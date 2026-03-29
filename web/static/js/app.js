@@ -14,6 +14,7 @@
 let csrfToken = '';
 let currentUser = null;
 let currentNote = null;      // { id, title, content_hash, disk_path, folder_id, tags }
+let currentFolderId = null;  // highlighted folder in the tree
 let editor = null;           // EasyMDE instance
 let saveTimer = null;
 let loadedFolderIds = new Set(); // tracks which folders have had their notes loaded
@@ -134,8 +135,9 @@ function renderTree() {
     const notes = notesByFolder[f.id] || [];
     const children = folders.filter(c => c.parent_id === f.id);
 
+    const folderActive = currentFolderId === f.id ? ' active' : '';
     html += `<div class="tree-folder" data-folder-id="${f.id}">`;
-    html += `<div class="tree-folder-label" style="padding-left:${8 + indent}px" onclick="toggleFolder(${f.id})">`;
+    html += `<div class="tree-folder-label${folderActive}" style="padding-left:${8 + indent}px" onclick="selectFolder(${f.id})">`;
     html += `<span class="icon">${icon}</span>${esc(f.name)}`;
     html += `</div>`;
 
@@ -168,7 +170,8 @@ function renderTree() {
   tree.innerHTML = html;
 }
 
-async function toggleFolder(folderId) {
+async function selectFolder(folderId) {
+  currentFolderId = folderId;
   if (loadedFolderIds.has(folderId)) {
     loadedFolderIds.delete(folderId);
     renderTree();
@@ -305,6 +308,7 @@ function promptCreateNote() {
     opt.textContent = f.name;
     sel.appendChild(opt);
   }
+  sel.value = currentFolderId || '';
   document.getElementById('new-note-title').value = '';
   document.getElementById('new-note-error').textContent = '';
   document.getElementById('new-note-modal').style.display = 'flex';
@@ -347,6 +351,7 @@ function promptCreateFolder() {
     opt.textContent = f.name;
     sel.appendChild(opt);
   }
+  sel.value = currentFolderId || '';
   document.getElementById('new-folder-name').value = '';
   document.getElementById('new-folder-error').textContent = '';
   document.getElementById('new-folder-modal').style.display = 'flex';
