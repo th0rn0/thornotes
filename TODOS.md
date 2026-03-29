@@ -1,46 +1,5 @@
 # thornotes — TODOS
 
-## V1 (in-scope, implement before shipping)
-
-### Rate limiter: X-Forwarded-For + --trusted-proxy flag
-**What:** The per-IP rate limiter uses `r.RemoteAddr` directly. Behind a reverse proxy
-(nginx/Caddy — the recommended deployment), this is always the proxy's IP. Every user
-appears to be the same IP and gets throttled together.
-
-**Why:** Rate limiting is a stated security requirement. Behind a proxy it doesn't work.
-
-**How to apply:** Only trust `X-Forwarded-For` when `--trusted-proxy` CIDR is set.
-Default: trust nothing (direct connections only). When configured: extract the leftmost
-non-trusted IP from XFF chain.
-
-**Where:** `internal/security/ratelimit.go` + `internal/config/config.go` (`TrustedProxy` field)
-
-**Depends on:** config system, rate limiter implementation
-
----
-
-### Lazy-loading note list: GET /api/v1/folders/{id}/notes
-**What:** Add endpoint to load note metadata per-folder. Remove note metadata from
-`GET /api/v1/folders` response (folders return tree structure only).
-
-**Why:** Full-tree load with note metadata doesn't scale for hosted service with power
-users (10,000+ notes). Lazy-loading per folder keeps initial load fast.
-
-**API change:**
-```
-GET /api/v1/folders           → [{ id, name, parent_id, child_count, note_count }]
-GET /api/v1/folders/{id}/notes → [{ id, title, slug, updated_at, tags }]
-```
-
-**Frontend change:** Track `loadedFolderIds` in JS state. On folder expand: fetch
-notes if not yet loaded. Show loading indicator during fetch.
-
-**Where:** `internal/handler/folders.go`, `web/static/js/app.js`
-
-**Depends on:** folder and note handlers
-
----
-
 ## V2 (deferred, design in V1 for easy addition)
 
 ### Startup reconciliation progress + --skip-reconciliation flag
@@ -114,3 +73,13 @@ interfaces against MySQL/PostgreSQL.
 Add viewport meta, touch-friendly UI adjustments.
 
 **Why:** Research shows mobile-responsive web UI is now expected for self-hosted apps.
+
+---
+
+## Completed
+
+### Rate limiter: X-Forwarded-For + --trusted-proxy flag
+**Completed:** v0.1.0.0 (2026-03-29) — Implemented in `internal/security/ratelimit.go` with `--trusted-proxy` CIDR flag in `internal/config/config.go`.
+
+### Lazy-loading note list: GET /api/v1/folders/{id}/notes
+**Completed:** v0.1.0.0 (2026-03-29) — Endpoint registered in router, `loadedFolderIds` tracking in `app.js`, folder expand fetches notes lazily.
