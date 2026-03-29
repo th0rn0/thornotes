@@ -2,6 +2,44 @@
 
 ## V2 (deferred, design in V1 for easy addition)
 
+### Docker integration smoke test
+**What:** A CI job that pulls the freshly-pushed image and runs a basic health check
+(`docker run ... /thornotes --help` or a live HTTP check).
+
+**Why:** Currently CI verifies the build succeeds but not that the image actually
+starts correctly. A broken entrypoint or missing embed would only surface at deploy time.
+
+**How:** Add a `smoke-test` job after `build-push` that pulls
+`th0rn0/thornotes:latest` and runs a quick sanity check.
+
+**Where:** `.github/workflows/ci.yml`
+
+---
+
+### golangci-lint config (.golangci.yml)
+**What:** Explicit lint rule config so rules are reproducible locally and in CI.
+
+**Why:** Currently using golangci-lint defaults. Explicit config allows enabling
+`errcheck`, `govet`, `staticcheck` consistently and avoiding surprise failures
+when the linter adds new default rules.
+
+**Where:** `.golangci.yml` at repo root
+
+---
+
+### Multi-arch Docker builds (amd64 + arm64)
+**What:** Build and push `linux/arm64` alongside `linux/amd64` in CI.
+
+**Why:** Self-hosters on Raspberry Pi / NAS (arm64) can pull natively without
+emulation. Particularly relevant for thornotes' self-hosted positioning.
+
+**How:** Add `platforms: linux/amd64,linux/arm64` to `docker/build-push-action`.
+Requires QEMU setup via `docker/setup-qemu-action@v3`. Build time increases ~3 min.
+
+**Where:** `.github/workflows/ci.yml` (build-push job)
+
+---
+
 ### Startup reconciliation progress + --skip-reconciliation flag
 **What:** The startup reconciliation scan (comparing SHA-256 of every .md file vs
 `content_hash` in DB) can take minutes for large note corpora. Server appears
