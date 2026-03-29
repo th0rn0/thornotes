@@ -6,3 +6,4 @@ dist/
 notes-dev/
 /notes/
 *.tmp
+.gstack/

@@ -58,6 +58,7 @@ func New(
 	// Notes.
 	mux.Handle("POST /api/v1/notes", authSvc.SessionMiddleware(security.CSRFMiddleware(http.HandlerFunc(notesH.Create))))
 	mux.Handle("GET /api/v1/notes", authSvc.SessionMiddleware(http.HandlerFunc(notesH.Search)))
+	mux.Handle("GET /api/v1/notes/root", authSvc.SessionMiddleware(http.HandlerFunc(notesH.ListRoot)))
 	mux.Handle("GET /api/v1/notes/{id}", authSvc.SessionMiddleware(http.HandlerFunc(notesH.Get)))
 	mux.Handle("PATCH /api/v1/notes/{id}", authSvc.SessionMiddleware(security.CSRFMiddleware(http.HandlerFunc(notesH.Patch))))
 	mux.Handle("DELETE /api/v1/notes/{id}", authSvc.SessionMiddleware(security.CSRFMiddleware(http.HandlerFunc(notesH.Delete))))
