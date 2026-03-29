@@ -1,0 +1,8 @@
+thornotes
+dist/
+*.db
+*.db-shm
+*.db-wal
+notes-dev/
+notes/
+*.tmp
