@@ -552,7 +552,7 @@ func TestService_CreateNote_FsWriteError(t *testing.T) {
 	// Make the user directory non-writable so the next CreateTemp call fails.
 	userDir := filepath.Join(st.notesDir, fmt.Sprintf("%d", st.userID))
 	require.NoError(t, os.Chmod(userDir, 0500))
-	t.Cleanup(func() { os.Chmod(userDir, 0700) })
+	t.Cleanup(func() { _ = os.Chmod(userDir, 0700) })
 
 	_, err = st.svc.CreateNote(ctx, st.userID, nil, "Will Fail", nil)
 	require.Error(t, err)
@@ -571,7 +571,7 @@ func TestService_UpdateNoteContent_FsWriteError(t *testing.T) {
 	// Block writes to the user directory.
 	userDir := filepath.Join(st.notesDir, fmt.Sprintf("%d", st.userID))
 	require.NoError(t, os.Chmod(userDir, 0500))
-	t.Cleanup(func() { os.Chmod(userDir, 0700) })
+	t.Cleanup(func() { _ = os.Chmod(userDir, 0700) })
 
 	_, err = st.svc.UpdateNoteContent(ctx, st.userID, note.ID, "new content", note.ContentHash)
 	require.Error(t, err)

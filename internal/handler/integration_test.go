@@ -117,7 +117,7 @@ func (c *testClient) login(t *testing.T, username, password string) {
 	}
 
 	var result map[string]string
-	json.NewDecoder(resp.Body).Decode(&result)
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
 	resp.Body.Close()
 	c.csrfToken = result["csrf_token"]
 }

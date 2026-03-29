@@ -234,7 +234,7 @@ func TestFileStore_Write_CreateTempFail(t *testing.T) {
 	require.NoError(t, fs.EnsureDir("nowrite"))
 	dirPath := filepath.Join(root, "nowrite")
 	require.NoError(t, os.Chmod(dirPath, 0500))
-	t.Cleanup(func() { os.Chmod(dirPath, 0700) })
+	t.Cleanup(func() { _ = os.Chmod(dirPath, 0700) })
 
 	// Writing should fail because CreateTemp can't create files in a non-writable dir.
 	err = fs.Write("nowrite/note.md", "content")
@@ -253,7 +253,7 @@ func TestFileStore_Delete_ErrorOnNonRemovable(t *testing.T) {
 	require.NoError(t, fs.Write("locked/file.md", "content"))
 	dirPath := filepath.Join(root, "locked")
 	require.NoError(t, os.Chmod(dirPath, 0500))
-	t.Cleanup(func() { os.Chmod(dirPath, 0700) })
+	t.Cleanup(func() { _ = os.Chmod(dirPath, 0700) })
 
 	// Delete should fail because the parent directory is not writable.
 	err = fs.Delete("locked/file.md")
@@ -273,7 +273,7 @@ func TestFileStore_RenameDir_ErrorOnBadDest(t *testing.T) {
 
 	// Make the root non-writable so MkdirAll for the dest fails.
 	require.NoError(t, os.Chmod(root, 0500))
-	t.Cleanup(func() { os.Chmod(root, 0700) })
+	t.Cleanup(func() { _ = os.Chmod(root, 0700) })
 
 	// RenameDir to a new path whose parent can't be created.
 	err = fs.RenameDir("srcdir", "newdir/nested")
@@ -300,7 +300,7 @@ func TestFileStore_Read_PermissionDenied(t *testing.T) {
 	require.NoError(t, fs.Write("secret.md", "content"))
 	secretPath := filepath.Join(root, "secret.md")
 	require.NoError(t, os.Chmod(secretPath, 0000))
-	t.Cleanup(func() { os.Chmod(secretPath, 0600) })
+	t.Cleanup(func() { _ = os.Chmod(secretPath, 0600) })
 
 	_, err = fs.Read("secret.md")
 	require.Error(t, err)
@@ -345,7 +345,7 @@ func TestFileStore_RemoveDir_PermissionError(t *testing.T) {
 	require.NoError(t, fs.Write("locked/file.md", "content"))
 	lockedDir := filepath.Join(root, "locked")
 	require.NoError(t, os.Chmod(lockedDir, 0500))
-	t.Cleanup(func() { os.Chmod(lockedDir, 0700) })
+	t.Cleanup(func() { _ = os.Chmod(lockedDir, 0700) })
 
 	err = fs.RemoveDir("locked")
 	require.Error(t, err)
