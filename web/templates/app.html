@@ -87,6 +87,75 @@ body { font-family: system-ui, -apple-system, sans-serif; font-size: 13px; backg
 .modal-actions button.primary { background: #222; color: #fff; border-color: #222; }
 .modal-actions button.primary:hover { background: #444; }
 .modal .error { color: #c00; font-size: 11px; margin-top: 6px; min-height: 16px; }
+
+/* DARK MODE TOGGLE */
+.theme-toggle { display: flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; }
+.theme-toggle input { display: none; }
+.toggle-track { width: 30px; height: 17px; background: #ccc; border-radius: 9px; position: relative; transition: background 0.2s; flex-shrink: 0; }
+.theme-toggle input:checked + .toggle-track { background: #555; }
+.toggle-thumb { position: absolute; top: 2px; left: 2px; width: 13px; height: 13px; background: #fff; border-radius: 50%; transition: transform 0.2s; }
+.theme-toggle input:checked + .toggle-track .toggle-thumb { transform: translateX(13px); }
+.toggle-label { font-size: 11px; color: #888; }
+
+/* DARK THEME */
+body.dark { background: #1a1a1a; color: #d4d4d4; }
+body.dark #auth-screen { background: #1a1a1a; }
+body.dark .auth-box { background: #252526; border-color: #3e3e42; }
+body.dark .auth-box h1 { color: #d4d4d4; }
+body.dark .auth-box .tagline { color: #858585; }
+body.dark .auth-box label { color: #ccc; }
+body.dark .auth-box input { border-color: #4a4a4a; background: #3c3c3c; color: #d4d4d4; }
+body.dark .auth-box button { background: #0e639c; }
+body.dark .auth-box button:hover { background: #1177bb; }
+body.dark .auth-box .switch-link { color: #666; }
+body.dark .auth-box .switch-link a { color: #9cdcfe; }
+body.dark .topbar { background: #252526; border-bottom-color: #3e3e42; }
+body.dark .topbar .logo { color: #d4d4d4; }
+body.dark .topbar .user { color: #858585; }
+body.dark .topbar .user button { color: #9cdcfe; }
+body.dark .toggle-track { background: #555; }
+body.dark .theme-toggle input:checked + .toggle-track { background: #0e639c; }
+body.dark .toggle-label { color: #858585; }
+body.dark .sidebar { background: #252526; border-right-color: #3e3e42; }
+body.dark .sidebar-toolbar button { border-color: #4a4a4a; background: #2d2d2d; color: #ccc; }
+body.dark .sidebar-toolbar button:hover { background: #383838; }
+body.dark .sidebar-search input { border-color: #4a4a4a; background: #3c3c3c; color: #ccc; }
+body.dark .tree-folder-label { color: #ccc; }
+body.dark .tree-folder-label:hover { background: #2d2d2d; }
+body.dark .tree-folder-label .icon { color: #858585; }
+body.dark .tree-note { color: #ababab; }
+body.dark .tree-note:hover { background: #2d2d2d; }
+body.dark .tree-note.active { background: #04395e; color: #d4d4d4; }
+body.dark .tree-unsorted { color: #555; }
+body.dark .editor-pane { background: #1e1e1e; }
+body.dark .editor-titlebar { border-bottom-color: #3e3e42; }
+body.dark .editor-titlebar input { color: #d4d4d4; }
+body.dark .share-btn { border-color: #4a4a4a; background: #2d2d2d; color: #ccc; }
+body.dark .tags-input { border-color: #4a4a4a; background: #2d2d2d; color: #ababab; }
+body.dark .empty-state { color: #555; }
+body.dark .editor-statusbar-custom { background: #252526; border-top-color: #3e3e42; }
+body.dark .editor-statusbar-custom span { color: #666; }
+body.dark .modal { background: #252526; border-color: #3e3e42; }
+body.dark .modal h2 { color: #d4d4d4; }
+body.dark .modal p { color: #ababab; }
+body.dark .modal label { color: #ccc; }
+body.dark .modal input[type=text], body.dark .modal select { border-color: #4a4a4a; background: #3c3c3c; color: #d4d4d4; }
+body.dark .modal-actions button { border-color: #4a4a4a; background: #3c3c3c; color: #ccc; }
+body.dark .modal-actions button:hover { background: #4a4a4a; }
+body.dark .modal-actions button.primary { background: #0e639c; color: #fff; border-color: #0e639c; }
+body.dark .modal-actions button.primary:hover { background: #1177bb; }
+body.dark .editor-toolbar { background: #252526 !important; border-color: #3e3e42 !important; }
+body.dark .editor-toolbar a { color: #ababab !important; }
+body.dark .editor-toolbar a:hover, body.dark .editor-toolbar a.active { background: #383838 !important; border-color: #4a4a4a !important; }
+body.dark .editor-toolbar i.separator { border-color: #4a4a4a !important; }
+body.dark .CodeMirror { background: #1e1e1e !important; color: #d4d4d4 !important; border-color: #3e3e42 !important; }
+body.dark .CodeMirror-cursor { border-left-color: #d4d4d4 !important; }
+body.dark .CodeMirror-selected { background: #264f78 !important; }
+body.dark .CodeMirror-line { color: #d4d4d4 !important; }
+body.dark .editor-preview { background: #1e1e1e !important; color: #d4d4d4 !important; border-color: #3e3e42 !important; }
+body.dark .editor-preview-side { background: #1e1e1e !important; border-color: #3e3e42 !important; }
+body.dark #notification { background: #383838; }
+body.dark #notification.error { background: #8b0000; }
 </style>
 </head>
 <body>
@@ -121,6 +190,11 @@ body { font-family: system-ui, -apple-system, sans-serif; font-size: 13px; backg
 <div id="app-screen">
   <div class="topbar">
     <span class="logo">thornotes</span>
+    <label class="theme-toggle" title="Toggle dark mode">
+      <input type="checkbox" id="dark-mode-toggle" onchange="toggleDarkMode(this.checked)">
+      <span class="toggle-track"><span class="toggle-thumb"></span></span>
+      <span class="toggle-label">Dark</span>
+    </label>
     <span class="user">
       <span id="topbar-username"></span>&nbsp;·&nbsp;
       <button onclick="logout()">Sign out</button>

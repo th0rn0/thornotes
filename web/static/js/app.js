@@ -1,6 +1,15 @@
 /* thornotes — main app */
 'use strict';
 
+// ── Theme ──────────────────────────────────────────────────────────────────
+(function initTheme() {
+  const saved = localStorage.getItem('theme');
+  const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  if (saved === 'dark' || (!saved && prefersDark)) {
+    document.body.classList.add('dark');
+  }
+})();
+
 // ── State ──────────────────────────────────────────────────────────────────
 let csrfToken = '';
 let currentUser = null;
@@ -88,6 +97,7 @@ function showAuth() {
 function showApp() {
   document.getElementById('auth-screen').style.display = 'none';
   document.getElementById('app-screen').style.display = 'flex';
+  document.getElementById('dark-mode-toggle').checked = document.body.classList.contains('dark');
 }
 
 // ── Folder tree ────────────────────────────────────────────────────────────
@@ -429,6 +439,12 @@ async function api(method, path, body) {
     throw err;
   }
   return data;
+}
+
+// ── Dark mode ──────────────────────────────────────────────────────────────
+function toggleDarkMode(dark) {
+  document.body.classList.toggle('dark', dark);
+  localStorage.setItem('theme', dark ? 'dark' : 'light');
 }
 
 // ── Utils ──────────────────────────────────────────────────────────────────
