@@ -286,37 +286,82 @@ async function onTagsChange() {
   currentNote.tags = tags;
 }
 
-async function promptCreateNote() {
-  const title = prompt('Note title:');
-  if (!title) return;
-  const folderIdStr = prompt('Folder ID (leave blank for unsorted):', '');
-  const folderId = folderIdStr ? parseInt(folderIdStr) : null;
-
-  const note = await api('POST', '/api/v1/notes', {
-    title,
-    folder_id: folderId,
-    tags: [],
-  });
-
-  if (folderId) {
-    // Invalidate the cache so the folder reloads its notes.
-    loadedFolderIds.delete(folderId);
-    await loadFolderNotes(folderId);
-  } else {
-    rootNotes = await api('GET', '/api/v1/notes/root').catch(() => rootNotes);
+function promptCreateNote() {
+  const sel = document.getElementById('new-note-folder');
+  sel.innerHTML = '<option value="">Unsorted</option>';
+  for (const f of folders) {
+    const opt = document.createElement('option');
+    opt.value = f.id;
+    opt.textContent = f.name;
+    sel.appendChild(opt);
   }
-
-  await openNote(note.id);
+  document.getElementById('new-note-title').value = '';
+  document.getElementById('new-note-error').textContent = '';
+  document.getElementById('new-note-modal').style.display = 'flex';
+  document.getElementById('new-note-title').focus();
 }
 
-async function promptCreateFolder() {
-  const name = prompt('Folder name:');
-  if (!name) return;
-  const parentIdStr = prompt('Parent folder ID (leave blank for root):', '');
-  const parentId = parentIdStr ? parseInt(parentIdStr) : null;
+function closeNewNoteModal() {
+  document.getElementById('new-note-modal').style.display = 'none';
+}
 
-  await api('POST', '/api/v1/folders', { name, parent_id: parentId });
-  await loadFolderTree();
+async function submitNewNote() {
+  const title = document.getElementById('new-note-title').value.trim();
+  if (!title) {
+    document.getElementById('new-note-error').textContent = 'Title is required.';
+    return;
+  }
+  const folderVal = document.getElementById('new-note-folder').value;
+  const folderId = folderVal ? parseInt(folderVal) : null;
+  try {
+    const note = await api('POST', '/api/v1/notes', { title, folder_id: folderId, tags: [] });
+    closeNewNoteModal();
+    if (folderId) {
+      loadedFolderIds.delete(folderId);
+      await loadFolderNotes(folderId);
+    } else {
+      rootNotes = await api('GET', '/api/v1/notes/root').catch(() => rootNotes);
+    }
+    await openNote(note.id);
+  } catch (e) {
+    document.getElementById('new-note-error').textContent = e.message || 'Failed to create note.';
+  }
+}
+
+function promptCreateFolder() {
+  const sel = document.getElementById('new-folder-parent');
+  sel.innerHTML = '<option value="">Root (no parent)</option>';
+  for (const f of folders) {
+    const opt = document.createElement('option');
+    opt.value = f.id;
+    opt.textContent = f.name;
+    sel.appendChild(opt);
+  }
+  document.getElementById('new-folder-name').value = '';
+  document.getElementById('new-folder-error').textContent = '';
+  document.getElementById('new-folder-modal').style.display = 'flex';
+  document.getElementById('new-folder-name').focus();
+}
+
+function closeNewFolderModal() {
+  document.getElementById('new-folder-modal').style.display = 'none';
+}
+
+async function submitNewFolder() {
+  const name = document.getElementById('new-folder-name').value.trim();
+  if (!name) {
+    document.getElementById('new-folder-error').textContent = 'Name is required.';
+    return;
+  }
+  const parentVal = document.getElementById('new-folder-parent').value;
+  const parentId = parentVal ? parseInt(parentVal) : null;
+  try {
+    await api('POST', '/api/v1/folders', { name, parent_id: parentId });
+    closeNewFolderModal();
+    await loadFolderTree();
+  } catch (e) {
+    document.getElementById('new-folder-error').textContent = e.message || 'Failed to create folder.';
+  }
 }
 
 async function shareNote() {

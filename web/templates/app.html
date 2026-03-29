@@ -73,14 +73,20 @@ body { font-family: system-ui, -apple-system, sans-serif; font-size: 13px; backg
 #notification { position: fixed; top: 12px; left: 50%; transform: translateX(-50%); background: #222; color: #fff; padding: 8px 16px; font-size: 12px; z-index: 1000; display: none; border-radius: 2px; }
 #notification.error { background: #c00; }
 
-/* CONFLICT MODAL */
+/* MODALS */
 .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 500; display: none; align-items: center; justify-content: center; }
-.modal { background: #fff; border: 1px solid #ccc; padding: 24px; max-width: 480px; width: 90%; }
-.modal h2 { font-size: 15px; margin-bottom: 8px; }
+.modal { background: #fff; border: 1px solid #ccc; padding: 24px; max-width: 400px; width: 90%; }
+.modal h2 { font-size: 15px; margin-bottom: 16px; }
 .modal p { font-size: 12px; color: #666; margin-bottom: 16px; }
-.modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.modal label { display: block; font-size: 11px; color: #555; margin-bottom: 4px; }
+.modal input[type=text], .modal select { display: block; width: 100%; border: 1px solid #ccc; padding: 6px 8px; font-size: 13px; margin-bottom: 14px; background: #fff; }
+.modal input[type=text]:focus, .modal select:focus { outline: none; border-color: #888; }
+.modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 4px; }
 .modal-actions button { padding: 6px 14px; font-size: 12px; border: 1px solid #ccc; cursor: pointer; background: #fff; }
+.modal-actions button:hover { background: #f0f0f0; }
 .modal-actions button.primary { background: #222; color: #fff; border-color: #222; }
+.modal-actions button.primary:hover { background: #444; }
+.modal .error { color: #c00; font-size: 11px; margin-top: 6px; min-height: 16px; }
 </style>
 </head>
 <body>
@@ -160,6 +166,38 @@ body { font-family: system-ui, -apple-system, sans-serif; font-size: 13px; backg
     <div class="modal-actions">
       <button onclick="resolveConflict('discard')">Discard my changes</button>
       <button class="primary" onclick="resolveConflict('overwrite')">Overwrite with my version</button>
+    </div>
+  </div>
+</div>
+
+<!-- NEW NOTE MODAL -->
+<div class="modal-overlay" id="new-note-modal" onclick="if(event.target===this)closeNewNoteModal()">
+  <div class="modal">
+    <h2>New note</h2>
+    <label for="new-note-title">Title</label>
+    <input id="new-note-title" type="text" placeholder="Note title" onkeydown="if(event.key==='Enter')submitNewNote();if(event.key==='Escape')closeNewNoteModal()" />
+    <label for="new-note-folder">Folder</label>
+    <select id="new-note-folder" onkeydown="if(event.key==='Escape')closeNewNoteModal()"></select>
+    <div class="error" id="new-note-error"></div>
+    <div class="modal-actions">
+      <button onclick="closeNewNoteModal()">Cancel</button>
+      <button class="primary" onclick="submitNewNote()">Create</button>
+    </div>
+  </div>
+</div>
+
+<!-- NEW FOLDER MODAL -->
+<div class="modal-overlay" id="new-folder-modal" onclick="if(event.target===this)closeNewFolderModal()">
+  <div class="modal">
+    <h2>New folder</h2>
+    <label for="new-folder-name">Name</label>
+    <input id="new-folder-name" type="text" placeholder="Folder name" onkeydown="if(event.key==='Enter')submitNewFolder();if(event.key==='Escape')closeNewFolderModal()" />
+    <label for="new-folder-parent">Parent folder</label>
+    <select id="new-folder-parent" onkeydown="if(event.key==='Escape')closeNewFolderModal()"></select>
+    <div class="error" id="new-folder-error"></div>
+    <div class="modal-actions">
+      <button onclick="closeNewFolderModal()">Cancel</button>
+      <button class="primary" onclick="submitNewFolder()">Create</button>
     </div>
   </div>
 </div>
