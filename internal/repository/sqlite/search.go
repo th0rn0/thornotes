@@ -116,7 +116,9 @@ func (r *SearchRepo) Search(ctx context.Context, userID int64, query string, tag
 		if err := rows.Scan(&res.NoteID, &res.Title, &res.Slug, &res.Snippet, &tagsJSON); err != nil {
 			return nil, err
 		}
-		json.Unmarshal([]byte(tagsJSON), &res.Tags)
+		if err := json.Unmarshal([]byte(tagsJSON), &res.Tags); err != nil {
+			res.Tags = nil // malformed stored JSON — treat as no tags
+		}
 		results = append(results, res)
 	}
 	return results, rows.Err()

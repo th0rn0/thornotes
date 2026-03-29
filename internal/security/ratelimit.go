@@ -104,18 +104,22 @@ func (rl *AuthRateLimiter) extractIP(r *http.Request) string {
 	return remoteIP
 }
 
+// evictStale removes limiters whose lastSeen is before cutoff.
+func (rl *AuthRateLimiter) evictStale(cutoff time.Time) {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+	for ip, entry := range rl.limiters {
+		if entry.lastSeen.Before(cutoff) {
+			delete(rl.limiters, ip)
+		}
+	}
+}
+
 // cleanupLoop removes limiters not seen in the last 30 minutes.
 func (rl *AuthRateLimiter) cleanupLoop() {
 	ticker := time.NewTicker(rateLimitCleanup)
 	defer ticker.Stop()
 	for range ticker.C {
-		cutoff := time.Now().Add(-rateLimitCleanup)
-		rl.mu.Lock()
-		for ip, entry := range rl.limiters {
-			if entry.lastSeen.Before(cutoff) {
-				delete(rl.limiters, ip)
-			}
-		}
-		rl.mu.Unlock()
+		rl.evictStale(time.Now().Add(-rateLimitCleanup))
 	}
 }

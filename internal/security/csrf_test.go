@@ -109,3 +109,48 @@ func TestCSRF_NoSessionCookie(t *testing.T) {
 	handler.ServeHTTP(rr, req)
 	assert.Equal(t, http.StatusForbidden, rr.Code)
 }
+
+func TestCSRF_InvalidateToken(t *testing.T) {
+	sessionToken := "session-invalidate-test"
+	_, err := GenerateCSRFToken(sessionToken)
+	require.NoError(t, err)
+
+	InvalidateCSRFToken(sessionToken)
+
+	handler := CSRFMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodPost, "/", nil)
+	req.AddCookie(&http.Cookie{Name: "session", Value: sessionToken})
+	req.Header.Set("X-CSRF-Token", "anytoken")
+
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusForbidden, rr.Code)
+	assert.Contains(t, rr.Body.String(), "csrf token not found")
+}
+
+func TestCSRF_HeadRequestBypasses(t *testing.T) {
+	handler := CSRFMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodHead, "/", nil)
+	// No cookie, no CSRF header — HEAD should pass through.
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusOK, rr.Code)
+}
+
+func TestCSRF_OptionsRequestBypasses(t *testing.T) {
+	handler := CSRFMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodOptions, "/", nil)
+	// No cookie, no CSRF header — OPTIONS should pass through.
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusOK, rr.Code)
+}

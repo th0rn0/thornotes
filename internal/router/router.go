@@ -2,6 +2,7 @@ package router
 
 import (
 	"html/template"
+	"log/slog"
 	"net/http"
 
 	"github.com/th0rn0/thornotes/internal/auth"
@@ -33,7 +34,9 @@ func New(
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		tmpl.ExecuteTemplate(w, "app.html", nil)
+		if err := tmpl.ExecuteTemplate(w, "app.html", nil); err != nil {
+			slog.Error("execute app template", "err", err)
+		}
 	})
 
 	// Public shared note view.

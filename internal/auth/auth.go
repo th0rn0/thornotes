@@ -71,7 +71,9 @@ func (s *Service) Login(ctx context.Context, username, password string) (string,
 	if err != nil {
 		if errors.Is(err, apperror.ErrNotFound) {
 			// Still do a bcrypt comparison to prevent timing attacks.
-			bcrypt.CompareHashAndPassword([]byte("$2a$12$invalidhashpadding000000000000000000000000000000000000"), []byte(password))
+			// Intentional: dummy comparison to prevent timing attacks.
+			// The hash is invalid by design so this always fails — error is expected.
+			_ = bcrypt.CompareHashAndPassword([]byte("$2a$12$invalidhashpadding000000000000000000000000000000000000"), []byte(password))
 			return "", apperror.Unauthorized(genericErr)
 		}
 		return "", apperror.Internal("get user", err)
