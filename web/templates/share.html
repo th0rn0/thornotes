@@ -31,9 +31,10 @@ h1.note-title { font-size: 26px; margin-bottom: 6px; letter-spacing: -0.5px; }
   <div class="content" id="content"></div>
   <div class="footer">Powered by <a href="https://github.com/th0rn0/thornotes">thornotes</a> — self-hosted markdown notes</div>
 </div>
+<pre id="note-raw" style="display:none">{{.Content}}</pre>
 <script src="/static/js/vendor/marked.min.js"></script>
 <script>
-  const raw = {{.Content | printf "%q"}};
+  const raw = document.getElementById('note-raw').textContent;
   document.getElementById('content').innerHTML = marked.parse(raw);
 </script>
 </body>

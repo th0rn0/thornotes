@@ -92,7 +92,10 @@ function showApp() {
 
 // ── Folder tree ────────────────────────────────────────────────────────────
 async function loadFolderTree() {
-  folders = await api('GET', '/api/v1/folders');
+  [folders, rootNotes] = await Promise.all([
+    api('GET', '/api/v1/folders'),
+    api('GET', '/api/v1/notes/root'),
+  ]);
   renderTree();
 }
 
@@ -215,24 +218,19 @@ async function openNote(noteId) {
   setSaveStatus('saved');
 
   if (!editor) {
+    const editorArea = document.getElementById('editor-area');
+    const ta = document.createElement('textarea');
+    editorArea.appendChild(ta);
     editor = new EasyMDE({
-      element: document.createElement('textarea'),
+      element: ta,
       autosave: { enabled: false },
+      autoDownloadFontAwesome: false,
       toolbar: ['bold', 'italic', 'heading', '|', 'quote', 'unordered-list', 'ordered-list', '|',
         'link', 'image', '|', 'preview', 'side-by-side', 'fullscreen', '|', 'guide'],
       spellChecker: false,
       status: false,
     });
-    document.getElementById('editor-area').appendChild(editor.element.closest('.EasyMDEContainer') || editor.element);
     editor.codemirror.on('change', onEditorChange);
-  }
-
-  // Replace editor textarea parent if needed.
-  const editorArea = document.getElementById('editor-area');
-  const container2 = editor.element.closest('.EasyMDEContainer');
-  if (container2 && !editorArea.contains(container2)) {
-    editorArea.innerHTML = '';
-    editorArea.appendChild(container2);
   }
 
   editor.value(note.content);
