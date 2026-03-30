@@ -2,6 +2,19 @@
 
 All notable changes to thornotes are documented here.
 
+## [0.2.0.0] - 2026-03-29
+
+### Added
+- MCP (Model Context Protocol) server at `POST /mcp` — exposes notes as resources and tools for AI assistants (Claude Desktop, Cursor, etc.)
+- API token authentication — bearer tokens with `tn_` prefix, managed per-user from the account page
+- Account page modal — create/revoke API tokens, view MCP endpoint URL and connection snippet
+- `api_tokens` DB table — stores tokens with `name`, `last_used_at` (async background update), and per-user scoping
+- MCP tools: `search_notes`, `get_note`, `list_notes`, `create_note`, `update_note`, `list_folders`
+- MCP resources: notes exposed as `note://{id}` URIs with `text/markdown` MIME type
+- `BearerMiddleware` in `internal/auth` — validates `Authorization: Bearer <token>` header, loads user into request context
+- One-time token reveal UI — full token shown only on creation, masked thereafter
+- Dark mode support for account modal
+
 ## [0.1.0.0] - 2026-03-29
 
 ### Fixed
