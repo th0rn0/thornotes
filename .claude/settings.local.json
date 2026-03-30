@@ -10,7 +10,10 @@
       "Bash(grep -a \" 0$\" coverage.out)",
       "Bash(go clean:*)",
       "Bash(git commit:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(ls -la /home/th0rn0/source/thornotes/*.md /home/th0rn0/source/thornotes/*.go /home/th0rn0/source/thornotes/*.mod)",
+      "Bash(golangci-lint run:*)",
+      "Skill(qa)"
     ]
   }
 }
