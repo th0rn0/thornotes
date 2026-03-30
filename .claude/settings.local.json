@@ -1,7 +1,16 @@
 {
   "permissions": {
     "allow": [
-      "Skill(review)"
+      "Skill(review)",
+      "Bash(go build:*)",
+      "Bash(go test:*)",
+      "Skill(plan-ceo-review)",
+      "Bash(go tool:*)",
+      "Bash(grep -n \"0$\" coverage.out)",
+      "Bash(grep -a \" 0$\" coverage.out)",
+      "Bash(go clean:*)",
+      "Bash(git commit:*)",
+      "Bash(git add:*)"
     ]
   }
 }
