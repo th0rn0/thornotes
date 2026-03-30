@@ -8,12 +8,15 @@ import (
 	"github.com/th0rn0/thornotes/internal/auth"
 	"github.com/th0rn0/thornotes/internal/handler"
 	"github.com/th0rn0/thornotes/internal/notes"
+	"github.com/th0rn0/thornotes/internal/repository"
 	"github.com/th0rn0/thornotes/internal/security"
 )
 
 func New(
 	authSvc *auth.Service,
 	notesSvc *notes.Service,
+	apiTokenRepo repository.APITokenRepository,
+	userRepo repository.UserRepository,
 	rateLimiter *security.AuthRateLimiter,
 	tmpl *template.Template,
 	staticFS http.FileSystem,
@@ -24,6 +27,10 @@ func New(
 	foldersH := handler.NewFoldersHandler(notesSvc)
 	notesH := handler.NewNotesHandler(notesSvc)
 	shareH := handler.NewShareHandler(notesSvc, tmpl)
+	accountH := handler.NewAccountHandler(apiTokenRepo)
+	mcpH := handler.NewMCPHandler(notesSvc)
+
+	bearerMW := auth.BearerMiddleware(apiTokenRepo, userRepo)
 
 	// Static files — the embedded FS has paths like "web/static/js/app.js".
 	// Strip "/static/" prefix and serve from "web/static/" subtree.
@@ -66,6 +73,14 @@ func New(
 	mux.Handle("PATCH /api/v1/notes/{id}", authSvc.SessionMiddleware(security.CSRFMiddleware(http.HandlerFunc(notesH.Patch))))
 	mux.Handle("DELETE /api/v1/notes/{id}", authSvc.SessionMiddleware(security.CSRFMiddleware(http.HandlerFunc(notesH.Delete))))
 	mux.Handle("POST /api/v1/notes/{id}/share", authSvc.SessionMiddleware(security.CSRFMiddleware(http.HandlerFunc(notesH.Share))))
+
+	// Account — API token management (session + CSRF for mutations).
+	mux.Handle("GET /api/v1/account/tokens", authSvc.SessionMiddleware(http.HandlerFunc(accountH.ListTokens)))
+	mux.Handle("POST /api/v1/account/tokens", authSvc.SessionMiddleware(security.CSRFMiddleware(http.HandlerFunc(accountH.CreateToken))))
+	mux.Handle("DELETE /api/v1/account/tokens/{id}", authSvc.SessionMiddleware(security.CSRFMiddleware(http.HandlerFunc(accountH.DeleteToken))))
+
+	// MCP — bearer token auth, no CSRF (token-authenticated API).
+	mux.Handle("POST /mcp", bearerMW(http.HandlerFunc(mcpH.Handle)))
 
 	return security.SecureHeaders(mux)
 }

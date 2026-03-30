@@ -452,6 +452,73 @@ function toggleDarkMode(dark) {
   localStorage.setItem('theme', dark ? 'dark' : 'light');
 }
 
+// ── Account / API tokens ───────────────────────────────────────────────────
+let _newTokenValue = '';
+
+async function showAccountModal() {
+  document.getElementById('mcp-endpoint').textContent = location.origin + '/mcp';
+  document.getElementById('token-reveal-area').style.display = 'none';
+  document.getElementById('new-token-name').value = '';
+  _newTokenValue = '';
+  await refreshTokenList();
+  document.getElementById('account-modal').style.display = 'flex';
+}
+
+function closeAccountModal() {
+  document.getElementById('account-modal').style.display = 'none';
+}
+
+async function refreshTokenList() {
+  const tokens = await api('GET', '/api/v1/account/tokens').catch(() => []);
+  const el = document.getElementById('token-list');
+  if (!tokens || tokens.length === 0) {
+    el.innerHTML = '<div style="font-size:12px;color:#aaa;padding:6px 0;">No tokens yet.</div>';
+    return;
+  }
+  let html = '';
+  for (const t of tokens) {
+    const created = new Date(t.created_at).toLocaleDateString();
+    const used = t.last_used_at ? new Date(t.last_used_at).toLocaleDateString() : 'never';
+    html += `<div class="token-item">
+      <span class="token-name">${esc(t.name)}</span>
+      <span class="token-prefix" title="Token prefix">${esc(t.prefix)}…</span>
+      <span class="token-date">created ${created} · used ${used}</span>
+      <button class="token-revoke" onclick="revokeToken(${t.id})">Revoke</button>
+    </div>`;
+  }
+  el.innerHTML = html;
+}
+
+async function createToken() {
+  const name = document.getElementById('new-token-name').value.trim() || 'Default';
+  try {
+    const token = await api('POST', '/api/v1/account/tokens', { name });
+    _newTokenValue = token.token;
+    document.getElementById('token-reveal-value').textContent = token.token;
+    document.getElementById('token-reveal-area').style.display = '';
+    document.getElementById('new-token-name').value = '';
+    await refreshTokenList();
+  } catch (e) {
+    showNotification(e.message || 'Failed to create token', true);
+  }
+}
+
+async function revokeToken(id) {
+  if (!confirm('Revoke this token? Any clients using it will lose access.')) return;
+  await api('DELETE', `/api/v1/account/tokens/${id}`).catch(() => {});
+  if (_newTokenValue) {
+    document.getElementById('token-reveal-area').style.display = 'none';
+    _newTokenValue = '';
+  }
+  await refreshTokenList();
+}
+
+function copyNewToken() {
+  if (!_newTokenValue) return;
+  navigator.clipboard.writeText(_newTokenValue).catch(() => {});
+  showNotification('Token copied to clipboard');
+}
+
 // ── Utils ──────────────────────────────────────────────────────────────────
 function esc(s) {
   return String(s)

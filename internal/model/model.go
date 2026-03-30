@@ -64,3 +64,13 @@ type SearchResult struct {
 	Snippet string   `json:"snippet"`
 	Tags    []string `json:"tags"`
 }
+
+type APIToken struct {
+	ID          int64      `json:"id"`
+	UserID      int64      `json:"-"`
+	Name        string     `json:"name"`
+	Token       string     `json:"token,omitempty"` // only set on creation
+	Prefix      string     `json:"prefix"`          // first 8 chars for display
+	CreatedAt   time.Time  `json:"created_at"`
+	LastUsedAt  *time.Time `json:"last_used_at"`
+}

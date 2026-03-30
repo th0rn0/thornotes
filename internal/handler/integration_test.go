@@ -49,6 +49,7 @@ func newTestClient(t *testing.T) *testClient {
 	folderRepo := sqlite.NewFolderRepo(pool.ReadDB, pool.WriteDB)
 	noteRepo := sqlite.NewNoteRepo(pool.ReadDB, pool.WriteDB)
 	searchRepo := sqlite.NewSearchRepo(pool.ReadDB, pool.WriteDB)
+	apiTokenRepo := sqlite.NewAPITokenRepo(pool.ReadDB, pool.WriteDB)
 
 	authSvc := auth.NewService(userRepo, sessionRepo, true)
 	notesSvc := notes.NewService(noteRepo, folderRepo, searchRepo, fs)
@@ -60,7 +61,7 @@ func newTestClient(t *testing.T) *testClient {
 	staticSub, err := iofs.Sub(thornotes.StaticFS, "web/static")
 	require.NoError(t, err)
 
-	h := router.New(authSvc, notesSvc, rateLimiter, tmpl, http.FS(staticSub))
+	h := router.New(authSvc, notesSvc, apiTokenRepo, userRepo, rateLimiter, tmpl, http.FS(staticSub))
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
 

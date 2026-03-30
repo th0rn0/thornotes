@@ -37,6 +37,7 @@ func buildHandler(t *testing.T) http.Handler {
 	folderRepo := sqlite.NewFolderRepo(pool.ReadDB, pool.WriteDB)
 	noteRepo := sqlite.NewNoteRepo(pool.ReadDB, pool.WriteDB)
 	searchRepo := sqlite.NewSearchRepo(pool.ReadDB, pool.WriteDB)
+	apiTokenRepo := sqlite.NewAPITokenRepo(pool.ReadDB, pool.WriteDB)
 
 	authSvc := auth.NewService(userRepo, sessionRepo, true)
 	notesSvc := notes.NewService(noteRepo, folderRepo, searchRepo, fs)
@@ -48,7 +49,7 @@ func buildHandler(t *testing.T) http.Handler {
 	staticSub, err := iofs.Sub(thornotes.StaticFS, "web/static")
 	require.NoError(t, err)
 
-	return router.New(authSvc, notesSvc, rateLimiter, tmpl, http.FS(staticSub))
+	return router.New(authSvc, notesSvc, apiTokenRepo, userRepo, rateLimiter, tmpl, http.FS(staticSub))
 }
 
 func TestRouter_New(t *testing.T) {

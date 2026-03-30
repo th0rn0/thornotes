@@ -42,6 +42,14 @@ type NoteRepository interface {
 	SetShareToken(ctx context.Context, userID, noteID int64, token *string) error
 }
 
+type APITokenRepository interface {
+	Create(ctx context.Context, userID int64, name, token string) (*model.APIToken, error)
+	GetByToken(ctx context.Context, token string) (*model.APIToken, error)
+	ListByUser(ctx context.Context, userID int64) ([]*model.APIToken, error)
+	Delete(ctx context.Context, userID, tokenID int64) error
+	TouchLastUsed(ctx context.Context, tokenID int64) error
+}
+
 type SearchRepository interface {
 	// Search performs full-text search, syncing FTS for notes with stale fts_synced_at.
 	Search(ctx context.Context, userID int64, query string, tags []string) ([]*model.SearchResult, error)
