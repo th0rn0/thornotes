@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>thornotes</title>
+<link rel="stylesheet" href="/static/css/font-awesome.min.css">
+<link rel="stylesheet" href="/static/css/easymde.min.css">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: system-ui, -apple-system, sans-serif; font-size: 13px; background: #f5f5f5; color: #222; height: 100vh; overflow: hidden; }
+
+/* AUTH */
+#auth-screen { display: flex; align-items: center; justify-content: center; height: 100vh; background: #f0f0f0; }
+.auth-box { background: #fff; border: 1px solid #ccc; padding: 32px; width: 320px; }
+.auth-box h1 { font-size: 18px; margin-bottom: 4px; letter-spacing: -0.5px; }
+.auth-box .tagline { font-size: 11px; color: #888; margin-bottom: 24px; }
+.auth-box label { display: block; font-size: 11px; color: #555; margin-bottom: 4px; }
+.auth-box input { display: block; width: 100%; border: 1px solid #ccc; padding: 7px 10px; font-size: 13px; margin-bottom: 14px; }
+.auth-box button { width: 100%; background: #222; color: #fff; border: none; padding: 8px; font-size: 13px; cursor: pointer; }
+.auth-box button:hover { background: #444; }
+.auth-box .switch-link { text-align: center; margin-top: 14px; font-size: 11px; color: #888; }
+.auth-box .switch-link a { color: #444; cursor: pointer; }
+.auth-box .error { color: #c00; font-size: 11px; margin-top: 8px; }
+
+/* APP */
+#app-screen { display: none; height: 100vh; flex-direction: column; }
+.topbar { display: flex; align-items: center; justify-content: space-between; background: #fff; border-bottom: 1px solid #ddd; padding: 0 12px; height: 38px; flex-shrink: 0; }
+.topbar .logo { font-size: 14px; font-weight: 600; letter-spacing: -0.5px; }
+.topbar .user { font-size: 11px; color: #888; }
+.topbar .user button { background: none; border: none; color: #555; cursor: pointer; font-size: 11px; }
+.main { display: flex; flex: 1; overflow: hidden; }
+
+/* SIDEBAR */
+.sidebar { width: 220px; flex-shrink: 0; background: #fafafa; border-right: 1px solid #ddd; display: flex; flex-direction: column; overflow: hidden; }
+.sidebar-toolbar { display: flex; gap: 4px; padding: 8px; border-bottom: 1px solid #eee; }
+.sidebar-toolbar button { flex: 1; padding: 5px 0; font-size: 11px; border: 1px solid #ccc; background: #fff; cursor: pointer; color: #333; }
+.sidebar-toolbar button:hover { background: #f0f0f0; }
+.sidebar-search { padding: 6px 8px; border-bottom: 1px solid #eee; }
+.sidebar-search input { width: 100%; border: 1px solid #ddd; padding: 4px 8px; font-size: 12px; }
+.tree { flex: 1; overflow-y: auto; padding: 4px 0; }
+.tree-folder-label { display: flex; align-items: center; gap: 4px; padding: 4px 8px; cursor: pointer; color: #444; font-size: 12px; user-select: none; }
+.tree-folder-label:hover { background: #eee; }
+.tree-folder-label.active { background: #e0e0e0; color: #111; font-weight: 500; }
+.tree-folder-label .icon { font-size: 10px; color: #888; width: 12px; }
+.tree-notes { padding-left: 8px; }
+.tree-note { padding: 3px 8px 3px 20px; cursor: pointer; font-size: 12px; color: #555; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tree-note:hover { background: #eee; }
+.tree-note.active { background: #222; color: #fff; }
+.tree-unsorted { padding: 8px 8px 2px; font-size: 10px; color: #aaa; text-transform: uppercase; letter-spacing: 0.5px; }
+
+/* EDITOR */
+.editor-pane { flex: 1; display: flex; flex-direction: column; overflow: hidden; background: #fff; }
+.editor-titlebar { display: flex; align-items: center; justify-content: space-between; padding: 0 16px; height: 44px; border-bottom: 1px solid #eee; flex-shrink: 0; gap: 12px; }
+.editor-titlebar input { border: none; outline: none; font-size: 16px; font-weight: 600; letter-spacing: -0.3px; flex: 1; background: transparent; }
+.editor-meta { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.save-status { font-size: 11px; color: #aaa; }
+.save-status.saving { color: #f80; }
+.save-status.saved { color: #080; }
+.save-status.error { color: #c00; }
+.share-btn { font-size: 11px; border: 1px solid #ccc; padding: 4px 10px; background: #fff; cursor: pointer; color: #333; }
+.tags-input { font-size: 11px; border: 1px solid #eee; padding: 3px 6px; color: #666; min-width: 80px; }
+.editor-area { flex: 1; overflow: hidden; }
+.editor-area .CodeMirror { height: 100%; }
+.editor-area .EasyMDEContainer { height: 100%; display: flex; flex-direction: column; }
+.editor-area .EasyMDEContainer .CodeMirror { flex: 1; }
+.editor-statusbar-custom { padding: 0 16px; height: 26px; border-top: 1px solid #eee; background: #fafafa; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
+.editor-statusbar-custom span { font-size: 11px; color: #999; }
+
+/* EMPTY STATE */
+.empty-state { display: flex; align-items: center; justify-content: center; flex: 1; color: #aaa; font-size: 13px; }
+
+/* NOTIFICATIONS */
+#notification { position: fixed; top: 12px; left: 50%; transform: translateX(-50%); background: #222; color: #fff; padding: 8px 16px; font-size: 12px; z-index: 1000; display: none; border-radius: 2px; }
+#notification.error { background: #c00; }
+
+/* MODALS */
+.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 500; display: none; align-items: center; justify-content: center; }
+.modal { background: #fff; border: 1px solid #ccc; padding: 24px; max-width: 400px; width: 90%; }
+.modal h2 { font-size: 15px; margin-bottom: 16px; }
+.modal p { font-size: 12px; color: #666; margin-bottom: 16px; }
+.modal label { display: block; font-size: 11px; color: #555; margin-bottom: 4px; }
+.modal input[type=text], .modal select { display: block; width: 100%; border: 1px solid #ccc; padding: 6px 8px; font-size: 13px; margin-bottom: 14px; background: #fff; }
+.modal input[type=text]:focus, .modal select:focus { outline: none; border-color: #888; }
+.modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 4px; }
+.modal-actions button { padding: 6px 14px; font-size: 12px; border: 1px solid #ccc; cursor: pointer; background: #fff; }
+.modal-actions button:hover { background: #f0f0f0; }
+.modal-actions button.primary { background: #222; color: #fff; border-color: #222; }
+.modal-actions button.primary:hover { background: #444; }
+.modal .error { color: #c00; font-size: 11px; margin-top: 6px; min-height: 16px; }
+
+/* DARK MODE TOGGLE */
+.theme-toggle { display: flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; }
+.theme-toggle input { display: none; }
+.toggle-track { width: 30px; height: 17px; background: #ccc; border-radius: 9px; position: relative; transition: background 0.2s; flex-shrink: 0; }
+.theme-toggle input:checked + .toggle-track { background: #555; }
+.toggle-thumb { position: absolute; top: 2px; left: 2px; width: 13px; height: 13px; background: #fff; border-radius: 50%; transition: transform 0.2s; }
+.theme-toggle input:checked + .toggle-track .toggle-thumb { transform: translateX(13px); }
+.toggle-label { font-size: 11px; color: #888; }
+
+/* DARK THEME */
+body.dark { background: #1a1a1a; color: #d4d4d4; }
+body.dark #auth-screen { background: #1a1a1a; }
+body.dark .auth-box { background: #252526; border-color: #3e3e42; }
+body.dark .auth-box h1 { color: #d4d4d4; }
+body.dark .auth-box .tagline { color: #858585; }
+body.dark .auth-box label { color: #ccc; }
+body.dark .auth-box input { border-color: #4a4a4a; background: #3c3c3c; color: #d4d4d4; }
+body.dark .auth-box button { background: #0e639c; }
+body.dark .auth-box button:hover { background: #1177bb; }
+body.dark .auth-box .switch-link { color: #666; }
+body.dark .auth-box .switch-link a { color: #9cdcfe; }
+body.dark .topbar { background: #252526; border-bottom-color: #3e3e42; }
+body.dark .topbar .logo { color: #d4d4d4; }
+body.dark .topbar .user { color: #858585; }
+body.dark .topbar .user button { color: #9cdcfe; }
+body.dark .toggle-track { background: #555; }
+body.dark .theme-toggle input:checked + .toggle-track { background: #0e639c; }
+body.dark .toggle-label { color: #858585; }
+body.dark .sidebar { background: #252526; border-right-color: #3e3e42; }
+body.dark .sidebar-toolbar button { border-color: #4a4a4a; background: #2d2d2d; color: #ccc; }
+body.dark .sidebar-toolbar button:hover { background: #383838; }
+body.dark .sidebar-search input { border-color: #4a4a4a; background: #3c3c3c; color: #ccc; }
+body.dark .tree-folder-label { color: #ccc; }
+body.dark .tree-folder-label:hover { background: #2d2d2d; }
+body.dark .tree-folder-label.active { background: #04395e; color: #d4d4d4; font-weight: 500; }
+body.dark .tree-folder-label .icon { color: #858585; }
+body.dark .tree-note { color: #ababab; }
+body.dark .tree-note:hover { background: #2d2d2d; }
+body.dark .tree-note.active { background: #04395e; color: #d4d4d4; }
+body.dark .tree-unsorted { color: #555; }
+body.dark .editor-pane { background: #1e1e1e; }
+body.dark .editor-titlebar { border-bottom-color: #3e3e42; }
+body.dark .editor-titlebar input { color: #d4d4d4; }
+body.dark .share-btn { border-color: #4a4a4a; background: #2d2d2d; color: #ccc; }
+body.dark .tags-input { border-color: #4a4a4a; background: #2d2d2d; color: #ababab; }
+body.dark .empty-state { color: #555; }
+body.dark .editor-statusbar-custom { background: #252526; border-top-color: #3e3e42; }
+body.dark .editor-statusbar-custom span { color: #666; }
+body.dark .modal { background: #252526; border-color: #3e3e42; }
+body.dark .modal h2 { color: #d4d4d4; }
+body.dark .modal p { color: #ababab; }
+body.dark .modal label { color: #ccc; }
+body.dark .modal input[type=text], body.dark .modal select { border-color: #4a4a4a; background: #3c3c3c; color: #d4d4d4; }
+body.dark .modal-actions button { border-color: #4a4a4a; background: #3c3c3c; color: #ccc; }
+body.dark .modal-actions button:hover { background: #4a4a4a; }
+body.dark .modal-actions button.primary { background: #0e639c; color: #fff; border-color: #0e639c; }
+body.dark .modal-actions button.primary:hover { background: #1177bb; }
+body.dark .editor-toolbar { background: #252526 !important; border-color: #3e3e42 !important; }
+body.dark .editor-toolbar a { color: #ababab !important; }
+body.dark .editor-toolbar a:hover, body.dark .editor-toolbar a.active { background: #383838 !important; border-color: #4a4a4a !important; }
+body.dark .editor-toolbar i.separator { border-color: #4a4a4a !important; }
+body.dark .CodeMirror { background: #1e1e1e !important; color: #d4d4d4 !important; border-color: #3e3e42 !important; }
+body.dark .CodeMirror-cursor { border-left-color: #d4d4d4 !important; }
+body.dark .CodeMirror-selected { background: #264f78 !important; }
+body.dark .CodeMirror-line { color: #d4d4d4 !important; }
+body.dark .editor-preview { background: #1e1e1e !important; color: #d4d4d4 !important; border-color: #3e3e42 !important; }
+body.dark .editor-preview-side { background: #1e1e1e !important; border-color: #3e3e42 !important; }
+body.dark #notification { background: #383838; }
+body.dark #notification.error { background: #8b0000; }
+
+/* ACCOUNT MODAL */
+.token-list { margin-bottom: 12px; max-height: 200px; overflow-y: auto; }
+.token-item { display: flex; align-items: center; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #eee; gap: 8px; }
+.token-item:last-child { border-bottom: none; }
+.token-name { font-size: 12px; font-weight: 500; flex: 1; }
+.token-prefix { font-size: 11px; font-family: monospace; color: #888; }
+.token-date { font-size: 10px; color: #aaa; }
+.token-revoke { background: none; border: 1px solid #ccc; padding: 2px 8px; font-size: 10px; cursor: pointer; color: #c00; }
+.token-revoke:hover { background: #fff0f0; }
+.token-new-reveal { margin-bottom: 14px; }
+.token-new-reveal label { display: block; font-size: 11px; color: #555; margin-bottom: 4px; }
+.token-new-reveal .token-value { font-family: monospace; font-size: 11px; background: #f5f5f5; border: 1px solid #ddd; padding: 6px 8px; word-break: break-all; margin-bottom: 6px; }
+.token-copy-btn { font-size: 11px; border: 1px solid #ccc; background: #fff; padding: 3px 10px; cursor: pointer; }
+.token-copy-btn:hover { background: #f0f0f0; }
+.account-section-title { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 8px; }
+.mcp-info { font-size: 11px; color: #666; background: #f9f9f9; border: 1px solid #eee; padding: 8px 10px; margin-bottom: 12px; line-height: 1.6; }
+.mcp-info code { font-family: monospace; font-size: 10px; background: #eee; padding: 1px 4px; }
+body.dark .token-item { border-bottom-color: #3e3e42; }
+body.dark .token-prefix { color: #666; }
+body.dark .token-date { color: #555; }
+body.dark .token-revoke { border-color: #4a4a4a; color: #f48771; }
+body.dark .token-revoke:hover { background: #3c2020; }
+body.dark .token-new-reveal .token-value { background: #3c3c3c; border-color: #4a4a4a; color: #d4d4d4; }
+body.dark .token-copy-btn { border-color: #4a4a4a; background: #3c3c3c; color: #ccc; }
+body.dark .token-copy-btn:hover { background: #4a4a4a; }
+body.dark .mcp-info { background: #2d2d2d; border-color: #3e3e42; color: #ababab; }
+body.dark .mcp-info code { background: #383838; color: #9cdcfe; }
+body.dark .account-section-title { color: #666; }
+</style>
+</head>
+<body>
+
+<!-- AUTH SCREEN -->
+<div id="auth-screen">
+  <div class="auth-box">
+    <h1>thornotes</h1>
+    <p class="tagline">Your notes. Your files. Your server.</p>
+    <div id="auth-form-login">
+      <label>Username</label>
+      <input id="login-username" type="text" autocomplete="username" />
+      <label>Password</label>
+      <input id="login-password" type="password" autocomplete="current-password" />
+      <button onclick="login()">Sign in</button>
+      <div class="switch-link"><a onclick="showRegister()">Create account</a></div>
+      <div class="error" id="login-error"></div>
+    </div>
+    <div id="auth-form-register" style="display:none">
+      <label>Username</label>
+      <input id="reg-username" type="text" autocomplete="username" />
+      <label>Password (min 12 characters)</label>
+      <input id="reg-password" type="password" autocomplete="new-password" />
+      <button onclick="register()">Create account</button>
+      <div class="switch-link"><a onclick="showLogin()">Sign in instead</a></div>
+      <div class="error" id="reg-error"></div>
+    </div>
+  </div>
+</div>
+
+<!-- APP SCREEN -->
+<div id="app-screen">
+  <div class="topbar">
+    <span class="logo">thornotes</span>
+    <label class="theme-toggle" title="Toggle dark mode">
+      <input type="checkbox" id="dark-mode-toggle" onchange="toggleDarkMode(this.checked)">
+      <span class="toggle-track"><span class="toggle-thumb"></span></span>
+      <span class="toggle-label">Dark</span>
+    </label>
+    <span class="user">
+      <span id="topbar-username"></span>&nbsp;·&nbsp;
+      <button onclick="showAccountModal()">Account</button>&nbsp;·&nbsp;
+      <button onclick="logout()">Sign out</button>
+    </span>
+  </div>
+  <div class="main">
+    <div class="sidebar">
+      <div class="sidebar-toolbar">
+        <button onclick="promptCreateNote()">+ Note</button>
+        <button onclick="promptCreateFolder()">+ Folder</button>
+      </div>
+      <div class="sidebar-search">
+        <input id="search-input" type="search" placeholder="Search notes…" oninput="onSearch(this.value)" />
+      </div>
+      <div class="tree" id="tree"></div>
+    </div>
+    <div class="editor-pane" id="editor-pane">
+      <div class="empty-state" id="empty-state">Select or create a note</div>
+      <div id="editor-container" style="display:none; flex:1; flex-direction:column; overflow:hidden;">
+        <div class="editor-titlebar">
+          <input id="note-title" type="text" placeholder="Note title" onchange="onTitleChange()" />
+          <div class="editor-meta">
+            <input id="note-tags" type="text" class="tags-input" placeholder="tags, comma, separated" onchange="onTagsChange()" title="Tags (comma-separated)" />
+            <span class="save-status" id="save-status">Saved</span>
+            <button class="share-btn" onclick="shareNote()">Share ↗</button>
+          </div>
+        </div>
+        <div class="editor-area" id="editor-area"></div>
+        <div class="editor-statusbar-custom">
+          <span id="note-path"></span>
+          <span id="note-stats"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- CONFLICT MODAL -->
+<div class="modal-overlay" id="conflict-modal">
+  <div class="modal">
+    <h2>Edit conflict</h2>
+    <p>This note was modified from another location. Your changes and the server version conflict.</p>
+    <div class="modal-actions">
+      <button onclick="resolveConflict('discard')">Discard my changes</button>
+      <button class="primary" onclick="resolveConflict('overwrite')">Overwrite with my version</button>
+    </div>
+  </div>
+</div>
+
+<!-- NEW NOTE MODAL -->
+<div class="modal-overlay" id="new-note-modal" onclick="if(event.target===this)closeNewNoteModal()">
+  <div class="modal">
+    <h2>New note</h2>
+    <label for="new-note-title">Title</label>
+    <input id="new-note-title" type="text" placeholder="Note title" onkeydown="if(event.key==='Enter')submitNewNote();if(event.key==='Escape')closeNewNoteModal()" />
+    <label for="new-note-folder">Folder</label>
+    <select id="new-note-folder" onkeydown="if(event.key==='Escape')closeNewNoteModal()"></select>
+    <div class="error" id="new-note-error"></div>
+    <div class="modal-actions">
+      <button onclick="closeNewNoteModal()">Cancel</button>
+      <button class="primary" onclick="submitNewNote()">Create</button>
+    </div>
+  </div>
+</div>
+
+<!-- NEW FOLDER MODAL -->
+<div class="modal-overlay" id="new-folder-modal" onclick="if(event.target===this)closeNewFolderModal()">
+  <div class="modal">
+    <h2>New folder</h2>
+    <label for="new-folder-name">Name</label>
+    <input id="new-folder-name" type="text" placeholder="Folder name" onkeydown="if(event.key==='Enter')submitNewFolder();if(event.key==='Escape')closeNewFolderModal()" />
+    <label for="new-folder-parent">Parent folder</label>
+    <select id="new-folder-parent" onkeydown="if(event.key==='Escape')closeNewFolderModal()"></select>
+    <div class="error" id="new-folder-error"></div>
+    <div class="modal-actions">
+      <button onclick="closeNewFolderModal()">Cancel</button>
+      <button class="primary" onclick="submitNewFolder()">Create</button>
+    </div>
+  </div>
+</div>
+
+<!-- ACCOUNT MODAL -->
+<div class="modal-overlay" id="account-modal" onclick="if(event.target===this)closeAccountModal()">
+  <div class="modal" style="max-width:480px">
+    <h2>Account</h2>
+    <p class="account-section-title">MCP Server</p>
+    <div class="mcp-info">
+      Connect AI assistants (Claude, Cursor, etc.) to your notes via the Model Context Protocol.<br>
+      Endpoint: <code id="mcp-endpoint"></code><br>
+      Add to your MCP client config with <code>Authorization: Bearer &lt;token&gt;</code>.
+    </div>
+    <p class="account-section-title">API Tokens</p>
+    <div class="token-list" id="token-list"></div>
+    <div id="token-reveal-area" style="display:none" class="token-new-reveal">
+      <label>New token (copy it now — it won't be shown again):</label>
+      <div class="token-value" id="token-reveal-value"></div>
+      <button class="token-copy-btn" onclick="copyNewToken()">Copy</button>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px">
+      <input id="new-token-name" type="text" placeholder="Token name (e.g. Claude Desktop)" style="flex:1;border:1px solid #ccc;padding:5px 8px;font-size:12px" />
+      <button onclick="createToken()" style="padding:5px 14px;font-size:12px;border:1px solid #ccc;background:#fff;cursor:pointer">+ New token</button>
+    </div>
+    <div class="modal-actions">
+      <button class="primary" onclick="closeAccountModal()">Done</button>
+    </div>
+  </div>
+</div>
+
+<div id="notification"></div>
+
+<script src="/static/js/vendor/easymde.min.js"></script>
+<script src="/static/js/vendor/marked.min.js"></script>
+<script src="/static/js/app.js"></script>
+</body>
+</html>

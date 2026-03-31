@@ -1,47 +1,44 @@
 # thornotes — TODOS
 
-## V1 (in-scope, implement before shipping)
-
-### Rate limiter: X-Forwarded-For + --trusted-proxy flag
-**What:** The per-IP rate limiter uses `r.RemoteAddr` directly. Behind a reverse proxy
-(nginx/Caddy — the recommended deployment), this is always the proxy's IP. Every user
-appears to be the same IP and gets throttled together.
-
-**Why:** Rate limiting is a stated security requirement. Behind a proxy it doesn't work.
-
-**How to apply:** Only trust `X-Forwarded-For` when `--trusted-proxy` CIDR is set.
-Default: trust nothing (direct connections only). When configured: extract the leftmost
-non-trusted IP from XFF chain.
-
-**Where:** `internal/security/ratelimit.go` + `internal/config/config.go` (`TrustedProxy` field)
-
-**Depends on:** config system, rate limiter implementation
-
----
-
-### Lazy-loading note list: GET /api/v1/folders/{id}/notes
-**What:** Add endpoint to load note metadata per-folder. Remove note metadata from
-`GET /api/v1/folders` response (folders return tree structure only).
-
-**Why:** Full-tree load with note metadata doesn't scale for hosted service with power
-users (10,000+ notes). Lazy-loading per folder keeps initial load fast.
-
-**API change:**
-```
-GET /api/v1/folders           → [{ id, name, parent_id, child_count, note_count }]
-GET /api/v1/folders/{id}/notes → [{ id, title, slug, updated_at, tags }]
-```
-
-**Frontend change:** Track `loadedFolderIds` in JS state. On folder expand: fetch
-notes if not yet loaded. Show loading indicator during fetch.
-
-**Where:** `internal/handler/folders.go`, `web/static/js/app.js`
-
-**Depends on:** folder and note handlers
-
----
-
 ## V2 (deferred, design in V1 for easy addition)
+
+### Docker integration smoke test
+**What:** A CI job that pulls the freshly-pushed image and runs a basic health check
+(`docker run ... /thornotes --help` or a live HTTP check).
+
+**Why:** Currently CI verifies the build succeeds but not that the image actually
+starts correctly. A broken entrypoint or missing embed would only surface at deploy time.
+
+**How:** Add a `smoke-test` job after `build-push` that pulls
+`th0rn0/thornotes:latest` and runs a quick sanity check.
+
+**Where:** `.github/workflows/ci.yml`
+
+---
+
+### golangci-lint config (.golangci.yml)
+**What:** Explicit lint rule config so rules are reproducible locally and in CI.
+
+**Why:** Currently using golangci-lint defaults. Explicit config allows enabling
+`errcheck`, `govet`, `staticcheck` consistently and avoiding surprise failures
+when the linter adds new default rules.
+
+**Where:** `.golangci.yml` at repo root
+
+---
+
+### Multi-arch Docker builds (amd64 + arm64)
+**What:** Build and push `linux/arm64` alongside `linux/amd64` in CI.
+
+**Why:** Self-hosters on Raspberry Pi / NAS (arm64) can pull natively without
+emulation. Particularly relevant for thornotes' self-hosted positioning.
+
+**How:** Add `platforms: linux/amd64,linux/arm64` to `docker/build-push-action`.
+Requires QEMU setup via `docker/setup-qemu-action@v3`. Build time increases ~3 min.
+
+**Where:** `.github/workflows/ci.yml` (build-push job)
+
+---
 
 ### Startup reconciliation progress + --skip-reconciliation flag
 **What:** The startup reconciliation scan (comparing SHA-256 of every .md file vs
@@ -114,3 +111,53 @@ interfaces against MySQL/PostgreSQL.
 Add viewport meta, touch-friendly UI adjustments.
 
 **Why:** Research shows mobile-responsive web UI is now expected for self-hosted apps.
+
+---
+
+---
+
+### Security: hash API tokens before DB storage
+**What:** API tokens are stored in plaintext in the `api_tokens` table. If the DB leaks, all tokens are immediately usable.
+
+**Why:** CSO audit finding #1 (HIGH, confidence 9/10). Password-equivalent secrets should be stored as SHA-256(token). GitHub and Linear use this pattern for PATs.
+
+**How:** `CreateToken` stores `SHA-256(raw_token)`, returns raw token once to client. `GetByToken` hashes the incoming token before querying `WHERE token_hash = ?`. Session tokens have the same pattern.
+
+**Where:** `internal/repository/sqlite/api_tokens.go:22`
+
+---
+
+### Security: SHA-pin GitHub Actions
+**What:** Third-party GitHub Actions are pinned to mutable version tags (v3, v6) rather than immutable SHA hashes.
+
+**Why:** CSO audit finding #2 (HIGH, confidence 9/10). A compromised action repo could push malicious code to the tag, stealing `DOCKERHUB_TOKEN` and pushing a backdoored image.
+
+**How:** Pin every third-party action to its full commit SHA. Add Dependabot to keep pins updated.
+
+**Where:** `.github/workflows/ci.yml:105`
+
+---
+
+### Security: THORNOTES_SECURE_COOKIES env var
+**What:** Session cookie `Secure` flag is hardcoded `false`. Without HTTPS, the cookie is sent in cleartext.
+
+**Why:** CSO audit finding #3 (MEDIUM, confidence 8/10). Enables session hijacking via passive network capture on HTTP deployments.
+
+**How:** Add `THORNOTES_SECURE_COOKIES=true` env var (default true). Document in Dockerfile that it can be set to false for local HTTP-only deployments.
+
+**Where:** `internal/handler/auth.go:73`, `internal/config/config.go`
+
+---
+
+## Completed
+
+### Disk watcher + SSE live sync
+**Completed:** v0.3.0.0 (2026-03-30) — Polling watcher (`internal/notes/watcher.go`) checks all notes on disk every `THORNOTES_WATCH_INTERVAL` (default 30s). Changes update the DB and push `notes_changed` SSE events to connected browser tabs via `GET /api/v1/events`. Frontend auto-refreshes the tree and reloads the open note (if unsaved edits are not in progress).
+
+
+
+### Rate limiter: X-Forwarded-For + --trusted-proxy flag
+**Completed:** v0.1.0.0 (2026-03-29) — Implemented in `internal/security/ratelimit.go` with `--trusted-proxy` CIDR flag in `internal/config/config.go`.
+
+### Lazy-loading note list: GET /api/v1/folders/{id}/notes
+**Completed:** v0.1.0.0 (2026-03-29) — Endpoint registered in router, `loadedFolderIds` tracking in `app.js`, folder expand fetches notes lazily.
