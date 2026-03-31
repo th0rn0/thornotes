@@ -2,6 +2,18 @@
 
 All notable changes to thornotes are documented here.
 
+## [0.3.0.0] - 2026-03-30
+
+### Added
+- Disk watcher — polls `THORNOTES_NOTES_ROOT` every `THORNOTES_WATCH_INTERVAL` (default 30s) for file changes made outside the app (e.g. external editor, `rsync`, git checkout)
+- When a file changes on disk, the DB is updated and connected browser tabs receive a `notes_changed` SSE event and auto-refresh the tree and open note
+- `GET /api/v1/events` — Server-Sent Events endpoint (session-authenticated); each user has their own event stream
+- `internal/hub` — per-user pub/sub hub wiring the watcher to open SSE connections
+- `THORNOTES_WATCH_INTERVAL` env var / `--watch-interval` flag — set to `0` to disable the watcher
+
+### Fixed
+- Startup `Reconcile()` now covers notes in folders, not just root/unsorted notes (was using `ListByFolder(nil)` which returns root-only; now uses `ListAllForWatch`)
+
 ## [0.2.0.0] - 2026-03-29
 
 ### Added

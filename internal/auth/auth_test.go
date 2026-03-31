@@ -57,6 +57,14 @@ func (r *fakeUserRepo) Count(_ context.Context) (int, error) {
 	return len(r.users), nil
 }
 
+func (r *fakeUserRepo) IDs(_ context.Context) ([]int64, error) {
+	ids := make([]int64, 0, len(r.users))
+	for _, u := range r.users {
+		ids = append(ids, u.ID)
+	}
+	return ids, nil
+}
+
 type fakeSessionRepo struct {
 	sessions map[string]*model.Session
 }

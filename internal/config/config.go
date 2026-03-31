@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"strings"
+	"time"
 )
 
 type Config struct {
@@ -15,6 +16,7 @@ type Config struct {
 	AllowRegistration bool
 	TrustedProxy      *net.IPNet // nil means trust nothing (direct connections only)
 	MaxContentBytes   int64
+	WatchInterval     time.Duration // 0 disables the disk watcher
 }
 
 func Parse() (*Config, error) {
@@ -26,6 +28,7 @@ func Parse() (*Config, error) {
 	flag.StringVar(&cfg.NotesRoot, "notes-root", envOr("THORNOTES_NOTES_ROOT", "notes"), "root directory for note files")
 	flag.BoolVar(&cfg.AllowRegistration, "allow-registration", envBool("THORNOTES_ALLOW_REGISTRATION", true), "allow new user registration")
 	flag.StringVar(&trustedProxy, "trusted-proxy", envOr("THORNOTES_TRUSTED_PROXY", ""), "CIDR of trusted reverse proxy (e.g. 10.0.0.0/8)")
+	flag.DurationVar(&cfg.WatchInterval, "watch-interval", envDuration("THORNOTES_WATCH_INTERVAL", 30*time.Second), "disk watch poll interval (0 to disable)")
 	flag.Parse()
 
 	cfg.MaxContentBytes = 1 << 20 // 1 MB
@@ -54,4 +57,16 @@ func envBool(key string, def bool) bool {
 		return def
 	}
 	return strings.EqualFold(v, "true") || v == "1"
+}
+
+func envDuration(key string, def time.Duration) time.Duration {
+	v := os.Getenv(key)
+	if v == "" {
+		return def
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil {
+		return def
+	}
+	return d
 }

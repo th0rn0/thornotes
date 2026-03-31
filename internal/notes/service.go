@@ -42,30 +42,25 @@ func HashContent(content string) string {
 // If they differ, the file is authoritative and the DB is updated.
 // This runs at startup to recover from any partial DB writes.
 func (s *Service) Reconcile(ctx context.Context, userID int64) error {
-	items, err := s.notes.ListByFolder(ctx, userID, nil)
+	// Use ListAllForWatch to cover all notes, not just root-level ones.
+	records, err := s.notes.ListAllForWatch(ctx, userID)
 	if err != nil {
 		return err
 	}
 
 	reconciled := 0
-	for _, item := range items {
-		note, err := s.notes.GetByID(ctx, userID, item.ID)
+	for _, rec := range records {
+		fileContent, err := s.fs.Read(rec.DiskPath)
 		if err != nil {
-			slog.Warn("reconcile: get note", "id", item.ID, "err", err)
-			continue
-		}
-
-		fileContent, err := s.fs.Read(note.DiskPath)
-		if err != nil {
-			slog.Warn("reconcile: note file missing", "disk_path", note.DiskPath, "id", note.ID)
+			slog.Warn("reconcile: note file missing", "disk_path", rec.DiskPath, "id", rec.ID)
 			continue
 		}
 
 		fileHash := HashContent(fileContent)
-		if fileHash != note.ContentHash {
-			slog.Info("reconcile: updating stale note", "id", note.ID, "disk_path", note.DiskPath)
-			if err := s.notes.UpdateContent(ctx, userID, note.ID, fileContent, fileHash, note.ContentHash); err != nil {
-				slog.Warn("reconcile: update content", "id", note.ID, "err", err)
+		if fileHash != rec.ContentHash {
+			slog.Info("reconcile: updating stale note", "id", rec.ID, "disk_path", rec.DiskPath)
+			if err := s.notes.UpdateContent(ctx, userID, rec.ID, fileContent, fileHash, rec.ContentHash); err != nil {
+				slog.Warn("reconcile: update content", "id", rec.ID, "err", err)
 			} else {
 				reconciled++
 			}

@@ -68,3 +68,21 @@ func (r *UserRepo) Count(ctx context.Context) (int, error) {
 	err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM users`).Scan(&n)
 	return n, err
 }
+
+func (r *UserRepo) IDs(ctx context.Context) ([]int64, error) {
+	rows, err := r.db.QueryContext(ctx, `SELECT id FROM users`)
+	if err != nil {
+		return nil, fmt.Errorf("list user ids: %w", err)
+	}
+	defer rows.Close()
+
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}

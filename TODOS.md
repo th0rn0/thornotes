@@ -114,7 +114,47 @@ Add viewport meta, touch-friendly UI adjustments.
 
 ---
 
+---
+
+### Security: hash API tokens before DB storage
+**What:** API tokens are stored in plaintext in the `api_tokens` table. If the DB leaks, all tokens are immediately usable.
+
+**Why:** CSO audit finding #1 (HIGH, confidence 9/10). Password-equivalent secrets should be stored as SHA-256(token). GitHub and Linear use this pattern for PATs.
+
+**How:** `CreateToken` stores `SHA-256(raw_token)`, returns raw token once to client. `GetByToken` hashes the incoming token before querying `WHERE token_hash = ?`. Session tokens have the same pattern.
+
+**Where:** `internal/repository/sqlite/api_tokens.go:22`
+
+---
+
+### Security: SHA-pin GitHub Actions
+**What:** Third-party GitHub Actions are pinned to mutable version tags (v3, v6) rather than immutable SHA hashes.
+
+**Why:** CSO audit finding #2 (HIGH, confidence 9/10). A compromised action repo could push malicious code to the tag, stealing `DOCKERHUB_TOKEN` and pushing a backdoored image.
+
+**How:** Pin every third-party action to its full commit SHA. Add Dependabot to keep pins updated.
+
+**Where:** `.github/workflows/ci.yml:105`
+
+---
+
+### Security: THORNOTES_SECURE_COOKIES env var
+**What:** Session cookie `Secure` flag is hardcoded `false`. Without HTTPS, the cookie is sent in cleartext.
+
+**Why:** CSO audit finding #3 (MEDIUM, confidence 8/10). Enables session hijacking via passive network capture on HTTP deployments.
+
+**How:** Add `THORNOTES_SECURE_COOKIES=true` env var (default true). Document in Dockerfile that it can be set to false for local HTTP-only deployments.
+
+**Where:** `internal/handler/auth.go:73`, `internal/config/config.go`
+
+---
+
 ## Completed
+
+### Disk watcher + SSE live sync
+**Completed:** v0.3.0.0 (2026-03-30) — Polling watcher (`internal/notes/watcher.go`) checks all notes on disk every `THORNOTES_WATCH_INTERVAL` (default 30s). Changes update the DB and push `notes_changed` SSE events to connected browser tabs via `GET /api/v1/events`. Frontend auto-refreshes the tree and reloads the open note (if unsaved edits are not in progress).
+
+
 
 ### Rate limiter: X-Forwarded-For + --trusted-proxy flag
 **Completed:** v0.1.0.0 (2026-03-29) — Implemented in `internal/security/ratelimit.go` with `--trusted-proxy` CIDR flag in `internal/config/config.go`.

@@ -65,6 +65,14 @@ type SearchResult struct {
 	Tags    []string `json:"tags"`
 }
 
+// NoteWatchRecord is a lightweight projection used by the disk watcher.
+// It contains only the fields needed to detect content changes.
+type NoteWatchRecord struct {
+	ID          int64
+	DiskPath    string
+	ContentHash string
+}
+
 type APIToken struct {
 	ID          int64      `json:"id"`
 	UserID      int64      `json:"-"`

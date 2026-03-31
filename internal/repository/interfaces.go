@@ -11,6 +11,7 @@ type UserRepository interface {
 	GetByID(ctx context.Context, id int64) (*model.User, error)
 	GetByUsername(ctx context.Context, username string) (*model.User, error)
 	Count(ctx context.Context) (int, error)
+	IDs(ctx context.Context) ([]int64, error)
 }
 
 type SessionRepository interface {
@@ -36,6 +37,9 @@ type NoteRepository interface {
 	GetByID(ctx context.Context, userID, noteID int64) (*model.Note, error)
 	GetByShareToken(ctx context.Context, token string) (*model.Note, error)
 	ListByFolder(ctx context.Context, userID int64, folderID *int64) ([]*model.NoteListItem, error)
+	// ListAllForWatch returns lightweight records for all notes owned by userID.
+	// Used by the disk watcher to detect content changes without loading full content.
+	ListAllForWatch(ctx context.Context, userID int64) ([]*model.NoteWatchRecord, error)
 	Update(ctx context.Context, n *model.Note) error
 	UpdateContent(ctx context.Context, userID, noteID int64, content, contentHash, expectedHash string) error
 	Delete(ctx context.Context, userID, noteID int64) error

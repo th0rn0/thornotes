@@ -7,6 +7,7 @@ import (
 
 	"github.com/th0rn0/thornotes/internal/auth"
 	"github.com/th0rn0/thornotes/internal/handler"
+	"github.com/th0rn0/thornotes/internal/hub"
 	"github.com/th0rn0/thornotes/internal/notes"
 	"github.com/th0rn0/thornotes/internal/repository"
 	"github.com/th0rn0/thornotes/internal/security"
@@ -20,6 +21,7 @@ func New(
 	rateLimiter *security.AuthRateLimiter,
 	tmpl *template.Template,
 	staticFS http.FileSystem,
+	h *hub.Hub,
 ) http.Handler {
 	mux := http.NewServeMux()
 
@@ -29,6 +31,7 @@ func New(
 	shareH := handler.NewShareHandler(notesSvc, tmpl)
 	accountH := handler.NewAccountHandler(apiTokenRepo)
 	mcpH := handler.NewMCPHandler(notesSvc)
+	eventsH := handler.NewEventsHandler(h)
 
 	bearerMW := auth.BearerMiddleware(apiTokenRepo, userRepo)
 
@@ -78,6 +81,9 @@ func New(
 	mux.Handle("GET /api/v1/account/tokens", authSvc.SessionMiddleware(http.HandlerFunc(accountH.ListTokens)))
 	mux.Handle("POST /api/v1/account/tokens", authSvc.SessionMiddleware(security.CSRFMiddleware(http.HandlerFunc(accountH.CreateToken))))
 	mux.Handle("DELETE /api/v1/account/tokens/{id}", authSvc.SessionMiddleware(security.CSRFMiddleware(http.HandlerFunc(accountH.DeleteToken))))
+
+	// Server-Sent Events — session auth, long-lived connection for disk-change notifications.
+	mux.Handle("GET /api/v1/events", authSvc.SessionMiddleware(http.HandlerFunc(eventsH.Stream)))
 
 	// MCP — bearer token auth, no CSRF (token-authenticated API).
 	mux.Handle("POST /mcp", bearerMW(http.HandlerFunc(mcpH.Handle)))

@@ -93,6 +93,25 @@ func (r *NoteRepo) ListByFolder(ctx context.Context, userID int64, folderID *int
 	return items, rows.Err()
 }
 
+func (r *NoteRepo) ListAllForWatch(ctx context.Context, userID int64) ([]*model.NoteWatchRecord, error) {
+	rows, err := r.readDB.QueryContext(ctx,
+		`SELECT id, disk_path, content_hash FROM notes WHERE user_id = ?`, userID)
+	if err != nil {
+		return nil, fmt.Errorf("list notes for watch: %w", err)
+	}
+	defer rows.Close()
+
+	var records []*model.NoteWatchRecord
+	for rows.Next() {
+		rec := &model.NoteWatchRecord{}
+		if err := rows.Scan(&rec.ID, &rec.DiskPath, &rec.ContentHash); err != nil {
+			return nil, err
+		}
+		records = append(records, rec)
+	}
+	return records, rows.Err()
+}
+
 func (r *NoteRepo) Update(ctx context.Context, n *model.Note) error {
 	tagsJSON, err := json.Marshal(n.Tags)
 	if err != nil {

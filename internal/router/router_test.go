@@ -13,6 +13,7 @@ import (
 	thornotes "github.com/th0rn0/thornotes"
 	"github.com/th0rn0/thornotes/internal/auth"
 	"github.com/th0rn0/thornotes/internal/db"
+	"github.com/th0rn0/thornotes/internal/hub"
 	"github.com/th0rn0/thornotes/internal/notes"
 	"github.com/th0rn0/thornotes/internal/repository/sqlite"
 	"github.com/th0rn0/thornotes/internal/router"
@@ -49,7 +50,7 @@ func buildHandler(t *testing.T) http.Handler {
 	staticSub, err := iofs.Sub(thornotes.StaticFS, "web/static")
 	require.NoError(t, err)
 
-	return router.New(authSvc, notesSvc, apiTokenRepo, userRepo, rateLimiter, tmpl, http.FS(staticSub))
+	return router.New(authSvc, notesSvc, apiTokenRepo, userRepo, rateLimiter, tmpl, http.FS(staticSub), hub.New())
 }
 
 func TestRouter_New(t *testing.T) {

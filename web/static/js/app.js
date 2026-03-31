@@ -99,6 +99,46 @@ function showApp() {
   document.getElementById('auth-screen').style.display = 'none';
   document.getElementById('app-screen').style.display = 'flex';
   document.getElementById('dark-mode-toggle').checked = document.body.classList.contains('dark');
+  connectEventSource();
+}
+
+// ── Disk-change SSE ────────────────────────────────────────────────────────
+let _sse = null;
+let _sseReconnectTimer = null;
+
+function connectEventSource() {
+  if (_sse) return; // already connected
+  _sse = new EventSource('/api/v1/events', { withCredentials: true });
+
+  _sse.addEventListener('notes_changed', async () => {
+    // Reload the folder tree so counts and note titles stay fresh.
+    await loadFolderTree().catch(() => {});
+    // If the currently open note was changed on disk, reload its content.
+    if (currentNote) {
+      try {
+        const fresh = await api('GET', `/api/v1/notes/${currentNote.id}`);
+        if (fresh.content_hash !== currentNote.content_hash) {
+          // Only overwrite if the user has no unsaved edits (save status is 'saved').
+          const saveStatus = document.getElementById('save-status');
+          if (saveStatus && saveStatus.classList.contains('saved')) {
+            currentNote = fresh;
+            editor && editor.value(fresh.content);
+            document.getElementById('note-title').value = fresh.title;
+            document.getElementById('note-tags').value = (fresh.tags || []).join(', ');
+            document.getElementById('note-stats').textContent = `${fresh.content.length} chars`;
+          }
+        }
+      } catch { /* note may have been deleted */ }
+    }
+  });
+
+  _sse.onerror = () => {
+    _sse.close();
+    _sse = null;
+    // Reconnect with exponential backoff (5s, then browser handles further retries).
+    clearTimeout(_sseReconnectTimer);
+    _sseReconnectTimer = setTimeout(connectEventSource, 5000);
+  };
 }
 
 // ── Folder tree ────────────────────────────────────────────────────────────

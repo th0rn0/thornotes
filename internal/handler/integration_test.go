@@ -17,6 +17,7 @@ import (
 	thornotes "github.com/th0rn0/thornotes"
 	"github.com/th0rn0/thornotes/internal/auth"
 	"github.com/th0rn0/thornotes/internal/db"
+	"github.com/th0rn0/thornotes/internal/hub"
 	"github.com/th0rn0/thornotes/internal/notes"
 	"github.com/th0rn0/thornotes/internal/repository/sqlite"
 	"github.com/th0rn0/thornotes/internal/router"
@@ -61,7 +62,7 @@ func newTestClient(t *testing.T) *testClient {
 	staticSub, err := iofs.Sub(thornotes.StaticFS, "web/static")
 	require.NoError(t, err)
 
-	h := router.New(authSvc, notesSvc, apiTokenRepo, userRepo, rateLimiter, tmpl, http.FS(staticSub))
+	h := router.New(authSvc, notesSvc, apiTokenRepo, userRepo, rateLimiter, tmpl, http.FS(staticSub), hub.New())
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
 

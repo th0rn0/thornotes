@@ -23,11 +23,12 @@ FROM scratch
 COPY --from=builder /thornotes /thornotes
 
 # Configuration via environment variables:
-#   THORNOTES_ADDR          bind address          (default :8080)
-#   THORNOTES_DB            SQLite database path  (default /data/thornotes.db)
-#   THORNOTES_NOTES_ROOT    notes directory       (default /data/notes)
-#   THORNOTES_ALLOW_REGISTRATION                  (default true)
-#   THORNOTES_TRUSTED_PROXY CIDR of trusted proxy (optional)
+#   THORNOTES_ADDR              bind address           (default :8080)
+#   THORNOTES_DB                SQLite database path   (default /data/thornotes.db)
+#   THORNOTES_NOTES_ROOT        notes directory        (default /data/notes)
+#   THORNOTES_ALLOW_REGISTRATION                       (default true)
+#   THORNOTES_TRUSTED_PROXY     CIDR of trusted proxy  (optional)
+#   THORNOTES_WATCH_INTERVAL    disk poll interval     (default 30s, set 0 to disable)
 #
 # Mount a writable volume at /data, e.g.:
 #   docker run -v thornotes-data:/data -p 8080:8080 th0rn0/thornotes
