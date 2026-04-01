@@ -64,6 +64,50 @@ docker compose up -d
 
 The `/data` volume holds the SQLite database (`thornotes.db`) and all note files (`notes/`). Back it up with any standard volume backup tool.
 
+### Docker Compose with MySQL
+
+For multi-user or hosted deployments, swap the SQLite default for MySQL (requires MySQL 8.0+):
+
+```yaml
+services:
+  thornotes:
+    image: th0rn0/thornotes
+    container_name: thornotes
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - thornotes-notes:/data/notes
+    environment:
+      THORNOTES_DB_DRIVER: "mysql"
+      THORNOTES_DB_DSN: "thornotes:secret@tcp(db:3306)/thornotes?parseTime=true"
+      THORNOTES_NOTES_ROOT: "/data/notes"
+      THORNOTES_ALLOW_REGISTRATION: "true"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: thornotes
+      MYSQL_USER: thornotes
+      MYSQL_PASSWORD: secret
+      MYSQL_ROOT_PASSWORD: rootsecret
+    volumes:
+      - thornotes-db:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  thornotes-notes:
+  thornotes-db:
+```
+
 ## Configuration
 
 All options are available as environment variables and CLI flags.
@@ -71,7 +115,9 @@ All options are available as environment variables and CLI flags.
 | Environment variable | Flag | Default | Description |
 |---|---|---|---|
 | `THORNOTES_ADDR` | `--addr` | `:8080` | Listen address |
-| `THORNOTES_DB` | `--db` | `thornotes.db` | SQLite database path |
+| `THORNOTES_DB_DRIVER` | `--db-driver` | `sqlite` | Database driver: `sqlite` or `mysql` |
+| `THORNOTES_DB` | `--db` | `thornotes.db` | SQLite database path (sqlite driver only) |
+| `THORNOTES_DB_DSN` | `--db-dsn` | _(none)_ | MySQL DSN e.g. `user:pass@tcp(host:3306)/dbname?parseTime=true` (mysql driver only) |
 | `THORNOTES_NOTES_ROOT` | `--notes-root` | `notes` | Root directory for `.md` files |
 | `THORNOTES_ALLOW_REGISTRATION` | `--allow-registration` | `true` | Allow new user sign-up |
 | `THORNOTES_SECURE_COOKIES` | `--secure-cookies` | `false` | Set `Secure` flag on session cookie — enable when serving over HTTPS |

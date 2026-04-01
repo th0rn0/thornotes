@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -17,6 +18,8 @@ import (
 	"github.com/th0rn0/thornotes/internal/db"
 	"github.com/th0rn0/thornotes/internal/hub"
 	"github.com/th0rn0/thornotes/internal/notes"
+	"github.com/th0rn0/thornotes/internal/repository"
+	mysqlrepo "github.com/th0rn0/thornotes/internal/repository/mysql"
 	"github.com/th0rn0/thornotes/internal/repository/sqlite"
 	"github.com/th0rn0/thornotes/internal/router"
 	"github.com/th0rn0/thornotes/internal/security"
@@ -34,21 +37,52 @@ func main() {
 	}
 
 	// Open database.
-	pool, err := db.Open(cfg.DBPath)
+	var pool *db.Pool
+	switch strings.ToLower(cfg.DBDriver) {
+	case "mysql":
+		if cfg.DBDSN == "" {
+			slog.Error("--db-dsn / THORNOTES_DB_DSN is required when using mysql driver")
+			os.Exit(1)
+		}
+		pool, err = db.OpenMySQL(cfg.DBDSN)
+	default:
+		pool, err = db.Open(cfg.DBPath)
+	}
 	if err != nil {
-		slog.Error("open database", "err", err)
+		slog.Error("open database", "driver", cfg.DBDriver, "err", err)
 		os.Exit(1)
 	}
 	defer pool.Close()
 
-	// Build repositories.
-	userRepo := sqlite.NewUserRepo(pool.WriteDB)
-	sessionRepo := sqlite.NewSessionRepo(pool.WriteDB)
-	folderRepo := sqlite.NewFolderRepo(pool.ReadDB, pool.WriteDB)
-	noteRepo := sqlite.NewNoteRepo(pool.ReadDB, pool.WriteDB)
-	searchRepo := sqlite.NewSearchRepo(pool.ReadDB, pool.WriteDB)
-	apiTokenRepo := sqlite.NewAPITokenRepo(pool.ReadDB, pool.WriteDB)
-	journalRepo := sqlite.NewJournalRepo(pool.ReadDB, pool.WriteDB)
+	// Build repositories — one set per driver.
+	var (
+		userRepo     repository.UserRepository
+		sessionRepo  repository.SessionRepository
+		folderRepo   repository.FolderRepository
+		noteRepo     repository.NoteRepository
+		searchRepo   repository.SearchRepository
+		apiTokenRepo repository.APITokenRepository
+		journalRepo  repository.JournalRepository
+	)
+
+	switch strings.ToLower(cfg.DBDriver) {
+	case "mysql":
+		userRepo = mysqlrepo.NewUserRepo(pool.WriteDB)
+		sessionRepo = mysqlrepo.NewSessionRepo(pool.WriteDB)
+		folderRepo = mysqlrepo.NewFolderRepo(pool.WriteDB)
+		noteRepo = mysqlrepo.NewNoteRepo(pool.WriteDB)
+		searchRepo = mysqlrepo.NewSearchRepo(pool.WriteDB)
+		apiTokenRepo = mysqlrepo.NewAPITokenRepo(pool.WriteDB)
+		journalRepo = mysqlrepo.NewJournalRepo(pool.WriteDB)
+	default:
+		userRepo = sqlite.NewUserRepo(pool.WriteDB)
+		sessionRepo = sqlite.NewSessionRepo(pool.WriteDB)
+		folderRepo = sqlite.NewFolderRepo(pool.ReadDB, pool.WriteDB)
+		noteRepo = sqlite.NewNoteRepo(pool.ReadDB, pool.WriteDB)
+		searchRepo = sqlite.NewSearchRepo(pool.ReadDB, pool.WriteDB)
+		apiTokenRepo = sqlite.NewAPITokenRepo(pool.ReadDB, pool.WriteDB)
+		journalRepo = sqlite.NewJournalRepo(pool.ReadDB, pool.WriteDB)
+	}
 
 	// Build file store.
 	fs, err := notes.NewFileStore(cfg.NotesRoot)
@@ -98,7 +132,7 @@ func main() {
 	defer watchCancel()
 
 	go func() {
-		slog.Info("thornotes starting", "addr", cfg.Addr)
+		slog.Info("thornotes starting", "addr", cfg.Addr, "driver", cfg.DBDriver)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			slog.Error("server error", "err", err)
 			os.Exit(1)

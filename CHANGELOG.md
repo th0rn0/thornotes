@@ -2,6 +2,14 @@
 
 All notable changes to thornotes are documented here.
 
+## [0.7.0.0] - 2026-04-01
+
+### Added
+- **MySQL support** — set `THORNOTES_DB_DRIVER=mysql` and `THORNOTES_DB_DSN=user:pass@tcp(host:3306)/dbname?parseTime=true` to use MySQL 8.0+ instead of SQLite; all repositories implemented against `database/sql`; migrations embedded in `internal/db/mysql_migrations/`
+- Full-text search on MySQL uses a `FULLTEXT` index with `MATCH...AGAINST` in boolean mode (InnoDB)
+- Docker Compose with MySQL example added to README
+- `THORNOTES_DB_DRIVER` / `--db-driver` and `THORNOTES_DB_DSN` / `--db-dsn` config options
+
 ## [0.6.0.0] - 2026-04-01
 
 ### Security
