@@ -9,3 +9,4 @@ notes-dev/
 .gstack/
 coverage.out
 .claude/settings.local.json
+.context/
