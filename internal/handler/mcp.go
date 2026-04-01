@@ -1,8 +1,14 @@
 package handler
 
 import (
+	"bytes"
+	"crypto/rand"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
+	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/th0rn0/thornotes/internal/apperror"
@@ -11,17 +17,56 @@ import (
 	"github.com/th0rn0/thornotes/internal/notes"
 )
 
+const mcpProtocolVersion = "2025-03-26"
+
+// mcpSessions tracks live session IDs in memory.
+// A session is created on initialize and must be included in subsequent requests.
+type mcpSessions struct {
+	mu  sync.RWMutex
+	ids map[string]struct{}
+}
+
+func (s *mcpSessions) create() string {
+	b := make([]byte, 16)
+	_, _ = rand.Read(b)
+	id := fmt.Sprintf("%x", b)
+	s.mu.Lock()
+	s.ids[id] = struct{}{}
+	s.mu.Unlock()
+	return id
+}
+
+func (s *mcpSessions) valid(id string) bool {
+	s.mu.RLock()
+	_, ok := s.ids[id]
+	s.mu.RUnlock()
+	return ok
+}
+
+func (s *mcpSessions) remove(id string) {
+	s.mu.Lock()
+	delete(s.ids, id)
+	s.mu.Unlock()
+}
+
 // MCPHandler implements the Model Context Protocol over Streamable HTTP transport.
-// Spec: https://spec.modelcontextprotocol.io/specification/basic/transports/
+// Spec: https://spec.modelcontextprotocol.io/specification/2025-03-26/basic/transports/#streamable-http
 //
-// All requests arrive as POST /mcp with a JSON-RPC 2.0 body.
-// Responses are synchronous JSON-RPC 2.0 objects.
+// Three endpoints:
+//
+//	POST   /mcp  — client→server messages (requests + notifications)
+//	GET    /mcp  — server→client SSE stream (server-initiated messages)
+//	DELETE /mcp  — terminate a session
 type MCPHandler struct {
-	notes *notes.Service
+	notes    *notes.Service
+	sessions mcpSessions
 }
 
 func NewMCPHandler(notes *notes.Service) *MCPHandler {
-	return &MCPHandler{notes: notes}
+	return &MCPHandler{
+		notes:    notes,
+		sessions: mcpSessions{ids: make(map[string]struct{})},
+	}
 }
 
 // ── JSON-RPC 2.0 types ────────────────────────────────────────────────────────
@@ -52,6 +97,20 @@ const (
 	rpcInvalidParams  = -32602
 	rpcInternalError  = -32603
 )
+
+// isNotification returns true when the JSON-RPC message has no id field (or
+// id is null), meaning it is a notification and requires no response.
+func isNotification(id json.RawMessage) bool {
+	return len(id) == 0 || string(id) == "null"
+}
+
+func rpcOK(id json.RawMessage, result any) rpcResponse {
+	return rpcResponse{JSONRPC: "2.0", ID: id, Result: result}
+}
+
+func rpcErr(id json.RawMessage, code int, msg string) rpcResponse {
+	return rpcResponse{JSONRPC: "2.0", ID: id, Error: &rpcError{Code: code, Message: msg}}
+}
 
 // ── MCP protocol types ────────────────────────────────────────────────────────
 
@@ -89,51 +148,177 @@ type mcpTextContent struct {
 	Text string `json:"text"`
 }
 
-// ── Handler ───────────────────────────────────────────────────────────────────
+// ── HTTP handlers ─────────────────────────────────────────────────────────────
 
-// Handle is the gin handler — delegates to handle(w, r) to keep all internal
-// MCP logic unchanged.
-func (h *MCPHandler) Handle(c *gin.Context) {
-	h.handle(c.Writer, c.Request)
-}
+// HandlePOST handles POST /mcp — all client→server messages.
+// Accepts a single JSON-RPC object or a JSON array of batched messages.
+// Notifications (no id field) are handled silently and return 202.
+func (h *MCPHandler) HandlePOST(c *gin.Context) {
+	user := auth.UserFromContext(c.Request.Context())
+	sessionID := c.GetHeader("Mcp-Session-Id")
 
-func (h *MCPHandler) handle(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		c.Status(http.StatusBadRequest)
+		return
+	}
 
+	trimmed := bytes.TrimSpace(body)
+	if len(trimmed) == 0 {
+		c.Header("Content-Type", "application/json")
+		writeRPCJSON(c.Writer, rpcErr(nil, rpcParseError, "empty body"))
+		return
+	}
+
+	// Batch request — JSON array.
+	if trimmed[0] == '[' {
+		h.handleBatch(c, trimmed, sessionID, user.ID)
+		return
+	}
+
+	// Single request.
 	var req rpcRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeRPCError(w, nil, rpcParseError, "parse error")
+	if err := json.Unmarshal(trimmed, &req); err != nil {
+		c.Header("Content-Type", "application/json")
+		writeRPCJSON(c.Writer, rpcErr(nil, rpcParseError, "parse error"))
 		return
 	}
 	if req.JSONRPC != "2.0" {
-		writeRPCError(w, req.ID, rpcInvalidRequest, "jsonrpc must be '2.0'")
+		c.Header("Content-Type", "application/json")
+		writeRPCJSON(c.Writer, rpcErr(req.ID, rpcInvalidRequest, "jsonrpc must be '2.0'"))
 		return
 	}
 
-	user := auth.UserFromContext(r.Context())
+	// Notifications require no response.
+	if isNotification(req.ID) {
+		c.Status(http.StatusAccepted)
+		return
+	}
 
+	// initialize creates a new session.
+	if req.Method == "initialize" {
+		newID := h.sessions.create()
+		c.Header("Mcp-Session-Id", newID)
+		c.Header("Content-Type", "application/json")
+		writeRPCJSON(c.Writer, h.dispatch(c.Request, req, user.ID))
+		return
+	}
+
+	// All other requests: validate session ID if provided.
+	if sessionID != "" && !h.sessions.valid(sessionID) {
+		c.Status(http.StatusNotFound)
+		return
+	}
+
+	c.Header("Content-Type", "application/json")
+	writeRPCJSON(c.Writer, h.dispatch(c.Request, req, user.ID))
+}
+
+// HandleGET handles GET /mcp — opens a server-sent event stream.
+// thornotes has no server-initiated messages, so this holds the connection
+// open with periodic keepalive comments until the client disconnects.
+func (h *MCPHandler) HandleGET(c *gin.Context) {
+	sessionID := c.GetHeader("Mcp-Session-Id")
+	if sessionID != "" && !h.sessions.valid(sessionID) {
+		c.Status(http.StatusNotFound)
+		return
+	}
+
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+
+	ctx := c.Request.Context()
+	ticker := time.NewTicker(25 * time.Second)
+	defer ticker.Stop()
+
+	c.Stream(func(w io.Writer) bool {
+		select {
+		case <-ctx.Done():
+			return false
+		case <-ticker.C:
+			fmt.Fprint(w, ": keepalive\n\n")
+			return true
+		}
+	})
+}
+
+// HandleDELETE handles DELETE /mcp — terminates a session.
+func (h *MCPHandler) HandleDELETE(c *gin.Context) {
+	sessionID := c.GetHeader("Mcp-Session-Id")
+	if sessionID == "" {
+		c.Status(http.StatusBadRequest)
+		return
+	}
+	if !h.sessions.valid(sessionID) {
+		c.Status(http.StatusNotFound)
+		return
+	}
+	h.sessions.remove(sessionID)
+	c.Status(http.StatusOK)
+}
+
+// handleBatch processes a JSON array of JSON-RPC messages.
+// Notifications are handled silently. If all messages are notifications, returns 202.
+func (h *MCPHandler) handleBatch(c *gin.Context, body []byte, sessionID string, userID int64) {
+	var reqs []rpcRequest
+	if err := json.Unmarshal(body, &reqs); err != nil {
+		c.Header("Content-Type", "application/json")
+		writeRPCJSON(c.Writer, rpcErr(nil, rpcParseError, "parse error"))
+		return
+	}
+	if len(reqs) == 0 {
+		c.Header("Content-Type", "application/json")
+		writeRPCJSON(c.Writer, rpcErr(nil, rpcInvalidRequest, "empty batch"))
+		return
+	}
+
+	var responses []rpcResponse
+	for _, req := range reqs {
+		if req.JSONRPC != "2.0" || isNotification(req.ID) {
+			continue
+		}
+		if sessionID != "" && !h.sessions.valid(sessionID) {
+			responses = append(responses, rpcErr(req.ID, -32001, "session not found"))
+			continue
+		}
+		responses = append(responses, h.dispatch(c.Request, req, userID))
+	}
+
+	if len(responses) == 0 {
+		c.Status(http.StatusAccepted)
+		return
+	}
+	c.Header("Content-Type", "application/json")
+	_ = json.NewEncoder(c.Writer).Encode(responses)
+}
+
+// ── Dispatcher ────────────────────────────────────────────────────────────────
+
+// dispatch routes a JSON-RPC request to the correct MCP method handler
+// and returns the response object.
+func (h *MCPHandler) dispatch(r *http.Request, req rpcRequest, userID int64) rpcResponse {
 	switch req.Method {
 	case "initialize":
-		h.handleInitialize(w, req)
-	case "notifications/initialized":
-		// Client acknowledgement — no response needed for notifications.
-		w.WriteHeader(http.StatusAccepted)
+		return h.handleInitialize(req)
 	case "tools/list":
-		h.handleToolsList(w, req)
+		return h.handleToolsList(req)
 	case "tools/call":
-		h.handleToolsCall(w, r, req, user.ID)
+		return h.handleToolsCall(r, req, userID)
 	case "resources/list":
-		h.handleResourcesList(w, r, req, user.ID)
+		return h.handleResourcesList(r, req, userID)
 	case "resources/read":
-		h.handleResourcesRead(w, r, req, user.ID)
+		return h.handleResourcesRead(r, req, userID)
 	default:
-		writeRPCError(w, req.ID, rpcMethodNotFound, "method not found: "+req.Method)
+		return rpcErr(req.ID, rpcMethodNotFound, "method not found: "+req.Method)
 	}
 }
 
-func (h *MCPHandler) handleInitialize(w http.ResponseWriter, req rpcRequest) {
-	writeRPCResult(w, req.ID, mcpInitializeResult{
-		ProtocolVersion: "2024-11-05",
+// ── MCP method handlers ───────────────────────────────────────────────────────
+
+func (h *MCPHandler) handleInitialize(req rpcRequest) rpcResponse {
+	return rpcOK(req.ID, mcpInitializeResult{
+		ProtocolVersion: mcpProtocolVersion,
 		ServerInfo:      mcpServerInfo{Name: "thornotes", Version: "1.0"},
 		Capabilities: mcpCapabilities{
 			Tools:     map[string]any{"listChanged": false},
@@ -142,7 +327,7 @@ func (h *MCPHandler) handleInitialize(w http.ResponseWriter, req rpcRequest) {
 	})
 }
 
-func (h *MCPHandler) handleToolsList(w http.ResponseWriter, req rpcRequest) {
+func (h *MCPHandler) handleToolsList(req rpcRequest) rpcResponse {
 	tools := []mcpTool{
 		{
 			Name: "list_notes",
@@ -195,17 +380,16 @@ func (h *MCPHandler) handleToolsList(w http.ResponseWriter, req rpcRequest) {
 			}, []string{"id", "content"}),
 		},
 	}
-	writeRPCResult(w, req.ID, map[string]any{"tools": tools})
+	return rpcOK(req.ID, map[string]any{"tools": tools})
 }
 
-func (h *MCPHandler) handleToolsCall(w http.ResponseWriter, r *http.Request, req rpcRequest, userID int64) {
+func (h *MCPHandler) handleToolsCall(r *http.Request, req rpcRequest, userID int64) rpcResponse {
 	var params struct {
 		Name      string          `json:"name"`
 		Arguments json.RawMessage `json:"arguments"`
 	}
 	if err := json.Unmarshal(req.Params, &params); err != nil {
-		writeRPCError(w, req.ID, rpcInvalidParams, "invalid params")
-		return
+		return rpcErr(req.ID, rpcInvalidParams, "invalid params")
 	}
 
 	ctx := r.Context()
@@ -217,32 +401,28 @@ func (h *MCPHandler) handleToolsCall(w http.ResponseWriter, r *http.Request, req
 			Tags  []string `json:"tags"`
 		}
 		if err := json.Unmarshal(params.Arguments, &args); err != nil || args.Query == "" {
-			writeRPCError(w, req.ID, rpcInvalidParams, "query is required")
-			return
+			return rpcErr(req.ID, rpcInvalidParams, "query is required")
 		}
 		results, err := h.notes.Search(ctx, userID, args.Query, args.Tags)
 		if err != nil {
-			writeRPCError(w, req.ID, rpcInternalError, "search failed")
-			return
+			return rpcErr(req.ID, rpcInternalError, "search failed")
 		}
 		text, _ := json.Marshal(results)
-		writeRPCResult(w, req.ID, toolResult(string(text)))
+		return rpcOK(req.ID, toolResult(string(text)))
 
 	case "get_note":
 		var args struct {
 			ID int64 `json:"id"`
 		}
 		if err := json.Unmarshal(params.Arguments, &args); err != nil || args.ID == 0 {
-			writeRPCError(w, req.ID, rpcInvalidParams, "id is required")
-			return
+			return rpcErr(req.ID, rpcInvalidParams, "id is required")
 		}
 		note, err := h.notes.GetNote(ctx, userID, args.ID)
 		if err != nil {
-			writeRPCError(w, req.ID, rpcInternalError, errorString(err))
-			return
+			return rpcErr(req.ID, rpcInternalError, errorString(err))
 		}
 		text, _ := json.Marshal(note)
-		writeRPCResult(w, req.ID, toolResult(string(text)))
+		return rpcOK(req.ID, toolResult(string(text)))
 
 	case "list_notes":
 		var args struct {
@@ -259,11 +439,10 @@ func (h *MCPHandler) handleToolsCall(w http.ResponseWriter, r *http.Request, req
 			items, err = h.notes.ListAllNotes(ctx, userID)
 		}
 		if err != nil {
-			writeRPCError(w, req.ID, rpcInternalError, "list failed")
-			return
+			return rpcErr(req.ID, rpcInternalError, "list failed")
 		}
 		text, _ := json.Marshal(items)
-		writeRPCResult(w, req.ID, toolResult(string(text)))
+		return rpcOK(req.ID, toolResult(string(text)))
 
 	case "create_note":
 		var args struct {
@@ -273,28 +452,25 @@ func (h *MCPHandler) handleToolsCall(w http.ResponseWriter, r *http.Request, req
 			Tags     []string `json:"tags"`
 		}
 		if err := json.Unmarshal(params.Arguments, &args); err != nil || args.Title == "" {
-			writeRPCError(w, req.ID, rpcInvalidParams, "title is required")
-			return
+			return rpcErr(req.ID, rpcInvalidParams, "title is required")
 		}
 		if args.Tags == nil {
 			args.Tags = []string{}
 		}
 		note, err := h.notes.CreateNote(ctx, userID, args.FolderID, args.Title, args.Tags)
 		if err != nil {
-			writeRPCError(w, req.ID, rpcInternalError, errorString(err))
-			return
+			return rpcErr(req.ID, rpcInternalError, errorString(err))
 		}
 		if args.Content != "" {
 			newHash, err := h.notes.UpdateNoteContent(ctx, userID, note.ID, args.Content, note.ContentHash)
 			if err != nil {
-				writeRPCError(w, req.ID, rpcInternalError, errorString(err))
-				return
+				return rpcErr(req.ID, rpcInternalError, errorString(err))
 			}
 			note.Content = args.Content
 			note.ContentHash = newHash
 		}
 		text, _ := json.Marshal(note)
-		writeRPCResult(w, req.ID, toolResult(string(text)))
+		return rpcOK(req.ID, toolResult(string(text)))
 
 	case "update_note":
 		var args struct {
@@ -302,43 +478,38 @@ func (h *MCPHandler) handleToolsCall(w http.ResponseWriter, r *http.Request, req
 			Content string `json:"content"`
 		}
 		if err := json.Unmarshal(params.Arguments, &args); err != nil || args.ID == 0 {
-			writeRPCError(w, req.ID, rpcInvalidParams, "id and content are required")
-			return
+			return rpcErr(req.ID, rpcInvalidParams, "id and content are required")
 		}
 		note, err := h.notes.GetNote(ctx, userID, args.ID)
 		if err != nil {
-			writeRPCError(w, req.ID, rpcInternalError, errorString(err))
-			return
+			return rpcErr(req.ID, rpcInternalError, errorString(err))
 		}
 		newHash, err := h.notes.UpdateNoteContent(ctx, userID, args.ID, args.Content, note.ContentHash)
 		if err != nil {
-			writeRPCError(w, req.ID, rpcInternalError, errorString(err))
-			return
+			return rpcErr(req.ID, rpcInternalError, errorString(err))
 		}
 		note.Content = args.Content
 		note.ContentHash = newHash
 		text, _ := json.Marshal(note)
-		writeRPCResult(w, req.ID, toolResult(string(text)))
+		return rpcOK(req.ID, toolResult(string(text)))
 
 	case "list_folders":
 		folders, err := h.notes.FolderTree(ctx, userID)
 		if err != nil {
-			writeRPCError(w, req.ID, rpcInternalError, "list failed")
-			return
+			return rpcErr(req.ID, rpcInternalError, "list failed")
 		}
 		text, _ := json.Marshal(folders)
-		writeRPCResult(w, req.ID, toolResult(string(text)))
+		return rpcOK(req.ID, toolResult(string(text)))
 
 	default:
-		writeRPCError(w, req.ID, rpcMethodNotFound, "unknown tool: "+params.Name)
+		return rpcErr(req.ID, rpcMethodNotFound, "unknown tool: "+params.Name)
 	}
 }
 
-func (h *MCPHandler) handleResourcesList(w http.ResponseWriter, r *http.Request, req rpcRequest, userID int64) {
+func (h *MCPHandler) handleResourcesList(r *http.Request, req rpcRequest, userID int64) rpcResponse {
 	items, err := h.notes.ListAllNotes(r.Context(), userID)
 	if err != nil {
-		writeRPCError(w, req.ID, rpcInternalError, "list notes failed")
-		return
+		return rpcErr(req.ID, rpcInternalError, "list notes failed")
 	}
 	resources := make([]mcpResource, 0, len(items))
 	for _, item := range items {
@@ -354,41 +525,35 @@ func (h *MCPHandler) handleResourcesList(w http.ResponseWriter, r *http.Request,
 			MimeType:    "text/markdown",
 		})
 	}
-	writeRPCResult(w, req.ID, map[string]any{"resources": resources})
+	return rpcOK(req.ID, map[string]any{"resources": resources})
 }
 
-func (h *MCPHandler) handleResourcesRead(w http.ResponseWriter, r *http.Request, req rpcRequest, userID int64) {
+func (h *MCPHandler) handleResourcesRead(r *http.Request, req rpcRequest, userID int64) rpcResponse {
 	var params struct {
 		URI string `json:"uri"`
 	}
 	if err := json.Unmarshal(req.Params, &params); err != nil {
-		writeRPCError(w, req.ID, rpcInvalidParams, "invalid params")
-		return
+		return rpcErr(req.ID, rpcInvalidParams, "invalid params")
 	}
 
-	// Parse note:// URI.
 	const prefix = "note://"
 	if len(params.URI) <= len(prefix) || params.URI[:len(prefix)] != prefix {
-		writeRPCError(w, req.ID, rpcInvalidParams, "invalid resource URI")
-		return
+		return rpcErr(req.ID, rpcInvalidParams, "invalid resource URI")
 	}
 	idStr := params.URI[len(prefix):]
 	var id int64
 	for _, c := range idStr {
 		if c < '0' || c > '9' {
-			writeRPCError(w, req.ID, rpcInvalidParams, "invalid note id in URI")
-			return
+			return rpcErr(req.ID, rpcInvalidParams, "invalid note id in URI")
 		}
 		id = id*10 + int64(c-'0')
 	}
 
 	note, err := h.notes.GetNote(r.Context(), userID, id)
 	if err != nil {
-		writeRPCError(w, req.ID, rpcInternalError, errorString(err))
-		return
+		return rpcErr(req.ID, rpcInternalError, errorString(err))
 	}
-
-	writeRPCResult(w, req.ID, map[string]any{
+	return rpcOK(req.ID, map[string]any{
 		"contents": []mcpTextContent{
 			{Type: "text", Text: note.Content},
 		},
@@ -397,20 +562,18 @@ func (h *MCPHandler) handleResourcesRead(w http.ResponseWriter, r *http.Request,
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+func writeRPCJSON(w http.ResponseWriter, resp rpcResponse) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// writeRPCResult and writeRPCError are kept for any callers outside this file.
 func writeRPCResult(w http.ResponseWriter, id json.RawMessage, result any) {
-	_ = json.NewEncoder(w).Encode(rpcResponse{
-		JSONRPC: "2.0",
-		ID:      id,
-		Result:  result,
-	})
+	writeRPCJSON(w, rpcOK(id, result))
 }
 
 func writeRPCError(w http.ResponseWriter, id json.RawMessage, code int, msg string) {
-	_ = json.NewEncoder(w).Encode(rpcResponse{
-		JSONRPC: "2.0",
-		ID:      id,
-		Error:   &rpcError{Code: code, Message: msg},
-	})
+	writeRPCJSON(w, rpcErr(id, code, msg))
 }
 
 func toolResult(text string) map[string]any {

@@ -2,6 +2,17 @@
 
 All notable changes to thornotes are documented here.
 
+## [0.14.0.0] - 2026-04-01
+
+### Changed
+- **MCP transport upgraded to Streamable HTTP (2025-03-26)** — the previous implementation used the older `2024-11-05` JSON-only POST transport. The new transport adds:
+  - `GET /mcp` — server-sent event stream for server-initiated messages; thornotes holds it open with 25-second keepalive comments (no server-push messages yet).
+  - `DELETE /mcp` — terminates a session.
+  - **Session management** — `initialize` generates a cryptographically random session ID returned in the `Mcp-Session-Id` response header; clients include it in subsequent requests; unknown session IDs return `404`.
+  - **Notifications return `202`** — any JSON-RPC message without an `id` field (notifications) returns `202 Accepted` with no body, matching the spec. Previously only `notifications/initialized` was handled this way.
+  - **Batch requests** — POST body may be a JSON array of JSON-RPC messages; responses are collected and returned as a JSON array; all-notification batches return `202`.
+  - Protocol version field updated from `2024-11-05` to `2025-03-26`.
+
 ## [0.13.6.0] - 2026-04-01
 
 ### Fixed

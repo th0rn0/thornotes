@@ -126,8 +126,10 @@ func New(
 	// Server-Sent Events.
 	r.GET("/api/v1/events", sessionMW, eventsH.Stream)
 
-	// MCP — bearer token auth, no CSRF (token-authenticated API).
-	r.POST("/mcp", bearerMW, mcpH.Handle)
+	// MCP — Streamable HTTP transport (2025-03-26), bearer token auth, no CSRF.
+	r.POST("/mcp", bearerMW, mcpH.HandlePOST)
+	r.GET("/mcp", bearerMW, mcpH.HandleGET)
+	r.DELETE("/mcp", bearerMW, mcpH.HandleDELETE)
 
 	return r
 }
