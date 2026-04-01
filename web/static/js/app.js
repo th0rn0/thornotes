@@ -199,7 +199,7 @@ function renderTree() {
 
     const folderActive = currentFolderId === f.id ? ' active' : '';
     html += `<div class="tree-folder" data-folder-id="${f.id}">`;
-    html += `<div class="tree-folder-label${folderActive}" style="padding-left:${8 + indent}px" onclick="selectFolder(${f.id})">`;
+    html += `<div class="tree-folder-label${folderActive}" style="padding-left:${8 + indent}px" data-action="select-folder" data-folder-id="${f.id}">`;
     html += `<span class="icon">${icon}</span>${esc(f.name)}`;
     html += `</div>`;
 
@@ -207,7 +207,7 @@ function renderTree() {
       html += `<div class="tree-notes">`;
       for (const n of notes) {
         const active = currentNote && currentNote.id === n.id ? ' active' : '';
-        html += `<div class="tree-note${active}" style="padding-left:${20 + indent}px" onclick="openNote(${n.id})" title="${esc(n.title)}">${esc(n.title)}</div>`;
+        html += `<div class="tree-note${active}" style="padding-left:${20 + indent}px" data-action="open-note" data-note-id="${n.id}" title="${esc(n.title)}">${esc(n.title)}</div>`;
       }
       for (const child of children) {
         renderFolder(child, depth + 1);
@@ -225,7 +225,7 @@ function renderTree() {
     html += `<div class="tree-unsorted">Unsorted</div>`;
     for (const n of rootNotes) {
       const active = currentNote && currentNote.id === n.id ? ' active' : '';
-      html += `<div class="tree-note${active}" style="padding-left:12px" onclick="openNote(${n.id})" title="${esc(n.title)}">${esc(n.title)}</div>`;
+      html += `<div class="tree-note${active}" style="padding-left:12px" data-action="open-note" data-note-id="${n.id}" title="${esc(n.title)}">${esc(n.title)}</div>`;
     }
   }
 
@@ -269,7 +269,7 @@ function renderSearchResults() {
   let html = '';
   for (const r of searchResults) {
     const active = currentNote && currentNote.id === r.note_id ? ' active' : '';
-    html += `<div class="tree-note${active}" onclick="openNote(${r.note_id})" title="${esc(r.title)}">${esc(r.title)}</div>`;
+    html += `<div class="tree-note${active}" data-action="open-note" data-note-id="${r.note_id}" title="${esc(r.title)}">${esc(r.title)}</div>`;
     if (r.snippet) {
       html += `<div style="padding:2px 16px 6px; font-size:11px; color:#888; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${esc(r.snippet)}</div>`;
     }
@@ -562,7 +562,7 @@ async function refreshTokenList() {
       <span class="token-name">${esc(t.name)}</span>
       <span class="token-prefix" title="Token prefix">${esc(t.prefix)}…</span>
       <span class="token-date">created ${created} · used ${used}</span>
-      <button class="token-revoke" onclick="revokeToken(${t.id})">Revoke</button>
+      <button class="token-revoke" data-action="revoke-token" data-token-id="${t.id}">Revoke</button>
     </div>`;
   }
   el.innerHTML = html;
@@ -817,6 +817,20 @@ document.getElementById('manage-journals-done-btn').addEventListener('click', cl
 document.getElementById('journal-list').addEventListener('click', function(e) {
   const btn = e.target.closest('.journal-delete-btn');
   if (btn) deleteJournal(Number(btn.dataset.journalId));
+});
+
+// Tree — event delegation for dynamically rendered folder/note items
+document.getElementById('tree').addEventListener('click', function(e) {
+  const el = e.target.closest('[data-action]');
+  if (!el) return;
+  if (el.dataset.action === 'open-note') openNote(Number(el.dataset.noteId));
+  if (el.dataset.action === 'select-folder') selectFolder(Number(el.dataset.folderId));
+});
+
+// Token list — event delegation for dynamically rendered revoke buttons
+document.getElementById('token-list').addEventListener('click', function(e) {
+  const btn = e.target.closest('[data-action="revoke-token"]');
+  if (btn) revokeToken(Number(btn.dataset.tokenId));
 });
 
 // Disk full banner
