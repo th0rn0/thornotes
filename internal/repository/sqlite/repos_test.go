@@ -823,3 +823,251 @@ func TestSanitizeFTSQuery(t *testing.T) {
 		})
 	}
 }
+
+// ─── JournalRepo tests ────────────────────────────────────────────────────────
+
+func TestJournalRepo_Create(t *testing.T) {
+	pool := openTestDB(t)
+	user := createUser(t, pool)
+	repo := NewJournalRepo(pool.ReadDB, pool.WriteDB)
+	ctx := context.Background()
+
+	j, err := repo.Create(ctx, user.ID, "Personal")
+	require.NoError(t, err)
+	assert.NotZero(t, j.ID)
+	assert.Equal(t, "Personal", j.Name)
+	assert.Equal(t, user.ID, j.UserID)
+}
+
+func TestJournalRepo_Create_Duplicate(t *testing.T) {
+	pool := openTestDB(t)
+	user := createUser(t, pool)
+	repo := NewJournalRepo(pool.ReadDB, pool.WriteDB)
+	ctx := context.Background()
+
+	_, err := repo.Create(ctx, user.ID, "Work")
+	require.NoError(t, err)
+
+	_, err = repo.Create(ctx, user.ID, "Work")
+	require.Error(t, err)
+	var appErr *apperror.AppError
+	require.ErrorAs(t, err, &appErr)
+	assert.Equal(t, 409, appErr.Code)
+}
+
+func TestJournalRepo_GetByID(t *testing.T) {
+	pool := openTestDB(t)
+	user := createUser(t, pool)
+	repo := NewJournalRepo(pool.ReadDB, pool.WriteDB)
+	ctx := context.Background()
+
+	j, err := repo.Create(ctx, user.ID, "Daily")
+	require.NoError(t, err)
+
+	got, err := repo.GetByID(ctx, user.ID, j.ID)
+	require.NoError(t, err)
+	assert.Equal(t, j.ID, got.ID)
+	assert.Equal(t, "Daily", got.Name)
+}
+
+func TestJournalRepo_GetByID_NotFound(t *testing.T) {
+	pool := openTestDB(t)
+	user := createUser(t, pool)
+	repo := NewJournalRepo(pool.ReadDB, pool.WriteDB)
+
+	_, err := repo.GetByID(context.Background(), user.ID, 99999)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, apperror.ErrNotFound)
+}
+
+func TestJournalRepo_ListByUser_Empty(t *testing.T) {
+	pool := openTestDB(t)
+	user := createUser(t, pool)
+	repo := NewJournalRepo(pool.ReadDB, pool.WriteDB)
+
+	journals, err := repo.ListByUser(context.Background(), user.ID)
+	require.NoError(t, err)
+	assert.NotNil(t, journals)
+	assert.Empty(t, journals)
+}
+
+func TestJournalRepo_ListByUser_Multiple(t *testing.T) {
+	pool := openTestDB(t)
+	user := createUser(t, pool)
+	repo := NewJournalRepo(pool.ReadDB, pool.WriteDB)
+	ctx := context.Background()
+
+	_, err := repo.Create(ctx, user.ID, "Personal")
+	require.NoError(t, err)
+	_, err = repo.Create(ctx, user.ID, "Work")
+	require.NoError(t, err)
+
+	journals, err := repo.ListByUser(ctx, user.ID)
+	require.NoError(t, err)
+	assert.Len(t, journals, 2)
+}
+
+func TestJournalRepo_Delete(t *testing.T) {
+	pool := openTestDB(t)
+	user := createUser(t, pool)
+	repo := NewJournalRepo(pool.ReadDB, pool.WriteDB)
+	ctx := context.Background()
+
+	j, err := repo.Create(ctx, user.ID, "Temp")
+	require.NoError(t, err)
+
+	err = repo.Delete(ctx, user.ID, j.ID)
+	require.NoError(t, err)
+
+	journals, err := repo.ListByUser(ctx, user.ID)
+	require.NoError(t, err)
+	assert.Empty(t, journals)
+}
+
+func TestJournalRepo_Delete_NotFound(t *testing.T) {
+	pool := openTestDB(t)
+	user := createUser(t, pool)
+	repo := NewJournalRepo(pool.ReadDB, pool.WriteDB)
+
+	err := repo.Delete(context.Background(), user.ID, 99999)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, apperror.ErrNotFound)
+}
+
+// ─── FolderRepo.GetByDiskPath tests ──────────────────────────────────────────
+
+func TestFolderRepo_GetByDiskPath(t *testing.T) {
+	pool := openTestDB(t)
+	user := createUser(t, pool)
+	repo := NewFolderRepo(pool.ReadDB, pool.WriteDB)
+	ctx := context.Background()
+
+	folder, err := repo.Create(ctx, user.ID, nil, "MyFolder", "1/myfolder")
+	require.NoError(t, err)
+
+	got, err := repo.GetByDiskPath(ctx, "1/myfolder")
+	require.NoError(t, err)
+	assert.Equal(t, folder.ID, got.ID)
+	assert.Equal(t, "MyFolder", got.Name)
+}
+
+func TestFolderRepo_GetByDiskPath_NotFound(t *testing.T) {
+	pool := openTestDB(t)
+	repo := NewFolderRepo(pool.ReadDB, pool.WriteDB)
+
+	_, err := repo.GetByDiskPath(context.Background(), "nonexistent/path")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, apperror.ErrNotFound)
+}
+
+// ─── NoteRepo.GetByFolderAndSlug tests ───────────────────────────────────────
+
+func TestNoteRepo_GetByFolderAndSlug_Root(t *testing.T) {
+	pool := openTestDB(t)
+	user := createUser(t, pool)
+	noteRepo := NewNoteRepo(pool.ReadDB, pool.WriteDB)
+	ctx := context.Background()
+
+	n := &model.Note{
+		UserID:      user.ID,
+		Title:       "Root Note",
+		Slug:        "root-note",
+		DiskPath:    "1/root-note.md",
+		Content:     "",
+		ContentHash: "abc",
+		Tags:        []string{},
+	}
+	created, err := noteRepo.Create(ctx, n)
+	require.NoError(t, err)
+
+	got, err := noteRepo.GetByFolderAndSlug(ctx, user.ID, nil, "root-note")
+	require.NoError(t, err)
+	assert.Equal(t, created.ID, got.ID)
+}
+
+func TestNoteRepo_GetByFolderAndSlug_InFolder(t *testing.T) {
+	pool := openTestDB(t)
+	user := createUser(t, pool)
+	folderRepo := NewFolderRepo(pool.ReadDB, pool.WriteDB)
+	noteRepo := NewNoteRepo(pool.ReadDB, pool.WriteDB)
+	ctx := context.Background()
+
+	folder, err := folderRepo.Create(ctx, user.ID, nil, "Docs", "1/docs")
+	require.NoError(t, err)
+
+	n := &model.Note{
+		UserID:      user.ID,
+		FolderID:    &folder.ID,
+		Title:       "Design Doc",
+		Slug:        "design-doc",
+		DiskPath:    "1/docs/design-doc.md",
+		Content:     "",
+		ContentHash: "xyz",
+		Tags:        []string{},
+	}
+	created, err := noteRepo.Create(ctx, n)
+	require.NoError(t, err)
+
+	got, err := noteRepo.GetByFolderAndSlug(ctx, user.ID, &folder.ID, "design-doc")
+	require.NoError(t, err)
+	assert.Equal(t, created.ID, got.ID)
+}
+
+func TestNoteRepo_GetByFolderAndSlug_NotFound(t *testing.T) {
+	pool := openTestDB(t)
+	user := createUser(t, pool)
+	noteRepo := NewNoteRepo(pool.ReadDB, pool.WriteDB)
+
+	_, err := noteRepo.GetByFolderAndSlug(context.Background(), user.ID, nil, "nonexistent")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, apperror.ErrNotFound)
+}
+
+// ─── NoteRepo.ListAll tests ───────────────────────────────────────────────────
+
+func TestNoteRepo_ListAll(t *testing.T) {
+	pool := openTestDB(t)
+	user := createUser(t, pool)
+	folderRepo := NewFolderRepo(pool.ReadDB, pool.WriteDB)
+	noteRepo := NewNoteRepo(pool.ReadDB, pool.WriteDB)
+	ctx := context.Background()
+
+	// Root note.
+	_, err := noteRepo.Create(ctx, &model.Note{
+		UserID: user.ID, Title: "Root", Slug: "root",
+		DiskPath: "1/root.md", ContentHash: "h1", Tags: []string{},
+	})
+	require.NoError(t, err)
+
+	// Note in folder.
+	folder, err := folderRepo.Create(ctx, user.ID, nil, "Folder", "1/folder")
+	require.NoError(t, err)
+	_, err = noteRepo.Create(ctx, &model.Note{
+		UserID: user.ID, FolderID: &folder.ID, Title: "In Folder", Slug: "in-folder",
+		DiskPath: "1/folder/in-folder.md", ContentHash: "h2", Tags: []string{},
+	})
+	require.NoError(t, err)
+
+	all, err := noteRepo.ListAll(ctx, user.ID)
+	require.NoError(t, err)
+	assert.Len(t, all, 2)
+
+	// Verify folder_id is populated correctly.
+	byTitle := make(map[string]*int64)
+	for _, item := range all {
+		byTitle[item.Title] = item.FolderID
+	}
+	assert.Nil(t, byTitle["Root"])
+	require.NotNil(t, byTitle["In Folder"])
+	assert.Equal(t, folder.ID, *byTitle["In Folder"])
+}
+
+func TestNoteRepo_ListAll_Empty(t *testing.T) {
+	pool := openTestDB(t)
+	user := createUser(t, pool)
+	noteRepo := NewNoteRepo(pool.ReadDB, pool.WriteDB)
+
+	all, err := noteRepo.ListAll(context.Background(), user.ID)
+	require.NoError(t, err)
+	assert.Empty(t, all)
+}

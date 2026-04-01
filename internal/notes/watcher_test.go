@@ -30,7 +30,7 @@ func TestWatch_DetectsFileChange(t *testing.T) {
 	noteRepo := sqlite.NewNoteRepo(pool.ReadDB, pool.WriteDB)
 	searchRepo := sqlite.NewSearchRepo(pool.ReadDB, pool.WriteDB)
 
-	svc := notes.NewService(noteRepo, folderRepo, searchRepo, fs)
+	svc := notes.NewService(noteRepo, folderRepo, searchRepo, sqlite.NewJournalRepo(pool.ReadDB, pool.WriteDB), fs)
 
 	// Create a user and a note.
 	user, err := userRepo.Create(context.Background(), "alice", "hash")
@@ -81,7 +81,7 @@ func TestWatch_NoNotifyWhenUnchanged(t *testing.T) {
 	noteRepo := sqlite.NewNoteRepo(pool.ReadDB, pool.WriteDB)
 	searchRepo := sqlite.NewSearchRepo(pool.ReadDB, pool.WriteDB)
 
-	svc := notes.NewService(noteRepo, folderRepo, searchRepo, fs)
+	svc := notes.NewService(noteRepo, folderRepo, searchRepo, sqlite.NewJournalRepo(pool.ReadDB, pool.WriteDB), fs)
 
 	user, err := userRepo.Create(context.Background(), "bob", "hash")
 	require.NoError(t, err)
@@ -122,7 +122,7 @@ func TestWatch_StopsOnContextCancel(t *testing.T) {
 	noteRepo := sqlite.NewNoteRepo(pool.ReadDB, pool.WriteDB)
 	searchRepo := sqlite.NewSearchRepo(pool.ReadDB, pool.WriteDB)
 
-	svc := notes.NewService(noteRepo, folderRepo, searchRepo, fs)
+	svc := notes.NewService(noteRepo, folderRepo, searchRepo, sqlite.NewJournalRepo(pool.ReadDB, pool.WriteDB), fs)
 	h := hub.New()
 
 	ctx, cancel := context.WithCancel(context.Background())

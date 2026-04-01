@@ -53,7 +53,7 @@ func newTestClient(t *testing.T) *testClient {
 	apiTokenRepo := sqlite.NewAPITokenRepo(pool.ReadDB, pool.WriteDB)
 
 	authSvc := auth.NewService(userRepo, sessionRepo, true)
-	notesSvc := notes.NewService(noteRepo, folderRepo, searchRepo, fs)
+	notesSvc := notes.NewService(noteRepo, folderRepo, searchRepo, sqlite.NewJournalRepo(pool.ReadDB, pool.WriteDB), fs)
 	rateLimiter := security.NewAuthRateLimiter(nil)
 
 	tmpl, err := template.ParseFS(thornotes.TemplatesFS, "web/templates/*.html")
@@ -875,15 +875,25 @@ func TestHandler_ListRoot_Empty(t *testing.T) {
 	c := newTestClient(t)
 	c.registerAndLogin(t)
 
-	// No notes created — should return empty array.
+	// Registration creates a Getting Started note; delete it so root is empty.
+	rootResp := c.do(t, http.MethodGet, "/api/v1/notes/root", nil)
+	var items []map[string]interface{}
+	require.NoError(t, json.NewDecoder(rootResp.Body).Decode(&items))
+	rootResp.Body.Close()
+	for _, item := range items {
+		id := int64(item["id"].(float64))
+		delResp := c.do(t, http.MethodDelete, "/api/v1/notes/"+i64str(id), nil)
+		delResp.Body.Close()
+	}
+
 	resp := c.do(t, http.MethodGet, "/api/v1/notes/root", nil)
 	defer resp.Body.Close()
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
-	var items []interface{}
-	require.NoError(t, json.NewDecoder(resp.Body).Decode(&items))
-	assert.NotNil(t, items)
-	assert.Empty(t, items)
+	var empty []interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&empty))
+	assert.NotNil(t, empty)
+	assert.Empty(t, empty)
 }
 
 func TestHandler_Search_WithTag(t *testing.T) {
@@ -968,6 +978,201 @@ func TestHandler_ListFolderNotes_DBError(t *testing.T) {
 	c.pool.ReadDB.Close()
 
 	resp := c.do(t, http.MethodGet, "/api/v1/folders/1/notes", nil)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
+}
+
+// ─── Journal handler tests ────────────────────────────────────────────────────
+
+func TestHandler_CreateJournal(t *testing.T) {
+	c := newTestClient(t)
+	c.registerAndLogin(t)
+
+	resp := c.do(t, http.MethodPost, "/api/v1/journals", map[string]interface{}{
+		"name": "Personal",
+	})
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusCreated, resp.StatusCode)
+
+	var j map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&j))
+	assert.Equal(t, "Personal", j["name"])
+	assert.NotZero(t, j["id"])
+}
+
+func TestHandler_CreateJournal_BadJSON(t *testing.T) {
+	c := newTestClient(t)
+	c.registerAndLogin(t)
+
+	req, _ := http.NewRequest(http.MethodPost, c.server.URL+"/api/v1/journals", bytes.NewReader([]byte("{bad")))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-CSRF-Token", c.csrfToken)
+	for _, cookie := range c.cookies {
+		req.AddCookie(cookie)
+	}
+	resp, err := c.httpClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+}
+
+func TestHandler_ListJournals_Empty(t *testing.T) {
+	c := newTestClient(t)
+	c.registerAndLogin(t)
+
+	resp := c.do(t, http.MethodGet, "/api/v1/journals", nil)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var journals []interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&journals))
+	assert.NotNil(t, journals)
+	assert.Empty(t, journals)
+}
+
+func TestHandler_ListJournals_AfterCreate(t *testing.T) {
+	c := newTestClient(t)
+	c.registerAndLogin(t)
+
+	createResp := c.do(t, http.MethodPost, "/api/v1/journals", map[string]interface{}{"name": "Work"})
+	createResp.Body.Close()
+	require.Equal(t, http.StatusCreated, createResp.StatusCode)
+
+	resp := c.do(t, http.MethodGet, "/api/v1/journals", nil)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var journals []interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&journals))
+	assert.Len(t, journals, 1)
+}
+
+func TestHandler_DeleteJournal(t *testing.T) {
+	c := newTestClient(t)
+	c.registerAndLogin(t)
+
+	createResp := c.do(t, http.MethodPost, "/api/v1/journals", map[string]interface{}{"name": "Temp"})
+	var j map[string]interface{}
+	require.NoError(t, json.NewDecoder(createResp.Body).Decode(&j))
+	createResp.Body.Close()
+
+	id := int64(j["id"].(float64))
+	delResp := c.do(t, http.MethodDelete, "/api/v1/journals/"+i64str(id), nil)
+	defer delResp.Body.Close()
+	assert.Equal(t, http.StatusNoContent, delResp.StatusCode)
+}
+
+func TestHandler_DeleteJournal_InvalidID(t *testing.T) {
+	c := newTestClient(t)
+	c.registerAndLogin(t)
+
+	resp := c.do(t, http.MethodDelete, "/api/v1/journals/notanid", nil)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+}
+
+func TestHandler_DeleteJournal_NotFound(t *testing.T) {
+	c := newTestClient(t)
+	c.registerAndLogin(t)
+
+	resp := c.do(t, http.MethodDelete, "/api/v1/journals/99999", nil)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+}
+
+func TestHandler_JournalToday(t *testing.T) {
+	c := newTestClient(t)
+	c.registerAndLogin(t)
+
+	createResp := c.do(t, http.MethodPost, "/api/v1/journals", map[string]interface{}{"name": "Daily"})
+	var j map[string]interface{}
+	require.NoError(t, json.NewDecoder(createResp.Body).Decode(&j))
+	createResp.Body.Close()
+
+	id := int64(j["id"].(float64))
+	resp := c.do(t, http.MethodGet, "/api/v1/journals/"+i64str(id)+"/today", nil)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var note map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&note))
+	assert.NotZero(t, note["id"])
+
+	// Idempotent — second call returns same note.
+	resp2 := c.do(t, http.MethodGet, "/api/v1/journals/"+i64str(id)+"/today", nil)
+	defer resp2.Body.Close()
+	assert.Equal(t, http.StatusOK, resp2.StatusCode)
+	var note2 map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp2.Body).Decode(&note2))
+	assert.Equal(t, note["id"], note2["id"])
+}
+
+func TestHandler_JournalToday_InvalidID(t *testing.T) {
+	c := newTestClient(t)
+	c.registerAndLogin(t)
+
+	resp := c.do(t, http.MethodGet, "/api/v1/journals/notanid/today", nil)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+}
+
+func TestHandler_JournalToday_NotFound(t *testing.T) {
+	c := newTestClient(t)
+	c.registerAndLogin(t)
+
+	resp := c.do(t, http.MethodGet, "/api/v1/journals/99999/today", nil)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+}
+
+// ─── ListAll handler tests ────────────────────────────────────────────────────
+
+func TestHandler_ListAll_AcrossFolders(t *testing.T) {
+	c := newTestClient(t)
+	c.registerAndLogin(t)
+
+	// Create a root note and a folder note.
+	createNoteHelper(t, c, "Root Note A")
+
+	folderResp := c.do(t, http.MethodPost, "/api/v1/folders", map[string]interface{}{"name": "MyFolder"})
+	var folder map[string]interface{}
+	require.NoError(t, json.NewDecoder(folderResp.Body).Decode(&folder))
+	folderResp.Body.Close()
+	folderID := int64(folder["id"].(float64))
+
+	folderNoteResp := c.do(t, http.MethodPost, "/api/v1/notes", map[string]interface{}{
+		"title":     "Folder Note B",
+		"folder_id": folderID,
+	})
+	folderNoteResp.Body.Close()
+
+	resp := c.do(t, http.MethodGet, "/api/v1/notes/all", nil)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var items []map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&items))
+
+	// Should contain the Getting Started note + Root Note A + Folder Note B.
+	assert.GreaterOrEqual(t, len(items), 2)
+
+	titles := make(map[string]bool)
+	for _, item := range items {
+		titles[item["title"].(string)] = true
+		// folder_id field must be present (may be null).
+		_, hasFolderID := item["folder_id"]
+		assert.True(t, hasFolderID, "folder_id field should be present")
+	}
+	assert.True(t, titles["Root Note A"])
+	assert.True(t, titles["Folder Note B"])
+}
+
+func TestHandler_ListAll_DBError(t *testing.T) {
+	c := newTestClient(t)
+	c.registerAndLogin(t)
+	c.pool.ReadDB.Close()
+
+	resp := c.do(t, http.MethodGet, "/api/v1/notes/all", nil)
 	defer resp.Body.Close()
 	assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
 }

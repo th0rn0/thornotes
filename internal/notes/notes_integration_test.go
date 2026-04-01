@@ -47,7 +47,7 @@ func newTestStackFull(t *testing.T) *serviceStack {
 	user, err := userRepo.Create(ctx, "testuser", "$2a$12$fakehash0000000000000000000000000000000000000000000000")
 	require.NoError(t, err)
 
-	svc := notes.NewService(noteRepo, folderRepo, searchRepo, fs)
+	svc := notes.NewService(noteRepo, folderRepo, searchRepo, sqlite_repo.NewJournalRepo(pool.ReadDB, pool.WriteDB), fs)
 	return &serviceStack{svc: svc, userID: user.ID, pool: pool, notesDir: fsDir}
 }
 
@@ -71,7 +71,7 @@ func newTestStack(t *testing.T) (svc *notes.Service, userID int64) {
 	user, err := userRepo.Create(ctx, "testuser", "$2a$12$fakehash0000000000000000000000000000000000000000000000")
 	require.NoError(t, err)
 
-	svc = notes.NewService(noteRepo, folderRepo, searchRepo, fs)
+	svc = notes.NewService(noteRepo, folderRepo, searchRepo, sqlite_repo.NewJournalRepo(pool.ReadDB, pool.WriteDB), fs)
 	return svc, user.ID
 }
 
@@ -460,7 +460,7 @@ func TestService_Reconcile(t *testing.T) {
 	user, err := userRepo.Create(ctx, "testuser2", "$2a$12$fakehash0000000000000000000000000000000000000000000000")
 	require.NoError(t, err)
 
-	svc := notes.NewService(noteRepo, folderRepo, searchRepo, fs)
+	svc := notes.NewService(noteRepo, folderRepo, searchRepo, sqlite_repo.NewJournalRepo(pool.ReadDB, pool.WriteDB), fs)
 
 	note, err := svc.CreateNote(ctx, user.ID, nil, "Reconcile Test", nil)
 	require.NoError(t, err)
@@ -500,7 +500,7 @@ func TestService_Reconcile_MissingFile(t *testing.T) {
 	user, err := userRepo.Create(ctx, "testuser3", "$2a$12$fakehash000000000000000000000000000000000000000000000")
 	require.NoError(t, err)
 
-	svc := notes.NewService(noteRepo, folderRepo, searchRepo, fs)
+	svc := notes.NewService(noteRepo, folderRepo, searchRepo, sqlite_repo.NewJournalRepo(pool.ReadDB, pool.WriteDB), fs)
 
 	note, err := svc.CreateNote(ctx, user.ID, nil, "Note Missing File", nil)
 	require.NoError(t, err)
@@ -629,4 +629,198 @@ func TestService_SetShareToken_DbError(t *testing.T) {
 
 	_, err = st.svc.SetShareToken(ctx, st.userID, note.ID, false)
 	require.Error(t, err)
+}
+
+// ─── Journal tests ─────────────────────────────────────────────────────────────
+
+func TestService_CreateJournal_Simple(t *testing.T) {
+	svc, userID := newTestStack(t)
+	ctx := context.Background()
+
+	j, err := svc.CreateJournal(ctx, userID, "Personal")
+	require.NoError(t, err)
+	assert.NotZero(t, j.ID)
+	assert.Equal(t, "Personal", j.Name)
+	assert.Equal(t, userID, j.UserID)
+}
+
+func TestService_CreateJournal_EmptyName(t *testing.T) {
+	svc, userID := newTestStack(t)
+	ctx := context.Background()
+
+	_, err := svc.CreateJournal(ctx, userID, "")
+	require.Error(t, err)
+	var appErr *apperror.AppError
+	require.ErrorAs(t, err, &appErr)
+	assert.Equal(t, 400, appErr.Code)
+}
+
+func TestService_CreateJournal_DuplicateName(t *testing.T) {
+	svc, userID := newTestStack(t)
+	ctx := context.Background()
+
+	_, err := svc.CreateJournal(ctx, userID, "Work")
+	require.NoError(t, err)
+
+	// Second create with same name should fail on journal record (folder already exists).
+	_, err = svc.CreateJournal(ctx, userID, "Work")
+	require.Error(t, err)
+}
+
+func TestService_ListJournals_Empty(t *testing.T) {
+	svc, userID := newTestStack(t)
+	ctx := context.Background()
+
+	journals, err := svc.ListJournals(ctx, userID)
+	require.NoError(t, err)
+	assert.Empty(t, journals)
+}
+
+func TestService_ListJournals_Multiple(t *testing.T) {
+	svc, userID := newTestStack(t)
+	ctx := context.Background()
+
+	_, err := svc.CreateJournal(ctx, userID, "Personal")
+	require.NoError(t, err)
+	_, err = svc.CreateJournal(ctx, userID, "Work")
+	require.NoError(t, err)
+
+	journals, err := svc.ListJournals(ctx, userID)
+	require.NoError(t, err)
+	assert.Len(t, journals, 2)
+}
+
+func TestService_DeleteJournal(t *testing.T) {
+	svc, userID := newTestStack(t)
+	ctx := context.Background()
+
+	j, err := svc.CreateJournal(ctx, userID, "Temp")
+	require.NoError(t, err)
+
+	err = svc.DeleteJournal(ctx, userID, j.ID)
+	require.NoError(t, err)
+
+	journals, err := svc.ListJournals(ctx, userID)
+	require.NoError(t, err)
+	assert.Empty(t, journals)
+}
+
+func TestService_DeleteJournal_NotFound(t *testing.T) {
+	svc, userID := newTestStack(t)
+	ctx := context.Background()
+
+	err := svc.DeleteJournal(ctx, userID, 99999)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, apperror.ErrNotFound)
+}
+
+func TestService_TodayEntry_CreateAndRetrieve(t *testing.T) {
+	svc, userID := newTestStack(t)
+	ctx := context.Background()
+
+	j, err := svc.CreateJournal(ctx, userID, "Daily")
+	require.NoError(t, err)
+
+	// First call creates the entry.
+	note, err := svc.TodayEntry(ctx, userID, j.ID)
+	require.NoError(t, err)
+	assert.NotZero(t, note.ID)
+	assert.Contains(t, note.Tags, "journal entry")
+	assert.Contains(t, note.Tags, "Daily")
+
+	// Second call returns the same note.
+	note2, err := svc.TodayEntry(ctx, userID, j.ID)
+	require.NoError(t, err)
+	assert.Equal(t, note.ID, note2.ID)
+}
+
+func TestService_TodayEntry_NotFoundJournal(t *testing.T) {
+	svc, userID := newTestStack(t)
+	ctx := context.Background()
+
+	_, err := svc.TodayEntry(ctx, userID, 99999)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, apperror.ErrNotFound)
+}
+
+// ─── Getting Started tests ────────────────────────────────────────────────────
+
+func TestService_CreateGettingStartedNote_CreatesNote(t *testing.T) {
+	svc, userID := newTestStack(t)
+	ctx := context.Background()
+
+	svc.CreateGettingStartedNote(ctx, userID)
+
+	// Note should exist in root with correct title.
+	items, err := svc.ListNotes(ctx, userID, nil)
+	require.NoError(t, err)
+
+	found := false
+	for _, item := range items {
+		if item.Title == "Getting Started" {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "Getting Started note should exist in root")
+}
+
+func TestService_CreateGettingStartedNote_Idempotent(t *testing.T) {
+	svc, userID := newTestStack(t)
+	ctx := context.Background()
+
+	// Call twice — should not error or create duplicates.
+	svc.CreateGettingStartedNote(ctx, userID)
+	svc.CreateGettingStartedNote(ctx, userID)
+
+	items, err := svc.ListNotes(ctx, userID, nil)
+	require.NoError(t, err)
+
+	count := 0
+	for _, item := range items {
+		if item.Title == "Getting Started" {
+			count++
+		}
+	}
+	assert.Equal(t, 1, count, "should only create one Getting Started note")
+}
+
+// ─── ListAllNotes tests ───────────────────────────────────────────────────────
+
+func TestService_ListAllNotes_AcrossFolders(t *testing.T) {
+	svc, userID := newTestStack(t)
+	ctx := context.Background()
+
+	// Root note.
+	_, err := svc.CreateNote(ctx, userID, nil, "Root Note", nil)
+	require.NoError(t, err)
+
+	// Note in a folder.
+	folder, err := svc.CreateFolder(ctx, userID, nil, "MyFolder")
+	require.NoError(t, err)
+	folderID := folder.ID
+	_, err = svc.CreateNote(ctx, userID, &folderID, "Folder Note", nil)
+	require.NoError(t, err)
+
+	all, err := svc.ListAllNotes(ctx, userID)
+	require.NoError(t, err)
+	assert.Len(t, all, 2)
+
+	// folder_id should be set correctly.
+	titles := make(map[string]*int64)
+	for _, n := range all {
+		titles[n.Title] = n.FolderID
+	}
+	assert.Nil(t, titles["Root Note"])
+	require.NotNil(t, titles["Folder Note"])
+	assert.Equal(t, folderID, *titles["Folder Note"])
+}
+
+func TestService_ListAllNotes_Empty(t *testing.T) {
+	svc, userID := newTestStack(t)
+	ctx := context.Background()
+
+	all, err := svc.ListAllNotes(ctx, userID)
+	require.NoError(t, err)
+	assert.Empty(t, all)
 }

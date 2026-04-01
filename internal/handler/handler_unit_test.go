@@ -49,7 +49,7 @@ func TestWriteError_GenericError(t *testing.T) {
 // ─── Auth handler unit tests ──────────────────────────────────────────────────
 
 func TestMe_NoUserInContext(t *testing.T) {
-	h := NewAuthHandler(nil)
+	h := NewAuthHandler(nil, nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", nil)
 	rr := httptest.NewRecorder()
 	h.Me(rr, req)
@@ -57,7 +57,7 @@ func TestMe_NoUserInContext(t *testing.T) {
 }
 
 func TestCSRF_NoSessionCookie_Handler(t *testing.T) {
-	h := NewAuthHandler(nil)
+	h := NewAuthHandler(nil, nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/csrf", nil)
 	rr := httptest.NewRecorder()
 	h.CSRF(rr, req)
