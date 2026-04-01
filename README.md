@@ -126,7 +126,7 @@ All options are available as environment variables and CLI flags.
 | `THORNOTES_DB_NAME` | `--db-name` | `thornotes` | MySQL/MariaDB database name (mysql driver only) |
 | `THORNOTES_DB_USER` | `--db-user` | _(none)_ | MySQL/MariaDB username (mysql driver only) |
 | `THORNOTES_DB_PASSWORD` | `--db-password` | _(none)_ | MySQL/MariaDB password (mysql driver only) |
-| `THORNOTES_NOTES_ROOT` | `--notes-root` | `notes` | Root directory for `.md` files |
+| `THORNOTES_NOTES_ROOT` | `--notes-root` | `notes` | Root directory for `.md` files. Verified writable at startup — thornotes exits early if the directory is read-only or inaccessible. |
 | `THORNOTES_ALLOW_REGISTRATION` | `--allow-registration` | `true` | Allow new user sign-up |
 | `THORNOTES_SECURE_COOKIES` | `--secure-cookies` | `false` | Set `Secure` flag on session cookie — enable when serving over HTTPS |
 | `THORNOTES_TRUSTED_PROXY` | `--trusted-proxy` | _(none)_ | CIDR of trusted reverse proxy (e.g. `10.0.0.0/8`) — enables `X-Forwarded-For` for rate limiting |
@@ -156,13 +156,25 @@ server {
 
 ## MCP integration
 
-thornotes exposes a Model Context Protocol server at `POST /mcp` so AI assistants can read and write your notes.
+thornotes implements the [MCP Streamable HTTP transport (2025-03-26)](https://spec.modelcontextprotocol.io/specification/2025-03-26/basic/transports/#streamable-http) at `/mcp` (`POST`, `GET`, `DELETE`). AI assistants can read and write your notes as MCP tools and resources.
 
 1. Open the **Account** modal in the app
 2. Create an API token
 3. Copy the connection snippet and paste it into your AI assistant's MCP config
 
-Available MCP tools: `list_notes`, `get_note`, `search_notes`, `create_note`, `update_note`, `list_folders`
+**Transport endpoints:**
+
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| `POST` | `/mcp` | Client → server messages (requests + notifications) |
+| `GET` | `/mcp` | Server → client SSE stream (keepalive; thornotes has no server-initiated messages) |
+| `DELETE` | `/mcp` | Terminate a session |
+
+All three endpoints require `Authorization: Bearer <token>`.
+
+**Available tools:** `list_notes`, `get_note`, `search_notes`, `create_note`, `update_note`, `list_folders`
+
+**Available resources:** Every note is exposed as a `note://<id>` resource (MIME type `text/markdown`).
 
 ## File format
 

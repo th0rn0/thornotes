@@ -232,6 +232,11 @@ func (h *MCPHandler) HandleGET(c *gin.Context) {
 	ticker := time.NewTicker(25 * time.Second)
 	defer ticker.Stop()
 
+	// Write an initial SSE comment to flush the response headers to the client
+	// immediately, before blocking on the ticker.
+	c.Writer.WriteHeader(http.StatusOK)
+	c.Writer.Flush()
+
 	c.Stream(func(w io.Writer) bool {
 		select {
 		case <-ctx.Done():
@@ -565,15 +570,6 @@ func (h *MCPHandler) handleResourcesRead(r *http.Request, req rpcRequest, userID
 func writeRPCJSON(w http.ResponseWriter, resp rpcResponse) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
-}
-
-// writeRPCResult and writeRPCError are kept for any callers outside this file.
-func writeRPCResult(w http.ResponseWriter, id json.RawMessage, result any) {
-	writeRPCJSON(w, rpcOK(id, result))
-}
-
-func writeRPCError(w http.ResponseWriter, id json.RawMessage, code int, msg string) {
-	writeRPCJSON(w, rpcErr(id, code, msg))
 }
 
 func toolResult(text string) map[string]any {
