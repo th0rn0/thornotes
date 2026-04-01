@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"html/template"
 	iofs "io/fs"
 	"net/http"
@@ -40,11 +41,12 @@ func main() {
 	var pool *db.Pool
 	switch strings.ToLower(cfg.DBDriver) {
 	case "mysql":
-		if cfg.DBDSN == "" {
-			log.Error().Msg("--db-dsn / THORNOTES_DB_DSN is required when using mysql driver")
+		if cfg.DBUser == "" {
+			log.Error().Msg("--db-user / THORNOTES_DB_USER is required when using mysql driver")
 			os.Exit(1)
 		}
-		pool, err = db.OpenMySQL(cfg.DBDSN)
+		dsn := fmt.Sprintf("%s:%s@tcp(%s)/%s?parseTime=true", cfg.DBUser, cfg.DBPassword, cfg.DBHost, cfg.DBName)
+		pool, err = db.OpenMySQL(dsn)
 	default:
 		pool, err = db.Open(cfg.DBPath)
 	}

@@ -80,7 +80,10 @@ services:
       - thornotes-notes:/data/notes
     environment:
       THORNOTES_DB_DRIVER: "mysql"
-      THORNOTES_DB_DSN: "thornotes:secret@tcp(db:3306)/thornotes?parseTime=true"
+      THORNOTES_DB_HOST: "db:3306"
+      THORNOTES_DB_NAME: "thornotes"
+      THORNOTES_DB_USER: "thornotes"
+      THORNOTES_DB_PASSWORD: "secret"
       THORNOTES_NOTES_ROOT: "/data/notes"
       THORNOTES_ALLOW_REGISTRATION: "true"
     depends_on:
@@ -117,7 +120,10 @@ All options are available as environment variables and CLI flags.
 | `THORNOTES_ADDR` | `--addr` | `:8080` | Listen address |
 | `THORNOTES_DB_DRIVER` | `--db-driver` | `sqlite` | Database driver: `sqlite` or `mysql` |
 | `THORNOTES_DB` | `--db` | `thornotes.db` | SQLite database path (sqlite driver only) |
-| `THORNOTES_DB_DSN` | `--db-dsn` | _(none)_ | MySQL/MariaDB DSN e.g. `user:pass@tcp(host:3306)/dbname?parseTime=true` (mysql driver only) |
+| `THORNOTES_DB_HOST` | `--db-host` | `localhost:3306` | MySQL/MariaDB host:port (mysql driver only) |
+| `THORNOTES_DB_NAME` | `--db-name` | `thornotes` | MySQL/MariaDB database name (mysql driver only) |
+| `THORNOTES_DB_USER` | `--db-user` | _(none)_ | MySQL/MariaDB username (mysql driver only) |
+| `THORNOTES_DB_PASSWORD` | `--db-password` | _(none)_ | MySQL/MariaDB password (mysql driver only) |
 | `THORNOTES_NOTES_ROOT` | `--notes-root` | `notes` | Root directory for `.md` files |
 | `THORNOTES_ALLOW_REGISTRATION` | `--allow-registration` | `true` | Allow new user sign-up |
 | `THORNOTES_SECURE_COOKIES` | `--secure-cookies` | `false` | Set `Secure` flag on session cookie — enable when serving over HTTPS |

@@ -2,6 +2,12 @@
 
 All notable changes to thornotes are documented here.
 
+## [0.12.2.0] - 2026-04-01
+
+### Changed
+- **MariaDB Compose example** — the Docker Compose example now uses `mariadb:11` instead of `mysql:8.0`, with `MARIADB_*` environment variables and the correct `healthcheck.sh` healthcheck.
+- **Database connection config split** — `THORNOTES_DB_DSN` is replaced by four discrete variables: `THORNOTES_DB_HOST` (default `localhost:3306`), `THORNOTES_DB_NAME` (default `thornotes`), `THORNOTES_DB_USER`, and `THORNOTES_DB_PASSWORD`. The DSN is assembled internally. Equivalent CLI flags: `--db-host`, `--db-name`, `--db-user`, `--db-password`.
+
 ## [0.12.1.0] - 2026-04-01
 
 ### Fixed

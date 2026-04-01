@@ -13,7 +13,10 @@ type Config struct {
 	Addr              string
 	DBDriver          string // "sqlite" (default) or "mysql"
 	DBPath            string // SQLite file path (ignored when DBDriver=mysql)
-	DBDSN             string // MySQL DSN (used when DBDriver=mysql)
+	DBHost            string // MySQL/MariaDB host (used when DBDriver=mysql)
+	DBName            string // MySQL/MariaDB database name (used when DBDriver=mysql)
+	DBUser            string // MySQL/MariaDB username (used when DBDriver=mysql)
+	DBPassword        string // MySQL/MariaDB password (used when DBDriver=mysql)
 	NotesRoot         string
 	AllowRegistration bool
 	SecureCookies     bool       // set true when serving over HTTPS
@@ -30,7 +33,10 @@ func Parse() (*Config, error) {
 	flag.StringVar(&cfg.Addr, "addr", envOr("THORNOTES_ADDR", ":8080"), "listen address")
 	flag.StringVar(&cfg.DBDriver, "db-driver", envOr("THORNOTES_DB_DRIVER", "sqlite"), "database driver: sqlite or mysql")
 	flag.StringVar(&cfg.DBPath, "db", envOr("THORNOTES_DB", "thornotes.db"), "SQLite database path (sqlite driver only)")
-	flag.StringVar(&cfg.DBDSN, "db-dsn", envOr("THORNOTES_DB_DSN", ""), "MySQL DSN e.g. user:pass@tcp(host:3306)/dbname?parseTime=true (mysql driver only)")
+	flag.StringVar(&cfg.DBHost, "db-host", envOr("THORNOTES_DB_HOST", "localhost:3306"), "MySQL/MariaDB host:port (mysql driver only)")
+	flag.StringVar(&cfg.DBName, "db-name", envOr("THORNOTES_DB_NAME", "thornotes"), "MySQL/MariaDB database name (mysql driver only)")
+	flag.StringVar(&cfg.DBUser, "db-user", envOr("THORNOTES_DB_USER", ""), "MySQL/MariaDB username (mysql driver only)")
+	flag.StringVar(&cfg.DBPassword, "db-password", envOr("THORNOTES_DB_PASSWORD", ""), "MySQL/MariaDB password (mysql driver only)")
 	flag.StringVar(&cfg.NotesRoot, "notes-root", envOr("THORNOTES_NOTES_ROOT", "notes"), "root directory for note files")
 	flag.BoolVar(&cfg.AllowRegistration, "allow-registration", envBool("THORNOTES_ALLOW_REGISTRATION", true), "allow new user registration")
 	flag.BoolVar(&cfg.SecureCookies, "secure-cookies", envBool("THORNOTES_SECURE_COOKIES", false), "set Secure flag on session cookie (enable when serving over HTTPS)")
