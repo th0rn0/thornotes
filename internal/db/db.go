@@ -3,6 +3,7 @@ package db
 import (
 	"database/sql"
 	"embed"
+	"errors"
 	"fmt"
 
 	"github.com/golang-migrate/migrate/v4"
@@ -80,6 +81,20 @@ func (p *Pool) migrate() error {
 	}
 
 	if err := m.Up(); err != nil && err != migrate.ErrNoChange {
+		var dirtyErr migrate.ErrDirty
+		if errors.As(err, &dirtyErr) {
+			// A previous run was interrupted and left the schema in a dirty state.
+			// Roll back to the last clean version and retry. All up migrations use
+			// CREATE TABLE IF NOT EXISTS so re-running a partially applied migration
+			// is safe.
+			if ferr := m.Force(dirtyErr.Version - 1); ferr != nil {
+				return fmt.Errorf("migrate up: force version after dirty state: %w", ferr)
+			}
+			if err := m.Up(); err != nil && err != migrate.ErrNoChange {
+				return fmt.Errorf("migrate up: %w", err)
+			}
+			return nil
+		}
 		return fmt.Errorf("migrate up: %w", err)
 	}
 

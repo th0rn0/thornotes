@@ -2,6 +2,11 @@
 
 All notable changes to thornotes are documented here.
 
+## [0.13.1.0] - 2026-04-01
+
+### Fixed
+- **Dirty migration state self-heals on restart** — if a previous container start was interrupted mid-migration (e.g. the database was not fully ready despite the healthcheck), `golang-migrate` marks the schema version as dirty and refuses to start on the next run. thornotes now detects `ErrDirty`, forces back to the last clean version, and retries the failed migration automatically. All `up` migrations use `CREATE TABLE IF NOT EXISTS` so re-running a partially applied migration is safe. Affects both MySQL/MariaDB and SQLite drivers.
+
 ## [0.13.0.0] - 2026-04-01
 
 ### Added
