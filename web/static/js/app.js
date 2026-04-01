@@ -5,8 +5,11 @@
 (function initTheme() {
   const saved = localStorage.getItem('theme');
   const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-  if (saved === 'dark' || (!saved && prefersDark)) {
+  const isDark = saved === 'dark' || (!saved && prefersDark);
+  if (isDark) {
     document.body.classList.add('dark');
+    const hljsTheme = document.getElementById('hljs-theme');
+    if (hljsTheme) hljsTheme.href = '/static/css/highlight-github-dark.min.css';
   }
 })();
 
@@ -282,6 +285,13 @@ async function openNote(noteId) {
         'link', 'image', '|', 'preview', 'side-by-side', 'fullscreen', '|', 'guide'],
       spellChecker: false,
       status: false,
+      previewRender(text) {
+        const html = marked.parse(text);
+        const tmp = document.createElement('div');
+        tmp.innerHTML = html;
+        tmp.querySelectorAll('pre code').forEach(el => hljs.highlightElement(el));
+        return tmp.innerHTML;
+      },
     });
     editor.codemirror.on('change', onEditorChange);
   }
@@ -490,6 +500,12 @@ async function api(method, path, body) {
 function toggleDarkMode(dark) {
   document.body.classList.toggle('dark', dark);
   localStorage.setItem('theme', dark ? 'dark' : 'light');
+  const hljsTheme = document.getElementById('hljs-theme');
+  if (hljsTheme) {
+    hljsTheme.href = dark
+      ? '/static/css/highlight-github-dark.min.css'
+      : '/static/css/highlight-github.min.css';
+  }
 }
 
 // ── Account / API tokens ───────────────────────────────────────────────────

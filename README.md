@@ -2,9 +2,14 @@
 
 A self-hosted Markdown note-taking app with file-as-canonical storage. Every note is a real `.md` file on disk. The database is an index, not the source of truth.
 
+![thornotes editor — light mode](docs/screenshot-editor.png)
+
+![thornotes syntax highlighting — dark mode](docs/screenshot-syntax-dark.png)
+
 ## Features
 
 - Write notes in Markdown with a live preview editor (EasyMDE)
+- Syntax highlighting for fenced code blocks — ` ```go `, ` ```yaml `, ` ```json `, and [180+ languages](https://highlightjs.org/)
 - Folder tree with lazy-loaded notes
 - Full-text search with snippet highlighting
 - Tags

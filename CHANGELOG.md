@@ -2,6 +2,13 @@
 
 All notable changes to thornotes are documented here.
 
+## [0.4.0.0] - 2026-04-01
+
+### Added
+- Syntax highlighting for fenced code blocks in the editor preview and shared note pages — specify the language after the opening fence (e.g. ` ```go `, ` ```yaml `, ` ```json `) and the preview renders with full colour highlighting
+- 180+ languages supported via [highlight.js](https://highlightjs.org/) (self-hosted, no CDN dependency)
+- Highlight theme automatically follows the app's dark/light mode: GitHub light in light mode, GitHub Dark in dark mode
+
 ## [0.3.0.0] - 2026-03-30
 
 ### Added
