@@ -2,6 +2,15 @@
 
 All notable changes to thornotes are documented here.
 
+## [0.8.0.0] - 2026-04-01
+
+### Changed
+- **zerolog replaces `log/slog`** — structured JSON logging (zero-alloc) via `github.com/rs/zerolog`; human-readable console output in development
+- **gin replaces stdlib `net/http` mux** — `github.com/gin-gonic/gin` adds panic recovery, per-request access logging (method/path/status/latency/IP), and cleaner route groups
+- All handler signatures converted from `(w http.ResponseWriter, r *http.Request)` to `func(c *gin.Context)`
+- All middleware (session, bearer, CSRF, rate-limiter, secure headers) converted to `gin.HandlerFunc`
+- `SessionMiddleware` and `BearerMiddleware` now return `gin.HandlerFunc` instead of wrapping `http.Handler`
+
 ## [0.7.0.0] - 2026-04-01
 
 ### Added

@@ -2,9 +2,11 @@ package router
 
 import (
 	"html/template"
-	"log/slog"
 	"net/http"
+	"time"
 
+	"github.com/gin-gonic/gin"
+	"github.com/rs/zerolog/log"
 	"github.com/th0rn0/thornotes/internal/auth"
 	"github.com/th0rn0/thornotes/internal/handler"
 	"github.com/th0rn0/thornotes/internal/hub"
@@ -24,7 +26,15 @@ func New(
 	h *hub.Hub,
 	secureCookies bool,
 ) http.Handler {
-	mux := http.NewServeMux()
+	gin.SetMode(gin.ReleaseMode)
+	r := gin.New()
+	r.Use(gin.Recovery())
+	r.Use(zerologAccessMiddleware())
+	r.Use(security.SecureHeadersMiddleware())
+
+	r.NoRoute(func(c *gin.Context) {
+		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+	})
 
 	authH := handler.NewAuthHandler(authSvc, notesSvc, secureCookies)
 	foldersH := handler.NewFoldersHandler(notesSvc)
@@ -36,66 +46,95 @@ func New(
 	journalsH := handler.NewJournalsHandler(notesSvc)
 
 	bearerMW := auth.BearerMiddleware(apiTokenRepo, userRepo)
+	sessionMW := authSvc.SessionMiddleware()
+	csrfMW := security.CSRFGinMiddleware()
+	rateMW := rateLimiter.GinMiddleware()
 
-	// Static files — the embedded FS has paths like "web/static/js/app.js".
-	// Strip "/static/" prefix and serve from "web/static/" subtree.
-	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(staticFS)))
-	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/" {
-			http.NotFound(w, r)
-			return
-		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		if err := tmpl.ExecuteTemplate(w, "app.html", nil); err != nil {
-			slog.Error("execute app template", "err", err)
+	// Static files.
+	r.StaticFS("/static", staticFS)
+
+	// App shell.
+	r.GET("/", func(c *gin.Context) {
+		c.Header("Content-Type", "text/html; charset=utf-8")
+		if err := tmpl.ExecuteTemplate(c.Writer, "app.html", nil); err != nil {
+			log.Error().Err(err).Msg("execute app template")
 		}
 	})
 
 	// Public shared note view.
-	mux.HandleFunc("GET /s/{token}", shareH.View)
+	r.GET("/s/:token", shareH.View)
 
-	// Auth endpoints (rate-limited, no session required for login/register).
-	mux.Handle("POST /api/v1/auth/register", rateLimiter.Middleware(http.HandlerFunc(authH.Register)))
-	mux.Handle("POST /api/v1/auth/login", rateLimiter.Middleware(http.HandlerFunc(authH.Login)))
+	// Auth endpoints.
+	authGroup := r.Group("/api/v1/auth")
+	{
+		authGroup.POST("/register", rateMW, authH.Register)
+		authGroup.POST("/login", rateMW, authH.Login)
+		authGroup.POST("/logout", sessionMW, authH.Logout)
+		authGroup.GET("/me", sessionMW, authH.Me)
+	}
 
-	// Session-required auth endpoints.
-	mux.Handle("POST /api/v1/auth/logout", authSvc.SessionMiddleware(http.HandlerFunc(authH.Logout)))
-	mux.Handle("GET /api/v1/auth/me", authSvc.SessionMiddleware(http.HandlerFunc(authH.Me)))
-	mux.Handle("GET /api/v1/csrf", authSvc.SessionMiddleware(http.HandlerFunc(authH.CSRF)))
+	// CSRF token.
+	r.GET("/api/v1/csrf", sessionMW, authH.CSRF)
 
-	// Folders (session + CSRF required for mutating methods).
-	mux.Handle("GET /api/v1/folders", authSvc.SessionMiddleware(http.HandlerFunc(foldersH.List)))
-	mux.Handle("POST /api/v1/folders", authSvc.SessionMiddleware(security.CSRFMiddleware(http.HandlerFunc(foldersH.Create))))
-	mux.Handle("PATCH /api/v1/folders/{id}", authSvc.SessionMiddleware(security.CSRFMiddleware(http.HandlerFunc(foldersH.Rename))))
-	mux.Handle("DELETE /api/v1/folders/{id}", authSvc.SessionMiddleware(security.CSRFMiddleware(http.HandlerFunc(foldersH.Delete))))
-	mux.Handle("GET /api/v1/folders/{id}/notes", authSvc.SessionMiddleware(http.HandlerFunc(foldersH.ListNotes)))
+	// Folders.
+	folders := r.Group("/api/v1/folders", sessionMW)
+	{
+		folders.GET("", foldersH.List)
+		folders.POST("", csrfMW, foldersH.Create)
+		folders.PATCH("/:id", csrfMW, foldersH.Rename)
+		folders.DELETE("/:id", csrfMW, foldersH.Delete)
+		folders.GET("/:id/notes", foldersH.ListNotes)
+	}
 
 	// Notes.
-	mux.Handle("POST /api/v1/notes", authSvc.SessionMiddleware(security.CSRFMiddleware(http.HandlerFunc(notesH.Create))))
-	mux.Handle("GET /api/v1/notes", authSvc.SessionMiddleware(http.HandlerFunc(notesH.Search)))
-	mux.Handle("GET /api/v1/notes/root", authSvc.SessionMiddleware(http.HandlerFunc(notesH.ListRoot)))
-	mux.Handle("GET /api/v1/notes/all", authSvc.SessionMiddleware(http.HandlerFunc(notesH.ListAll)))
-	mux.Handle("GET /api/v1/notes/{id}", authSvc.SessionMiddleware(http.HandlerFunc(notesH.Get)))
-	mux.Handle("PATCH /api/v1/notes/{id}", authSvc.SessionMiddleware(security.CSRFMiddleware(http.HandlerFunc(notesH.Patch))))
-	mux.Handle("DELETE /api/v1/notes/{id}", authSvc.SessionMiddleware(security.CSRFMiddleware(http.HandlerFunc(notesH.Delete))))
-	mux.Handle("POST /api/v1/notes/{id}/share", authSvc.SessionMiddleware(security.CSRFMiddleware(http.HandlerFunc(notesH.Share))))
+	notesGroup := r.Group("/api/v1/notes", sessionMW)
+	{
+		notesGroup.POST("", csrfMW, notesH.Create)
+		notesGroup.GET("", notesH.Search)
+		notesGroup.GET("/root", notesH.ListRoot)
+		notesGroup.GET("/all", notesH.ListAll)
+		notesGroup.GET("/:id", notesH.Get)
+		notesGroup.PATCH("/:id", csrfMW, notesH.Patch)
+		notesGroup.DELETE("/:id", csrfMW, notesH.Delete)
+		notesGroup.POST("/:id/share", csrfMW, notesH.Share)
+	}
 
-	// Account — API token management (session + CSRF for mutations).
-	mux.Handle("GET /api/v1/account/tokens", authSvc.SessionMiddleware(http.HandlerFunc(accountH.ListTokens)))
-	mux.Handle("POST /api/v1/account/tokens", authSvc.SessionMiddleware(security.CSRFMiddleware(http.HandlerFunc(accountH.CreateToken))))
-	mux.Handle("DELETE /api/v1/account/tokens/{id}", authSvc.SessionMiddleware(security.CSRFMiddleware(http.HandlerFunc(accountH.DeleteToken))))
+	// Account — API token management.
+	account := r.Group("/api/v1/account", sessionMW)
+	{
+		account.GET("/tokens", accountH.ListTokens)
+		account.POST("/tokens", csrfMW, accountH.CreateToken)
+		account.DELETE("/tokens/:id", csrfMW, accountH.DeleteToken)
+	}
 
 	// Journals.
-	mux.Handle("GET /api/v1/journals", authSvc.SessionMiddleware(http.HandlerFunc(journalsH.List)))
-	mux.Handle("POST /api/v1/journals", authSvc.SessionMiddleware(security.CSRFMiddleware(http.HandlerFunc(journalsH.Create))))
-	mux.Handle("DELETE /api/v1/journals/{id}", authSvc.SessionMiddleware(security.CSRFMiddleware(http.HandlerFunc(journalsH.Delete))))
-	mux.Handle("GET /api/v1/journals/{id}/today", authSvc.SessionMiddleware(http.HandlerFunc(journalsH.Today)))
+	journals := r.Group("/api/v1/journals", sessionMW)
+	{
+		journals.GET("", journalsH.List)
+		journals.POST("", csrfMW, journalsH.Create)
+		journals.DELETE("/:id", csrfMW, journalsH.Delete)
+		journals.GET("/:id/today", journalsH.Today)
+	}
 
-	// Server-Sent Events — session auth, long-lived connection for disk-change notifications.
-	mux.Handle("GET /api/v1/events", authSvc.SessionMiddleware(http.HandlerFunc(eventsH.Stream)))
+	// Server-Sent Events.
+	r.GET("/api/v1/events", sessionMW, eventsH.Stream)
 
 	// MCP — bearer token auth, no CSRF (token-authenticated API).
-	mux.Handle("POST /mcp", bearerMW(http.HandlerFunc(mcpH.Handle)))
+	r.POST("/mcp", bearerMW, mcpH.Handle)
 
-	return security.SecureHeaders(mux)
+	return r
+}
+
+func zerologAccessMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		start := time.Now()
+		c.Next()
+		log.Info().
+			Str("method", c.Request.Method).
+			Str("path", c.Request.URL.Path).
+			Int("status", c.Writer.Status()).
+			Dur("latency", time.Since(start)).
+			Str("ip", c.ClientIP()).
+			Msg("request")
+	}
 }

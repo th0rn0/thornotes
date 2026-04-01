@@ -2,9 +2,8 @@ package handler
 
 import (
 	"net/http"
-	"strconv"
 
-	"github.com/th0rn0/thornotes/internal/auth"
+	"github.com/gin-gonic/gin"
 	"github.com/th0rn0/thornotes/internal/notes"
 )
 
@@ -20,58 +19,56 @@ type createJournalRequest struct {
 	Name string `json:"name"`
 }
 
-func (h *JournalsHandler) List(w http.ResponseWriter, r *http.Request) {
-	user := auth.UserFromContext(r.Context())
-	journals, err := h.svc.ListJournals(r.Context(), user.ID)
+func (h *JournalsHandler) List(c *gin.Context) {
+	user := ginUser(c)
+	journals, err := h.svc.ListJournals(c.Request.Context(), user.ID)
 	if err != nil {
-		writeError(w, err)
+		writeError(c, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, journals)
+	c.JSON(http.StatusOK, journals)
 }
 
-func (h *JournalsHandler) Create(w http.ResponseWriter, r *http.Request) {
-	user := auth.UserFromContext(r.Context())
+func (h *JournalsHandler) Create(c *gin.Context) {
+	user := ginUser(c)
 	var req createJournalRequest
-	if err := readJSON(r, &req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+	if err := readJSON(c, &req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	journal, err := h.svc.CreateJournal(r.Context(), user.ID, req.Name)
+	journal, err := h.svc.CreateJournal(c.Request.Context(), user.ID, req.Name)
 	if err != nil {
-		writeError(w, err)
+		writeError(c, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, journal)
+	c.JSON(http.StatusCreated, journal)
 }
 
-func (h *JournalsHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	user := auth.UserFromContext(r.Context())
-	idStr := r.PathValue("id")
-	id, err := strconv.ParseInt(idStr, 10, 64)
+func (h *JournalsHandler) Delete(c *gin.Context) {
+	user := ginUser(c)
+	id, err := ginParamInt64(c, "id")
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid id"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
 		return
 	}
-	if err := h.svc.DeleteJournal(r.Context(), user.ID, id); err != nil {
-		writeError(w, err)
+	if err := h.svc.DeleteJournal(c.Request.Context(), user.ID, id); err != nil {
+		writeError(c, err)
 		return
 	}
-	w.WriteHeader(http.StatusNoContent)
+	c.Status(http.StatusNoContent)
 }
 
-func (h *JournalsHandler) Today(w http.ResponseWriter, r *http.Request) {
-	user := auth.UserFromContext(r.Context())
-	idStr := r.PathValue("id")
-	id, err := strconv.ParseInt(idStr, 10, 64)
+func (h *JournalsHandler) Today(c *gin.Context) {
+	user := ginUser(c)
+	id, err := ginParamInt64(c, "id")
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid id"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
 		return
 	}
-	note, err := h.svc.TodayEntry(r.Context(), user.ID, id)
+	note, err := h.svc.TodayEntry(c.Request.Context(), user.ID, id)
 	if err != nil {
-		writeError(w, err)
+		writeError(c, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, note)
+	c.JSON(http.StatusOK, note)
 }

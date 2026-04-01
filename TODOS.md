@@ -95,17 +95,6 @@ Max 200,000 chars (~50k tokens). Truncates oldest notes first.
 
 ---
 
-### zerolog logging & gin web server
-**What:** Replace `log/slog` with `zerolog` for structured logging, and replace the stdlib `net/http` mux with `gin`.
-
-**Why:** zerolog is significantly faster for high-throughput structured logging (zero-alloc JSON). gin adds request-level middleware (request ID, panic recovery, access logging) and cleaner route grouping without boilerplate.
-
-**How:** Add `github.com/rs/zerolog` and `github.com/gin-gonic/gin`. Swap handler signatures from `(w http.ResponseWriter, r *http.Request)` to `*gin.Context`. Move route definitions from `internal/router/router.go` into gin route groups. Replace all `slog.Info/Error/Warn` call sites.
-
-**Where:** `internal/router/router.go`, `internal/handler/*.go`, `cmd/thornotes/main.go`
-
----
-
 ### Mobile / PWA
 **What:** EasyMDE is not good on mobile. Evaluate CodeMirror 6 as a replacement.
 Add viewport meta, touch-friendly UI adjustments.

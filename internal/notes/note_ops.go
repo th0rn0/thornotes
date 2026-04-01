@@ -5,8 +5,8 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
-	"log/slog"
 
+	"github.com/rs/zerolog/log"
 	"github.com/th0rn0/thornotes/internal/apperror"
 	"github.com/th0rn0/thornotes/internal/model"
 )
@@ -56,7 +56,7 @@ func (s *Service) CreateNote(ctx context.Context, userID int64, folderID *int64,
 	if err != nil {
 		// Best-effort cleanup of the file if DB insert fails.
 		if cleanupErr := s.fs.Delete(diskPath); cleanupErr != nil {
-			slog.Warn("cleanup file after failed db insert", "path", diskPath, "err", cleanupErr)
+			log.Warn().Err(cleanupErr).Str("path", diskPath).Msg("cleanup file after failed db insert")
 		}
 		return nil, err
 	}

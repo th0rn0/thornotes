@@ -4,9 +4,9 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
-	"log/slog"
 	"path/filepath"
 
+	"github.com/rs/zerolog/log"
 	"github.com/th0rn0/thornotes/internal/model"
 	"github.com/th0rn0/thornotes/internal/repository"
 )
@@ -55,15 +55,15 @@ func (s *Service) Reconcile(ctx context.Context, userID int64) error {
 	for _, rec := range records {
 		fileContent, err := s.fs.Read(rec.DiskPath)
 		if err != nil {
-			slog.Warn("reconcile: note file missing", "disk_path", rec.DiskPath, "id", rec.ID)
+			log.Warn().Str("disk_path", rec.DiskPath).Int64("id", rec.ID).Msg("reconcile: note file missing")
 			continue
 		}
 
 		fileHash := HashContent(fileContent)
 		if fileHash != rec.ContentHash {
-			slog.Info("reconcile: updating stale note", "id", rec.ID, "disk_path", rec.DiskPath)
+			log.Info().Int64("id", rec.ID).Str("disk_path", rec.DiskPath).Msg("reconcile: updating stale note")
 			if err := s.notes.UpdateContent(ctx, userID, rec.ID, fileContent, fileHash, rec.ContentHash); err != nil {
-				slog.Warn("reconcile: update content", "id", rec.ID, "err", err)
+				log.Warn().Err(err).Int64("id", rec.ID).Msg("reconcile: update content")
 			} else {
 				reconciled++
 			}
@@ -71,7 +71,7 @@ func (s *Service) Reconcile(ctx context.Context, userID int64) error {
 	}
 
 	if reconciled > 0 {
-		slog.Info("reconcile: updated notes from disk", "count", reconciled)
+		log.Info().Int("count", reconciled).Msg("reconcile: updated notes from disk")
 	}
 	return nil
 }

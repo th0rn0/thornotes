@@ -3,8 +3,8 @@ package notes
 import (
 	"context"
 	"errors"
-	"log/slog"
 
+	"github.com/rs/zerolog/log"
 	"github.com/th0rn0/thornotes/internal/apperror"
 )
 
@@ -83,18 +83,18 @@ func (s *Service) CreateGettingStartedNote(ctx context.Context, userID int64) {
 		if errors.Is(err, apperror.ErrConflict) {
 			return // already exists, that's fine
 		}
-		slog.Warn("create getting started note", "user_id", userID, "err", err)
+		log.Warn().Err(err).Int64("user_id", userID).Msg("create getting started note")
 		return
 	}
 
 	// Write the content to the newly created note.
 	note, err := s.notes.GetByFolderAndSlug(ctx, userID, nil, "getting-started")
 	if err != nil {
-		slog.Warn("find getting started note after create", "user_id", userID, "err", err)
+		log.Warn().Err(err).Int64("user_id", userID).Msg("find getting started note after create")
 		return
 	}
 
 	if _, err := s.UpdateNoteContent(ctx, userID, note.ID, gettingStartedContent, note.ContentHash); err != nil {
-		slog.Warn("write getting started content", "user_id", userID, "err", err)
+		log.Warn().Err(err).Int64("user_id", userID).Msg("write getting started content")
 	}
 }

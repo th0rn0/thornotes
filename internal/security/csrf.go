@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"net/http"
 	"sync"
+
+	"github.com/gin-gonic/gin"
 )
 
 const csrfTokenBytes = 32
@@ -28,6 +30,7 @@ func GenerateCSRFToken(sessionToken string) (string, error) {
 
 // CSRFMiddleware validates the X-CSRF-Token header against the session's stored token.
 // Must run AFTER SessionMiddleware (needs session cookie to look up token).
+// This version wraps an http.Handler for backward compat with tests.
 func CSRFMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Only mutating methods need CSRF protection.
@@ -62,6 +65,44 @@ func CSRFMiddleware(next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, r)
 	})
+}
+
+// CSRFGinMiddleware validates the X-CSRF-Token header for use with gin.
+// Must run AFTER SessionMiddleware (needs session cookie to look up token).
+func CSRFGinMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// Only mutating methods need CSRF protection.
+		if c.Request.Method == http.MethodGet || c.Request.Method == http.MethodHead || c.Request.Method == http.MethodOptions {
+			c.Next()
+			return
+		}
+
+		cookie, err := c.Cookie("session")
+		if err != nil || cookie == "" {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+			return
+		}
+
+		provided := c.Request.Header.Get("X-CSRF-Token")
+		if provided == "" {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "csrf token required"})
+			return
+		}
+
+		stored, ok := csrfStore.Load(cookie)
+		if !ok {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "csrf token not found"})
+			return
+		}
+
+		storedStr, _ := stored.(string)
+		if subtle.ConstantTimeCompare([]byte(provided), []byte(storedStr)) != 1 {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "invalid csrf token"})
+			return
+		}
+
+		c.Next()
+	}
 }
 
 // InvalidateCSRFToken removes the CSRF token for a session (call on logout).

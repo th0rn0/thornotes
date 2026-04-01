@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/bcrypt"
@@ -239,6 +240,27 @@ func TestGetSession_UnknownToken(t *testing.T) {
 	require.Error(t, err)
 }
 
+// ginTestContext creates a gin.Context backed by an httptest.ResponseRecorder.
+// The returned cancel func should be called to avoid goroutine leaks.
+func ginTestContext(req *http.Request) (*gin.Context, *httptest.ResponseRecorder) {
+	gin.SetMode(gin.TestMode)
+	rr := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rr)
+	c.Request = req
+	return c, rr
+}
+
+// serveGinHandler runs a gin.HandlerFunc as if it were a simple handler under
+// a minimal gin router so that Abort / status propagation works correctly.
+func serveGinHandler(handler gin.HandlerFunc, req *http.Request) *httptest.ResponseRecorder {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.Any("/", handler)
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+	return rr
+}
+
 func TestSessionMiddleware_Valid(t *testing.T) {
 	userRepo := newFakeUserRepo()
 	sessionRepo := newFakeSessionRepo()
@@ -251,17 +273,18 @@ func TestSessionMiddleware_Valid(t *testing.T) {
 	require.NoError(t, err)
 
 	var capturedUser *model.User
-	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		capturedUser = UserFromContext(r.Context())
-		w.WriteHeader(http.StatusOK)
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.Any("/", svc.SessionMiddleware(), func(c *gin.Context) {
+		capturedUser = UserFromContext(c.Request.Context())
+		c.Status(http.StatusOK)
 	})
 
-	handler := svc.SessionMiddleware(next)
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.AddCookie(&http.Cookie{Name: "session", Value: token})
 
 	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
+	r.ServeHTTP(rr, req)
 
 	assert.Equal(t, http.StatusOK, rr.Code)
 	require.NotNil(t, capturedUser)
@@ -270,30 +293,16 @@ func TestSessionMiddleware_Valid(t *testing.T) {
 
 func TestSessionMiddleware_NoCookie(t *testing.T) {
 	svc := NewService(newFakeUserRepo(), newFakeSessionRepo(), true)
-	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})
-
-	handler := svc.SessionMiddleware(next)
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-
+	rr := serveGinHandler(svc.SessionMiddleware(), req)
 	assert.Equal(t, http.StatusUnauthorized, rr.Code)
 }
 
 func TestSessionMiddleware_InvalidSession(t *testing.T) {
 	svc := NewService(newFakeUserRepo(), newFakeSessionRepo(), true)
-	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})
-
-	handler := svc.SessionMiddleware(next)
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.AddCookie(&http.Cookie{Name: "session", Value: "invalid-token"})
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-
+	rr := serveGinHandler(svc.SessionMiddleware(), req)
 	assert.Equal(t, http.StatusUnauthorized, rr.Code)
 }
 
@@ -311,16 +320,9 @@ func TestSessionMiddleware_UserNotFound(t *testing.T) {
 	// Delete the user from the fake repo.
 	delete(userRepo.users, "alice")
 
-	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})
-
-	handler := svc.SessionMiddleware(next)
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.AddCookie(&http.Cookie{Name: "session", Value: token})
-	rr := httptest.NewRecorder()
-	handler.ServeHTTP(rr, req)
-
+	rr := serveGinHandler(svc.SessionMiddleware(), req)
 	assert.Equal(t, http.StatusUnauthorized, rr.Code)
 }
 

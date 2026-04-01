@@ -4,6 +4,7 @@ import (
 	"html/template"
 	"net/http"
 
+	"github.com/gin-gonic/gin"
 	"github.com/th0rn0/thornotes/internal/notes"
 )
 
@@ -17,21 +18,21 @@ func NewShareHandler(svc *notes.Service, tmpl *template.Template) *ShareHandler 
 	return &ShareHandler{svc: svc, tmpl: tmpl}
 }
 
-func (h *ShareHandler) View(w http.ResponseWriter, r *http.Request) {
-	token := r.PathValue("token")
+func (h *ShareHandler) View(c *gin.Context) {
+	token := c.Param("token")
 	if token == "" {
-		http.NotFound(w, r)
+		c.AbortWithStatus(http.StatusNotFound)
 		return
 	}
 
-	note, err := h.svc.GetNoteByShareToken(r.Context(), token)
+	note, err := h.svc.GetNoteByShareToken(c.Request.Context(), token)
 	if err != nil {
-		http.NotFound(w, r)
+		c.AbortWithStatus(http.StatusNotFound)
 		return
 	}
 
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := h.tmpl.ExecuteTemplate(w, "share.html", note); err != nil {
-		http.Error(w, "render error", http.StatusInternalServerError)
+	c.Header("Content-Type", "text/html; charset=utf-8")
+	if err := h.tmpl.ExecuteTemplate(c.Writer, "share.html", note); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "render error"})
 	}
 }

@@ -4,9 +4,8 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"net/http"
-	"strconv"
 
-	"github.com/th0rn0/thornotes/internal/auth"
+	"github.com/gin-gonic/gin"
 	"github.com/th0rn0/thornotes/internal/model"
 	"github.com/th0rn0/thornotes/internal/repository"
 )
@@ -24,11 +23,11 @@ func NewAccountHandler(tokens repository.APITokenRepository) *AccountHandler {
 
 // ListTokens returns the list of API tokens for the current user.
 // The full token value is never returned here — only the prefix.
-func (h *AccountHandler) ListTokens(w http.ResponseWriter, r *http.Request) {
-	user := auth.UserFromContext(r.Context())
-	tokens, err := h.tokens.ListByUser(r.Context(), user.ID)
+func (h *AccountHandler) ListTokens(c *gin.Context) {
+	user := ginUser(c)
+	tokens, err := h.tokens.ListByUser(c.Request.Context(), user.ID)
 	if err != nil {
-		writeError(w, err)
+		writeError(c, err)
 		return
 	}
 	// Mask the full token before sending — it was shown once on creation only.
@@ -38,19 +37,19 @@ func (h *AccountHandler) ListTokens(w http.ResponseWriter, r *http.Request) {
 	if tokens == nil {
 		tokens = []*model.APIToken{}
 	}
-	writeJSON(w, http.StatusOK, tokens)
+	c.JSON(http.StatusOK, tokens)
 }
 
 // CreateToken generates a new API token for the current user.
 // The full token is only returned in this response — never again.
-func (h *AccountHandler) CreateToken(w http.ResponseWriter, r *http.Request) {
-	user := auth.UserFromContext(r.Context())
+func (h *AccountHandler) CreateToken(c *gin.Context) {
+	user := ginUser(c)
 
 	var body struct {
 		Name string `json:"name"`
 	}
-	if err := readJSON(r, &body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+	if err := readJSON(c, &body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
 		return
 	}
 	if body.Name == "" {
@@ -59,34 +58,33 @@ func (h *AccountHandler) CreateToken(w http.ResponseWriter, r *http.Request) {
 
 	raw, err := generateAPIToken()
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not generate token"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "could not generate token"})
 		return
 	}
 
-	token, err := h.tokens.Create(r.Context(), user.ID, body.Name, raw)
+	token, err := h.tokens.Create(c.Request.Context(), user.ID, body.Name, raw)
 	if err != nil {
-		writeError(w, err)
+		writeError(c, err)
 		return
 	}
 	// token.Token is already set from RETURNING — return it now (only time).
-	writeJSON(w, http.StatusCreated, token)
+	c.JSON(http.StatusCreated, token)
 }
 
 // DeleteToken revokes an API token by ID.
-func (h *AccountHandler) DeleteToken(w http.ResponseWriter, r *http.Request) {
-	user := auth.UserFromContext(r.Context())
-	idStr := r.PathValue("id")
-	tokenID, err := strconv.ParseInt(idStr, 10, 64)
+func (h *AccountHandler) DeleteToken(c *gin.Context) {
+	user := ginUser(c)
+	tokenID, err := ginParamInt64(c, "id")
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid token id"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid token id"})
 		return
 	}
 
-	if err := h.tokens.Delete(r.Context(), user.ID, tokenID); err != nil {
-		writeError(w, err)
+	if err := h.tokens.Delete(c.Request.Context(), user.ID, tokenID); err != nil {
+		writeError(c, err)
 		return
 	}
-	w.WriteHeader(http.StatusNoContent)
+	c.Status(http.StatusNoContent)
 }
 
 func generateAPIToken() (string, error) {
