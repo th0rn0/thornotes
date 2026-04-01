@@ -150,6 +150,23 @@ func main() {
 		}
 	}()
 
+	// Startup reconciliation: compare every note's on-disk hash against the DB.
+	// Skippable via --skip-reconciliation on trusted restarts with large corpora.
+	if cfg.SkipReconciliation {
+		log.Info().Msg("startup reconciliation skipped (--skip-reconciliation)")
+	} else {
+		userIDs, reconcileErr := userRepo.IDs(context.Background())
+		if reconcileErr != nil {
+			log.Warn().Err(reconcileErr).Msg("startup reconcile: list users")
+		} else {
+			for _, uid := range userIDs {
+				if err := notesSvc.Reconcile(context.Background(), uid); err != nil {
+					log.Warn().Err(err).Int64("user_id", uid).Msg("startup reconcile error")
+				}
+			}
+		}
+	}
+
 	// Disk watcher: poll for file changes and push SSE notifications.
 	if cfg.WatchInterval > 0 {
 		log.Info().Dur("interval", cfg.WatchInterval).Msg("disk watcher enabled")

@@ -40,21 +40,6 @@ Requires QEMU setup via `docker/setup-qemu-action@v3`. Build time increases ~3 m
 
 ---
 
-### Startup reconciliation progress + --skip-reconciliation flag
-**What:** The startup reconciliation scan (comparing SHA-256 of every .md file vs
-`content_hash` in DB) can take minutes for large note corpora. Server appears
-unresponsive with no log output.
-
-**Why:** Self-hosters will see a mysterious 2-4 minute black hole on restart. With
-5000 notes at ~50ms per file hash → ~4 minutes of silence.
-
-**How:** Log progress every 100 notes: `slog.Info("reconciling", "progress", "1234/5000")`.
-Add `--skip-reconciliation` flag to bypass scan on trusted restarts.
-
-**Where:** startup reconciliation code in `internal/notes/service.go` or `cmd/thornotes/main.go`
-
----
-
 ---
 
 ### Git-backed version history
@@ -97,6 +82,9 @@ Max 200,000 chars (~50k tokens). Truncates oldest notes first.
 
 
 ## Completed
+
+### Startup reconciliation progress + --skip-reconciliation flag
+**Completed:** v0.12.0.0 — Startup reconciliation now wired up in `main.go` (was implemented but never called). `Reconcile` logs starting/progress/complete with note counts. `--skip-reconciliation` / `THORNOTES_SKIP_RECONCILIATION` bypasses the scan on trusted restarts.
 
 ### Timezone-aware "today" for journal entries
 **Completed:** v0.10.0.0 — `GET /api/v1/journals/{id}/today?tz=America/New_York`. Handler validates via `time.LoadLocation`, falls back to UTC if omitted. Frontend passes `Intl.DateTimeFormat().resolvedOptions().timeZone`. Invalid tz → HTTP 400.

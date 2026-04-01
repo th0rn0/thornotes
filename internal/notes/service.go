@@ -51,8 +51,19 @@ func (s *Service) Reconcile(ctx context.Context, userID int64) error {
 		return err
 	}
 
+	total := len(records)
+	if total == 0 {
+		return nil
+	}
+
+	log.Info().Int64("user_id", userID).Int("total", total).Msg("reconcile: starting")
+
 	reconciled := 0
-	for _, rec := range records {
+	for i, rec := range records {
+		if i > 0 && i%100 == 0 {
+			log.Info().Int64("user_id", userID).Int("progress", i).Int("total", total).Msg("reconcile: progress")
+		}
+
 		fileContent, err := s.fs.Read(rec.DiskPath)
 		if err != nil {
 			log.Warn().Str("disk_path", rec.DiskPath).Int64("id", rec.ID).Msg("reconcile: note file missing")
@@ -70,9 +81,7 @@ func (s *Service) Reconcile(ctx context.Context, userID int64) error {
 		}
 	}
 
-	if reconciled > 0 {
-		log.Info().Int("count", reconciled).Msg("reconcile: updated notes from disk")
-	}
+	log.Info().Int64("user_id", userID).Int("total", total).Int("updated", reconciled).Msg("reconcile: complete")
 	return nil
 }
 

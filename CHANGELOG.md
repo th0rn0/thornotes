@@ -2,6 +2,13 @@
 
 All notable changes to thornotes are documented here.
 
+## [0.12.0.0] - 2026-04-01
+
+### Added
+- **Startup reconciliation** — on boot, thornotes now scans every note on disk and updates the DB for any whose content hash has changed (e.g. after a crash or external edit). Previously this scan existed in code but was never wired up at startup.
+- **Reconciliation progress logging** — `Reconcile` logs `reconcile: starting` with the total note count, then logs progress every 100 notes (`reconcile: progress {i}/{total}`), then logs `reconcile: complete`. Self-hosters with large corpora will see live progress instead of silence.
+- **`--skip-reconciliation` / `THORNOTES_SKIP_RECONCILIATION`** — flag to bypass the startup scan on trusted restarts where it isn't needed, eliminating the delay entirely.
+
 ## [0.11.0.0] - 2026-04-01
 
 ### Added
