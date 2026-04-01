@@ -25,6 +25,7 @@ let folders = [];            // flat folder list from API
 let notesByFolder = {};      // { folderId: [noteListItem] }
 let rootNotes = [];          // notes with no folder
 let searchResults = null;    // null = not in search mode
+let journals = [];           // all journals for current user
 
 const AUTO_SAVE_DELAY_MS = 1500;
 
@@ -36,7 +37,7 @@ const AUTO_SAVE_DELAY_MS = 1500;
     document.getElementById('topbar-username').textContent = me.username;
     const csrf = await api('GET', '/api/v1/csrf');
     csrfToken = csrf.csrf_token;
-    await loadFolderTree();
+    await Promise.all([loadFolderTree(), loadJournals()]);
     showApp();
   } catch {
     showAuth();
@@ -66,7 +67,7 @@ async function login() {
     const me = await api('GET', '/api/v1/auth/me');
     currentUser = me;
     document.getElementById('topbar-username').textContent = me.username;
-    await loadFolderTree();
+    await Promise.all([loadFolderTree(), loadJournals()]);
     showApp();
   } catch (e) {
     document.getElementById('login-error').textContent = e.message || 'Login failed';
@@ -573,6 +574,142 @@ function copyNewToken() {
   if (!_newTokenValue) return;
   navigator.clipboard.writeText(_newTokenValue).catch(() => {});
   showNotification('Token copied to clipboard');
+}
+
+// ── Journals ───────────────────────────────────────────────────────────────
+async function loadJournals() {
+  try {
+    journals = await api('GET', '/api/v1/journals');
+  } catch {
+    journals = [];
+  }
+  renderJournalSection();
+}
+
+function renderJournalSection() {
+  const section = document.getElementById('journal-section');
+  const picker = document.getElementById('journal-picker');
+  const sel = document.getElementById('journal-select');
+
+  if (!section) return;
+
+  if (journals.length === 0) {
+    // Show the section with just the manage button (prompts creation).
+    section.style.display = '';
+    picker.style.display = 'none';
+    return;
+  }
+
+  section.style.display = '';
+
+  if (journals.length > 1) {
+    sel.innerHTML = journals.map(j => `<option value="${j.id}">${esc(j.name)}</option>`).join('');
+    picker.style.display = '';
+  } else {
+    picker.style.display = 'none';
+  }
+}
+
+async function openTodayJournal() {
+  if (journals.length === 0) {
+    showManageJournalsModal();
+    return;
+  }
+
+  let journalId;
+  if (journals.length === 1) {
+    journalId = journals[0].id;
+  } else {
+    const sel = document.getElementById('journal-select');
+    journalId = parseInt(sel.value, 10);
+  }
+
+  try {
+    const note = await api('GET', `/api/v1/journals/${journalId}/today`);
+    // Ensure the note's folder hierarchy is loaded in the tree.
+    if (note.folder_id) {
+      await ensureFolderLoaded(note.folder_id);
+    }
+    await openNote(note.id);
+  } catch (e) {
+    showNotification(e.message || 'Could not open today\'s journal entry', true);
+  }
+}
+
+// ensureFolderLoaded walks up the folder tree to make sure all ancestor folders
+// are expanded so the note is visible in the sidebar.
+async function ensureFolderLoaded(folderId) {
+  // Find all ancestor folder IDs.
+  const ancestors = [];
+  let id = folderId;
+  while (id) {
+    const f = folders.find(f => f.id === id);
+    if (!f) break;
+    ancestors.unshift(id);
+    id = f.parent_id;
+  }
+  // Load notes for each ancestor folder (innermost last so tree renders correctly).
+  for (const aid of ancestors) {
+    if (!loadedFolderIds.has(aid)) {
+      const items = await api('GET', `/api/v1/folders/${aid}/notes`).catch(() => []);
+      notesByFolder[aid] = items || [];
+      loadedFolderIds.add(aid);
+    }
+  }
+}
+
+function showManageJournalsModal() {
+  document.getElementById('journal-error').textContent = '';
+  document.getElementById('new-journal-name').value = '';
+  renderJournalList();
+  document.getElementById('manage-journals-modal').style.display = 'flex';
+}
+
+function closeManageJournalsModal() {
+  document.getElementById('manage-journals-modal').style.display = 'none';
+}
+
+function renderJournalList() {
+  const list = document.getElementById('journal-list');
+  if (journals.length === 0) {
+    list.innerHTML = '<p style="font-size:12px;color:#aaa;padding:4px 0">No journals yet. Create one below.</p>';
+    return;
+  }
+  list.innerHTML = journals.map(j =>
+    `<div class="journal-item">
+       <span class="journal-item-name">${esc(j.name)}</span>
+       <button class="journal-delete-btn" onclick="deleteJournal(${j.id})">Remove</button>
+     </div>`
+  ).join('');
+}
+
+async function submitNewJournal() {
+  const name = document.getElementById('new-journal-name').value.trim();
+  document.getElementById('journal-error').textContent = '';
+  if (!name) return;
+  try {
+    const journal = await api('POST', '/api/v1/journals', { name });
+    journals.push(journal);
+    document.getElementById('new-journal-name').value = '';
+    renderJournalList();
+    renderJournalSection();
+    // Reload folder tree so the new journal root folder appears.
+    await loadFolderTree();
+  } catch (e) {
+    document.getElementById('journal-error').textContent = e.message || 'Failed to create journal';
+  }
+}
+
+async function deleteJournal(id) {
+  if (!confirm('Remove this journal? Your notes and folders will be kept.')) return;
+  try {
+    await api('DELETE', `/api/v1/journals/${id}`);
+    journals = journals.filter(j => j.id !== id);
+    renderJournalList();
+    renderJournalSection();
+  } catch (e) {
+    showNotification(e.message || 'Failed to remove journal', true);
+  }
 }
 
 // ── Utils ──────────────────────────────────────────────────────────────────

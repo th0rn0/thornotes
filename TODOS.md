@@ -95,6 +95,17 @@ Max 200,000 chars (~50k tokens). Truncates oldest notes first.
 
 ---
 
+### zerolog logging & gin web server
+**What:** Replace `log/slog` with `zerolog` for structured logging, and replace the stdlib `net/http` mux with `gin`.
+
+**Why:** zerolog is significantly faster for high-throughput structured logging (zero-alloc JSON). gin adds request-level middleware (request ID, panic recovery, access logging) and cleaner route grouping without boilerplate.
+
+**How:** Add `github.com/rs/zerolog` and `github.com/gin-gonic/gin`. Swap handler signatures from `(w http.ResponseWriter, r *http.Request)` to `*gin.Context`. Move route definitions from `internal/router/router.go` into gin route groups. Replace all `slog.Info/Error/Warn` call sites.
+
+**Where:** `internal/router/router.go`, `internal/handler/*.go`, `cmd/thornotes/main.go`
+
+---
+
 ### MySQL/PostgreSQL support
 **What:** Implement the `SearchRepository` MySQL FULLTEXT variant and the core repository
 interfaces against MySQL/PostgreSQL.
@@ -111,6 +122,19 @@ interfaces against MySQL/PostgreSQL.
 Add viewport meta, touch-friendly UI adjustments.
 
 **Why:** Research shows mobile-responsive web UI is now expected for self-hosted apps.
+
+---
+
+### Timezone-aware "today" for journal entries
+**What:** Pass the user's browser timezone to `GET /api/v1/journals/{id}/today` so the server computes the correct local date.
+
+**Why:** Currently uses server UTC. A user in UTC+9 or UTC-8 may get the wrong date for several hours of their day. Cosmetic but affects daily journaling correctness for non-UTC users.
+
+**How:** Frontend adds `?tz=America/New_York` (via `Intl.DateTimeFormat().resolvedOptions().timeZone`). Handler uses `time.LoadLocation(tz)` to compute today's date in that zone. Validate the timezone string to prevent injection.
+
+**Where:** `internal/handler/journals.go`, `web/static/js/app.js`
+
+**Depends on / blocked by:** Daily journal feature (v0.5.0.0) must ship first.
 
 ---
 

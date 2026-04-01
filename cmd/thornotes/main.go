@@ -48,6 +48,7 @@ func main() {
 	noteRepo := sqlite.NewNoteRepo(pool.ReadDB, pool.WriteDB)
 	searchRepo := sqlite.NewSearchRepo(pool.ReadDB, pool.WriteDB)
 	apiTokenRepo := sqlite.NewAPITokenRepo(pool.ReadDB, pool.WriteDB)
+	journalRepo := sqlite.NewJournalRepo(pool.ReadDB, pool.WriteDB)
 
 	// Build file store.
 	fs, err := notes.NewFileStore(cfg.NotesRoot)
@@ -58,7 +59,7 @@ func main() {
 
 	// Build services.
 	authSvc := auth.NewService(userRepo, sessionRepo, cfg.AllowRegistration)
-	notesSvc := notes.NewService(noteRepo, folderRepo, searchRepo, fs)
+	notesSvc := notes.NewService(noteRepo, folderRepo, searchRepo, journalRepo, fs)
 
 	// Build SSE hub.
 	notifyHub := hub.New()

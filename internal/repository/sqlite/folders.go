@@ -51,6 +51,21 @@ func (r *FolderRepo) GetByID(ctx context.Context, userID, folderID int64) (*mode
 	return f, nil
 }
 
+func (r *FolderRepo) GetByDiskPath(ctx context.Context, diskPath string) (*model.Folder, error) {
+	f := &model.Folder{}
+	err := r.readDB.QueryRowContext(ctx,
+		`SELECT id, user_id, parent_id, name, disk_path, created_at FROM folders WHERE disk_path = ?`,
+		diskPath,
+	).Scan(&f.ID, &f.UserID, &f.ParentID, &f.Name, &f.DiskPath, &f.CreatedAt)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, apperror.ErrNotFound
+		}
+		return nil, fmt.Errorf("get folder by disk_path: %w", err)
+	}
+	return f, nil
+}
+
 func (r *FolderRepo) Tree(ctx context.Context, userID int64) ([]*model.FolderTreeItem, error) {
 	rows, err := r.readDB.QueryContext(ctx, `
 		SELECT

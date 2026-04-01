@@ -25,13 +25,14 @@ func New(
 ) http.Handler {
 	mux := http.NewServeMux()
 
-	authH := handler.NewAuthHandler(authSvc)
+	authH := handler.NewAuthHandler(authSvc, notesSvc)
 	foldersH := handler.NewFoldersHandler(notesSvc)
 	notesH := handler.NewNotesHandler(notesSvc)
 	shareH := handler.NewShareHandler(notesSvc, tmpl)
 	accountH := handler.NewAccountHandler(apiTokenRepo)
 	mcpH := handler.NewMCPHandler(notesSvc)
 	eventsH := handler.NewEventsHandler(h)
+	journalsH := handler.NewJournalsHandler(notesSvc)
 
 	bearerMW := auth.BearerMiddleware(apiTokenRepo, userRepo)
 
@@ -72,6 +73,7 @@ func New(
 	mux.Handle("POST /api/v1/notes", authSvc.SessionMiddleware(security.CSRFMiddleware(http.HandlerFunc(notesH.Create))))
 	mux.Handle("GET /api/v1/notes", authSvc.SessionMiddleware(http.HandlerFunc(notesH.Search)))
 	mux.Handle("GET /api/v1/notes/root", authSvc.SessionMiddleware(http.HandlerFunc(notesH.ListRoot)))
+	mux.Handle("GET /api/v1/notes/all", authSvc.SessionMiddleware(http.HandlerFunc(notesH.ListAll)))
 	mux.Handle("GET /api/v1/notes/{id}", authSvc.SessionMiddleware(http.HandlerFunc(notesH.Get)))
 	mux.Handle("PATCH /api/v1/notes/{id}", authSvc.SessionMiddleware(security.CSRFMiddleware(http.HandlerFunc(notesH.Patch))))
 	mux.Handle("DELETE /api/v1/notes/{id}", authSvc.SessionMiddleware(security.CSRFMiddleware(http.HandlerFunc(notesH.Delete))))
@@ -81,6 +83,12 @@ func New(
 	mux.Handle("GET /api/v1/account/tokens", authSvc.SessionMiddleware(http.HandlerFunc(accountH.ListTokens)))
 	mux.Handle("POST /api/v1/account/tokens", authSvc.SessionMiddleware(security.CSRFMiddleware(http.HandlerFunc(accountH.CreateToken))))
 	mux.Handle("DELETE /api/v1/account/tokens/{id}", authSvc.SessionMiddleware(security.CSRFMiddleware(http.HandlerFunc(accountH.DeleteToken))))
+
+	// Journals.
+	mux.Handle("GET /api/v1/journals", authSvc.SessionMiddleware(http.HandlerFunc(journalsH.List)))
+	mux.Handle("POST /api/v1/journals", authSvc.SessionMiddleware(security.CSRFMiddleware(http.HandlerFunc(journalsH.Create))))
+	mux.Handle("DELETE /api/v1/journals/{id}", authSvc.SessionMiddleware(security.CSRFMiddleware(http.HandlerFunc(journalsH.Delete))))
+	mux.Handle("GET /api/v1/journals/{id}/today", authSvc.SessionMiddleware(http.HandlerFunc(journalsH.Today)))
 
 	// Server-Sent Events — session auth, long-lived connection for disk-change notifications.
 	mux.Handle("GET /api/v1/events", authSvc.SessionMiddleware(http.HandlerFunc(eventsH.Stream)))

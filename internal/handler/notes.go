@@ -162,6 +162,19 @@ func (h *NotesHandler) ListRoot(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, items)
 }
 
+func (h *NotesHandler) ListAll(w http.ResponseWriter, r *http.Request) {
+	user := auth.UserFromContext(r.Context())
+	items, err := h.svc.ListAllNotes(r.Context(), user.ID)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	if items == nil {
+		items = []*model.NoteListItem{}
+	}
+	writeJSON(w, http.StatusOK, items)
+}
+
 func (h *NotesHandler) Search(w http.ResponseWriter, r *http.Request) {
 	user := auth.UserFromContext(r.Context())
 	q := r.URL.Query().Get("q")

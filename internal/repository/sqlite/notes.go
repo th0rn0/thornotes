@@ -58,18 +58,33 @@ func (r *NoteRepo) GetByShareToken(ctx context.Context, token string) (*model.No
 		FROM notes WHERE share_token = ?`, token))
 }
 
+func (r *NoteRepo) GetByFolderAndSlug(ctx context.Context, userID int64, folderID *int64, slug string) (*model.Note, error) {
+	if folderID == nil {
+		return r.scanNote(r.readDB.QueryRowContext(ctx, `
+			SELECT id, user_id, folder_id, title, slug, disk_path, content, content_hash,
+			       tags, share_token, fts_synced_at, created_at, updated_at
+			FROM notes WHERE user_id = ? AND folder_id IS NULL AND slug = ?`,
+			userID, slug))
+	}
+	return r.scanNote(r.readDB.QueryRowContext(ctx, `
+		SELECT id, user_id, folder_id, title, slug, disk_path, content, content_hash,
+		       tags, share_token, fts_synced_at, created_at, updated_at
+		FROM notes WHERE user_id = ? AND folder_id = ? AND slug = ?`,
+		userID, *folderID, slug))
+}
+
 func (r *NoteRepo) ListByFolder(ctx context.Context, userID int64, folderID *int64) ([]*model.NoteListItem, error) {
 	var rows *sql.Rows
 	var err error
 
 	if folderID == nil {
 		rows, err = r.readDB.QueryContext(ctx, `
-			SELECT id, title, slug, tags, updated_at FROM notes
+			SELECT id, folder_id, title, slug, tags, updated_at FROM notes
 			WHERE user_id = ? AND folder_id IS NULL
 			ORDER BY updated_at DESC`, userID)
 	} else {
 		rows, err = r.readDB.QueryContext(ctx, `
-			SELECT id, title, slug, tags, updated_at FROM notes
+			SELECT id, folder_id, title, slug, tags, updated_at FROM notes
 			WHERE user_id = ? AND folder_id = ?
 			ORDER BY updated_at DESC`, userID, *folderID)
 	}
@@ -78,11 +93,28 @@ func (r *NoteRepo) ListByFolder(ctx context.Context, userID int64, folderID *int
 	}
 	defer rows.Close()
 
+	return scanNoteListItems(rows)
+}
+
+func (r *NoteRepo) ListAll(ctx context.Context, userID int64) ([]*model.NoteListItem, error) {
+	rows, err := r.readDB.QueryContext(ctx, `
+		SELECT id, folder_id, title, slug, tags, updated_at FROM notes
+		WHERE user_id = ?
+		ORDER BY updated_at DESC`, userID)
+	if err != nil {
+		return nil, fmt.Errorf("list all notes: %w", err)
+	}
+	defer rows.Close()
+
+	return scanNoteListItems(rows)
+}
+
+func scanNoteListItems(rows *sql.Rows) ([]*model.NoteListItem, error) {
 	var items []*model.NoteListItem
 	for rows.Next() {
 		item := &model.NoteListItem{}
 		var tagsJSON string
-		if err := rows.Scan(&item.ID, &item.Title, &item.Slug, &tagsJSON, &item.UpdatedAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.FolderID, &item.Title, &item.Slug, &tagsJSON, &item.UpdatedAt); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal([]byte(tagsJSON), &item.Tags); err != nil {
