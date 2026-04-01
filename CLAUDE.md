@@ -1,3 +1,8 @@
+## Git rules
+
+- **Never run `git push` unless the user explicitly says to push.** This applies even during ship workflows — stop before the push step and wait for confirmation.
+- **Never commit `.claude/` directory files** as part of feature work. Any `.claude/` changes belong on a dedicated branch.
+
 ## gstack
 
 Use the `/browse` skill from gstack for all web browsing. Never use `mcp__claude-in-chrome__*` tools.

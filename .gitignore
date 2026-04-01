@@ -7,3 +7,5 @@ notes-dev/
 /notes/
 *.tmp
 .gstack/
+coverage.out
+.claude/settings.local.json
