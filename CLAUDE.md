@@ -1,3 +1,7 @@
+## Documentation rules
+
+- **Keep the README Docker section current.** Any time a new environment variable, CLI flag, or feature is added, update the Quick start, Configuration table, and Compose example in README.md as part of the same PR.
+
 ## Git rules
 
 - **Never run `git push` unless the user explicitly says to push.** This applies even during ship workflows — stop before the push step and wait for confirmation.
