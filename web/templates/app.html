@@ -188,6 +188,36 @@ body.dark .token-copy-btn:hover { background: #4a4a4a; }
 body.dark .mcp-info { background: #2d2d2d; border-color: #3e3e42; color: #ababab; }
 body.dark .mcp-info code { background: #383838; color: #9cdcfe; }
 body.dark .account-section-title { color: #666; }
+
+/* JOURNAL SECTION */
+.journal-section { border-bottom: 1px solid #eee; }
+.journal-toolbar { display: flex; align-items: center; padding: 5px 8px; gap: 4px; }
+.journal-toolbar-label { font-size: 10px; color: #aaa; text-transform: uppercase; letter-spacing: 0.5px; flex: 1; }
+.journal-today-btn { flex: 1; padding: 4px 0; font-size: 11px; border: 1px solid #ccc; background: #fff; cursor: pointer; color: #333; }
+.journal-today-btn:hover { background: #f0f0f0; }
+.journal-manage-btn { padding: 4px 6px; font-size: 11px; border: 1px solid #ccc; background: #fff; cursor: pointer; color: #888; }
+.journal-manage-btn:hover { background: #f0f0f0; }
+.journal-picker { padding: 0 8px 6px; }
+.journal-picker select { width: 100%; border: 1px solid #ddd; padding: 3px 6px; font-size: 11px; background: #fff; }
+body.dark .journal-section { border-bottom-color: #3e3e42; }
+body.dark .journal-toolbar-label { color: #555; }
+body.dark .journal-today-btn { border-color: #4a4a4a; background: #2d2d2d; color: #ccc; }
+body.dark .journal-today-btn:hover { background: #383838; }
+body.dark .journal-manage-btn { border-color: #4a4a4a; background: #2d2d2d; color: #888; }
+body.dark .journal-manage-btn:hover { background: #383838; }
+body.dark .journal-picker select { border-color: #4a4a4a; background: #3c3c3c; color: #ccc; }
+
+/* MANAGE JOURNALS MODAL */
+.journal-list { margin-bottom: 12px; max-height: 180px; overflow-y: auto; }
+.journal-item { display: flex; align-items: center; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #eee; }
+.journal-item:last-child { border-bottom: none; }
+.journal-item-name { font-size: 12px; flex: 1; }
+.journal-delete-btn { background: none; border: 1px solid #ccc; padding: 2px 8px; font-size: 10px; cursor: pointer; color: #c00; }
+.journal-delete-btn:hover { background: #fff0f0; }
+body.dark .journal-item { border-bottom-color: #3e3e42; }
+body.dark .journal-item-name { color: #ccc; }
+body.dark .journal-delete-btn { border-color: #4a4a4a; color: #f48771; }
+body.dark .journal-delete-btn:hover { background: #3c2020; }
 </style>
 </head>
 <body>
@@ -241,6 +271,16 @@ body.dark .account-section-title { color: #666; }
       </div>
       <div class="sidebar-search">
         <input id="search-input" type="search" placeholder="Search notes…" oninput="onSearch(this.value)" />
+      </div>
+      <div class="journal-section" id="journal-section" style="display:none">
+        <div class="journal-toolbar">
+          <span class="journal-toolbar-label">Journal</span>
+          <button class="journal-today-btn" onclick="openTodayJournal()">Today</button>
+          <button class="journal-manage-btn" onclick="showManageJournalsModal()" title="Manage journals">⚙</button>
+        </div>
+        <div class="journal-picker" id="journal-picker" style="display:none">
+          <select id="journal-select"></select>
+        </div>
       </div>
       <div class="tree" id="tree"></div>
     </div>
@@ -332,6 +372,22 @@ body.dark .account-section-title { color: #666; }
     </div>
     <div class="modal-actions">
       <button class="primary" onclick="closeAccountModal()">Done</button>
+    </div>
+  </div>
+</div>
+
+<!-- MANAGE JOURNALS MODAL -->
+<div class="modal-overlay" id="manage-journals-modal" onclick="if(event.target===this)closeManageJournalsModal()">
+  <div class="modal">
+    <h2>Journals</h2>
+    <div class="journal-list" id="journal-list"></div>
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px">
+      <input id="new-journal-name" type="text" placeholder="Journal name (e.g. Personal)" onkeydown="if(event.key==='Enter')submitNewJournal();if(event.key==='Escape')closeManageJournalsModal()" style="flex:1;border:1px solid #ccc;padding:5px 8px;font-size:12px" />
+      <button onclick="submitNewJournal()" style="padding:5px 14px;font-size:12px;border:1px solid #ccc;background:#fff;cursor:pointer">+ Add</button>
+    </div>
+    <div class="error" id="journal-error"></div>
+    <div class="modal-actions">
+      <button class="primary" onclick="closeManageJournalsModal()">Done</button>
     </div>
   </div>
 </div>
