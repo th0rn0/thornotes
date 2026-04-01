@@ -23,6 +23,8 @@ A self-hosted Markdown note-taking app with file-as-canonical storage. Every not
 
 ## Quick start with Docker
 
+The image is published for `linux/amd64` and `linux/arm64` (Raspberry Pi, NAS, Apple Silicon via Rosetta).
+
 ```sh
 docker run -d \
   --name thornotes \
@@ -212,19 +214,25 @@ Releases are version-tagged commits on `main`. The CI pipeline automatically bui
    ```
 
 CI will then:
-- Run lint and tests.
-- Build and push `th0rn0/thornotes:latest` and `th0rn0/thornotes:v0.9.0.0` to Docker Hub.
-- Create a GitHub release with the changelog section for that version as release notes.
+- Run lint (with `.golangci.yml` config) and tests.
+- Build and push multi-arch (`linux/amd64`, `linux/arm64`) images: `th0rn0/thornotes:latest` and `th0rn0/thornotes:v0.9.0.0`.
+- Run a smoke test — pulls the freshly pushed image, starts a container, and verifies HTTP 200 on `/`.
+- Create a GitHub release with the changelog section for that version as release notes (only after smoke test passes).
 
 ### Manual (no CI)
 
 If you need to release without CI, run the Docker build and push yourself:
 
 ```sh
-# Build
-docker build -t th0rn0/thornotes:latest -t th0rn0/thornotes:v0.9.0.0 .
+# Build (multi-arch — requires docker buildx and QEMU)
+docker buildx build \
+  --platform linux/amd64,linux/arm64 \
+  -t th0rn0/thornotes:latest \
+  -t th0rn0/thornotes:v0.9.0.0 \
+  --push .
 
-# Push
+# Or single-arch if buildx is unavailable
+docker build -t th0rn0/thornotes:latest -t th0rn0/thornotes:v0.9.0.0 .
 docker push th0rn0/thornotes:latest
 docker push th0rn0/thornotes:v0.9.0.0
 

@@ -2,6 +2,13 @@
 
 All notable changes to thornotes are documented here.
 
+## [0.13.0.0] - 2026-04-01
+
+### Added
+- **golangci-lint config** — `.golangci.yml` added with an explicit linter set (`errcheck`, `govet`, `staticcheck`, `gosimple`, `ineffassign`, `unused`) using `default: none`. Lint rules are now reproducible locally and in CI regardless of golangci-lint version changes.
+- **Multi-arch Docker images** — CI now builds and pushes `linux/amd64` and `linux/arm64` in a single manifest. Self-hosters on Raspberry Pi, ARM NAS devices, or Apple Silicon can pull the native image without emulation.
+- **Docker smoke test** — a `smoke-test` CI job runs after `build-push`. It pulls the freshly pushed image, starts a container with a temporary data directory, and verifies HTTP 200 on `/`. The GitHub release job now requires the smoke test to pass before it runs.
+
 ## [0.12.2.0] - 2026-04-01
 
 ### Changed

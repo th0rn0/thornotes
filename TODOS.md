@@ -2,46 +2,6 @@
 
 ## V2 (deferred, design in V1 for easy addition)
 
-### Docker integration smoke test
-**What:** A CI job that pulls the freshly-pushed image and runs a basic health check
-(`docker run ... /thornotes --help` or a live HTTP check).
-
-**Why:** Currently CI verifies the build succeeds but not that the image actually
-starts correctly. A broken entrypoint or missing embed would only surface at deploy time.
-
-**How:** Add a `smoke-test` job after `build-push` that pulls
-`th0rn0/thornotes:latest` and runs a quick sanity check.
-
-**Where:** `.github/workflows/ci.yml`
-
----
-
-### golangci-lint config (.golangci.yml)
-**What:** Explicit lint rule config so rules are reproducible locally and in CI.
-
-**Why:** Currently using golangci-lint defaults. Explicit config allows enabling
-`errcheck`, `govet`, `staticcheck` consistently and avoiding surprise failures
-when the linter adds new default rules.
-
-**Where:** `.golangci.yml` at repo root
-
----
-
-### Multi-arch Docker builds (amd64 + arm64)
-**What:** Build and push `linux/arm64` alongside `linux/amd64` in CI.
-
-**Why:** Self-hosters on Raspberry Pi / NAS (arm64) can pull natively without
-emulation. Particularly relevant for thornotes' self-hosted positioning.
-
-**How:** Add `platforms: linux/amd64,linux/arm64` to `docker/build-push-action`.
-Requires QEMU setup via `docker/setup-qemu-action@v3`. Build time increases ~3 min.
-
-**Where:** `.github/workflows/ci.yml` (build-push job)
-
----
-
----
-
 ### Git-backed version history
 **What:** Every save is a `git commit` on disk. Full version history, diffing,
 branching (draft/published). UI shows a timeline of every note's history.
@@ -117,3 +77,6 @@ Max 200,000 chars (~50k tokens). Truncates oldest notes first.
 
 ### MySQL/PostgreSQL support
 **Completed:** v0.7.0.0 — `internal/repository/mysql/` implements all repository interfaces against `database/sql`. MySQL migrations in `internal/db/mysql_migrations/`. FULLTEXT search via `MATCH...AGAINST` in boolean mode. Select via `THORNOTES_DB_DRIVER=mysql` + individual `THORNOTES_DB_HOST/NAME/USER/PASSWORD` variables (DSN assembled internally). Docker Compose with MariaDB example in README (updated v0.12.2.0).
+
+### golangci-lint config + multi-arch Docker builds + smoke test
+**Completed:** v0.13.0.0 — `.golangci.yml` added with explicit linter set (`errcheck`, `govet`, `staticcheck`, `gosimple`, `ineffassign`, `unused`) using `default: none` for reproducibility. `build-push` CI job now builds `linux/amd64` and `linux/arm64` via QEMU + buildx. New `smoke-test` job pulls the freshly pushed image, starts a container, and verifies HTTP 200 before the `release` job runs. `setup-qemu-action@v3` SHA pinning deferred (TODO: pin via `gh api /repos/docker/setup-qemu-action/git/ref/tags/v3`).
