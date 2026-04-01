@@ -208,6 +208,19 @@ func TestFileStore_NewFileStore_Fail(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestFileStore_NewFileStore_NotWritable(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("skipping permission test when running as root")
+	}
+	root := t.TempDir()
+	require.NoError(t, os.Chmod(root, 0500)) // read+execute, no write
+	t.Cleanup(func() { _ = os.Chmod(root, 0700) })
+
+	_, err := NewFileStore(root)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not writable")
+}
+
 func TestFileStore_Write_MkdirFail(t *testing.T) {
 	if os.Getuid() == 0 {
 		t.Skip("skipping permission test when running as root")

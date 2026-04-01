@@ -2,6 +2,11 @@
 
 All notable changes to thornotes are documented here.
 
+## [0.14.1.0] - 2026-04-01
+
+### Fixed
+- **Notes root writable check at startup** — `NewFileStore` now creates a temporary probe file in the notes directory immediately after `MkdirAll`. If the directory exists but is read-only (e.g. a read-only bind mount, wrong ownership, `chmod 555`) the process exits with a clear `notes root "..." is not writable` error instead of starting successfully and failing silently on the first save.
+
 ## [0.14.0.0] - 2026-04-01
 
 ### Changed

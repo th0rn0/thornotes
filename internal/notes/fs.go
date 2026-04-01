@@ -28,7 +28,25 @@ func NewFileStore(notesRoot string) (*FileStore, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Verify the directory is writable by creating and immediately removing a
+	// probe file. This catches read-only mounts and permission errors at startup
+	// rather than silently failing on the first note save.
+	if err := probeWritable(abs); err != nil {
+		return nil, fmt.Errorf("notes root %q is not writable: %w", abs, err)
+	}
 	return &FileStore{notesRoot: abs}, nil
+}
+
+// probeWritable creates and removes a temporary file in dir to confirm write access.
+func probeWritable(dir string) error {
+	f, err := os.CreateTemp(dir, ".thornotes-probe-*")
+	if err != nil {
+		return err
+	}
+	name := f.Name()
+	f.Close()
+	os.Remove(name)
+	return nil
 }
 
 // Write atomically writes content to relativePath.
