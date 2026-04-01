@@ -157,9 +157,10 @@ func (h *MCPHandler) HandlePOST(c *gin.Context) {
 	user := auth.UserFromContext(c.Request.Context())
 	sessionID := c.GetHeader("Mcp-Session-Id")
 
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 4<<20) // 4 MiB
 	body, err := io.ReadAll(c.Request.Body)
 	if err != nil {
-		c.Status(http.StatusBadRequest)
+		c.Status(http.StatusRequestEntityTooLarge)
 		return
 	}
 
@@ -482,7 +483,7 @@ func (h *MCPHandler) handleToolsCall(r *http.Request, req rpcRequest, userID int
 			ID      int64  `json:"id"`
 			Content string `json:"content"`
 		}
-		if err := json.Unmarshal(params.Arguments, &args); err != nil || args.ID == 0 {
+		if err := json.Unmarshal(params.Arguments, &args); err != nil || args.ID == 0 || args.Content == "" {
 			return rpcErr(req.ID, rpcInvalidParams, "id and content are required")
 		}
 		note, err := h.notes.GetNote(ctx, userID, args.ID)

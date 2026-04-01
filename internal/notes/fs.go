@@ -45,8 +45,7 @@ func probeWritable(dir string) error {
 	}
 	name := f.Name()
 	f.Close()
-	os.Remove(name)
-	return nil
+	return os.Remove(name)
 }
 
 // Write atomically writes content to relativePath.

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"testing"
 	"time"
@@ -65,18 +66,12 @@ func (m *mcpClient) doGET(t *testing.T, sessionID string) *http.Response {
 	if sessionID != "" {
 		req.Header.Set("Mcp-Session-Id", sessionID)
 	}
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		// A timeout after headers are received is OK — we got what we need.
-		// context.DeadlineExceeded with a non-nil resp means headers were received.
-		if resp != nil {
-			return resp
-		}
-		// If no resp, it's a 404 or similar pre-header error.
-		// For 404, the server closes quickly so we won't hit the timeout.
-		require.NoError(t, err)
+	resp, err := m.httpClient.Do(req)
+	if err != nil && resp != nil {
+		// Context deadline fired after headers were received — that's fine.
+		return resp
 	}
+	require.NoError(t, err)
 	return resp
 }
 
@@ -125,6 +120,15 @@ func rpc(id interface{}, method string, params interface{}) map[string]interface
 	return m
 }
 
+// extractNoteID pulls the note ID from a successful tools/call create_note response.
+func extractNoteID(t *testing.T, result map[string]interface{}) int64 {
+	t.Helper()
+	contentText := result["result"].(map[string]interface{})["content"].([]interface{})[0].(map[string]interface{})["text"].(string)
+	var noteData map[string]interface{}
+	require.NoError(t, json.Unmarshal([]byte(contentText), &noteData))
+	return int64(noteData["id"].(float64))
+}
+
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 
 func TestMCP_POST_NoBearer(t *testing.T) {
@@ -132,6 +136,27 @@ func TestMCP_POST_NoBearer(t *testing.T) {
 	tc.registerAndLogin(t)
 	req, _ := http.NewRequest(http.MethodPost, tc.server.URL+"/mcp", bytes.NewReader([]byte("{}")))
 	req.Header.Set("Content-Type", "application/json")
+	resp, err := tc.httpClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+}
+
+func TestMCP_GET_NoBearer(t *testing.T) {
+	tc := newTestClient(t)
+	tc.registerAndLogin(t)
+	req, _ := http.NewRequest(http.MethodGet, tc.server.URL+"/mcp", nil)
+	resp, err := tc.httpClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+}
+
+func TestMCP_DELETE_NoBearer(t *testing.T) {
+	tc := newTestClient(t)
+	tc.registerAndLogin(t)
+	req, _ := http.NewRequest(http.MethodDelete, tc.server.URL+"/mcp", nil)
+	req.Header.Set("Mcp-Session-Id", "any-session")
 	resp, err := tc.httpClient.Do(req)
 	require.NoError(t, err)
 	defer resp.Body.Close()
@@ -200,12 +225,9 @@ func TestMCP_POST_EmptyBody(t *testing.T) {
 
 func TestMCP_POST_InvalidJSON(t *testing.T) {
 	m := newMCPClient(t)
-	resp := m.post(t, nil, "")
-	// Override body with invalid JSON.
 	req, _ := http.NewRequest(http.MethodPost, m.server.URL+"/mcp", bytes.NewReader([]byte("{bad json")))
 	req.Header.Set("Authorization", "Bearer "+m.bearerToken)
 	req.Header.Set("Content-Type", "application/json")
-	resp.Body.Close()
 	resp, err := m.httpClient.Do(req)
 	require.NoError(t, err)
 	defer resp.Body.Close()
@@ -330,10 +352,7 @@ func TestMCP_ToolsCall_GetNote(t *testing.T) {
 
 	var createResult map[string]interface{}
 	require.NoError(t, json.NewDecoder(createResp.Body).Decode(&createResult))
-	contentText := createResult["result"].(map[string]interface{})["content"].([]interface{})[0].(map[string]interface{})["text"].(string)
-	var noteData map[string]interface{}
-	require.NoError(t, json.Unmarshal([]byte(contentText), &noteData))
-	noteID := int64(noteData["id"].(float64))
+	noteID := extractNoteID(t, createResult)
 
 	// Now get it.
 	getResp := m.post(t, rpc(6, "tools/call", map[string]interface{}{
@@ -359,10 +378,7 @@ func TestMCP_ToolsCall_UpdateNote(t *testing.T) {
 	defer createResp.Body.Close()
 	var createResult map[string]interface{}
 	require.NoError(t, json.NewDecoder(createResp.Body).Decode(&createResult))
-	contentText := createResult["result"].(map[string]interface{})["content"].([]interface{})[0].(map[string]interface{})["text"].(string)
-	var noteData map[string]interface{}
-	require.NoError(t, json.Unmarshal([]byte(contentText), &noteData))
-	noteID := int64(noteData["id"].(float64))
+	noteID := extractNoteID(t, createResult)
 
 	updateResp := m.post(t, rpc(8, "tools/call", map[string]interface{}{
 		"name": "update_note",
@@ -511,13 +527,10 @@ func TestMCP_ResourcesRead(t *testing.T) {
 	defer cResp.Body.Close()
 	var cResult map[string]interface{}
 	require.NoError(t, json.NewDecoder(cResp.Body).Decode(&cResult))
-	contentText := cResult["result"].(map[string]interface{})["content"].([]interface{})[0].(map[string]interface{})["text"].(string)
-	var noteData map[string]interface{}
-	require.NoError(t, json.Unmarshal([]byte(contentText), &noteData))
-	noteID := int64(noteData["id"].(float64))
+	noteID := extractNoteID(t, cResult)
 
 	resp := m.post(t, rpc(18, "resources/read", map[string]interface{}{
-		"uri": "note://" + string(rune('0'+noteID)),
+		"uri": fmt.Sprintf("note://%d", noteID),
 	}), sessionID)
 	defer resp.Body.Close()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
@@ -707,4 +720,110 @@ func TestMCP_DELETE_InvalidSession(t *testing.T) {
 	resp := m.doDelete(t, "nonexistent")
 	defer resp.Body.Close()
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+}
+
+// ─── Additional edge cases ────────────────────────────────────────────────────
+
+func TestMCP_ToolsCall_UpdateNote_EmptyContent(t *testing.T) {
+	m := newMCPClient(t)
+	sessionID := m.initialize(t)
+
+	cResp := m.post(t, rpc(25, "tools/call", map[string]interface{}{
+		"name":      "create_note",
+		"arguments": map[string]interface{}{"title": "EmptyContentTest"},
+	}), sessionID)
+	defer cResp.Body.Close()
+	var cResult map[string]interface{}
+	require.NoError(t, json.NewDecoder(cResp.Body).Decode(&cResult))
+	noteID := extractNoteID(t, cResult)
+
+	resp := m.post(t, rpc(26, "tools/call", map[string]interface{}{
+		"name": "update_note",
+		"arguments": map[string]interface{}{
+			"id":      noteID,
+			"content": "",
+		},
+	}), sessionID)
+	defer resp.Body.Close()
+
+	var result map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+	errObj := result["error"].(map[string]interface{})
+	assert.Equal(t, float64(-32602), errObj["code"])
+}
+
+func TestMCP_ResourcesRead_NotFound(t *testing.T) {
+	m := newMCPClient(t)
+	sessionID := m.initialize(t)
+
+	resp := m.post(t, rpc(27, "resources/read", map[string]interface{}{
+		"uri": "note://999999",
+	}), sessionID)
+	defer resp.Body.Close()
+
+	var result map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+	assert.NotNil(t, result["error"])
+	errObj := result["error"].(map[string]interface{})
+	assert.Equal(t, float64(-32603), errObj["code"])
+}
+
+func TestMCP_ResourcesRead_NonNumericID(t *testing.T) {
+	m := newMCPClient(t)
+	sessionID := m.initialize(t)
+
+	resp := m.post(t, rpc(28, "resources/read", map[string]interface{}{
+		"uri": "note://abc",
+	}), sessionID)
+	defer resp.Body.Close()
+
+	var result map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+	errObj := result["error"].(map[string]interface{})
+	assert.Equal(t, float64(-32602), errObj["code"])
+}
+
+func TestMCP_ToolsCall_ListNotes_WithFolderID(t *testing.T) {
+	m := newMCPClient(t)
+	sessionID := m.initialize(t)
+
+	// Create a note first to ensure something exists.
+	cResp := m.post(t, rpc(29, "tools/call", map[string]interface{}{
+		"name":      "create_note",
+		"arguments": map[string]interface{}{"title": "FolderListTest"},
+	}), sessionID)
+	cResp.Body.Close()
+
+	// folder_id=0 is not a valid folder — expect list to succeed (empty or data).
+	// Use a nil-like approach: pass folder_id explicitly as integer.
+	resp := m.post(t, rpc(30, "tools/call", map[string]interface{}{
+		"name": "list_notes",
+		"arguments": map[string]interface{}{
+			"folder_id": float64(0),
+		},
+	}), sessionID)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var result map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+	// folder_id 0 may return empty or error — just verify no panic/500.
+	assert.NotNil(t, result)
+}
+
+func TestMCP_Batch_InvalidSessionPerItem(t *testing.T) {
+	m := newMCPClient(t)
+
+	batch := []map[string]interface{}{
+		rpc(31, "tools/list", nil),
+	}
+	resp := m.post(t, batch, "bogus-session-id")
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var results []map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&results))
+	require.Len(t, results, 1)
+	errObj := results[0]["error"].(map[string]interface{})
+	assert.Equal(t, float64(-32001), errObj["code"])
 }
