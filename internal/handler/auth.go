@@ -9,12 +9,13 @@ import (
 )
 
 type AuthHandler struct {
-	svc      *auth.Service
-	notesSvc *notes.Service
+	svc           *auth.Service
+	notesSvc      *notes.Service
+	secureCookies bool
 }
 
-func NewAuthHandler(svc *auth.Service, notesSvc *notes.Service) *AuthHandler {
-	return &AuthHandler{svc: svc, notesSvc: notesSvc}
+func NewAuthHandler(svc *auth.Service, notesSvc *notes.Service, secureCookies bool) *AuthHandler {
+	return &AuthHandler{svc: svc, notesSvc: notesSvc, secureCookies: secureCookies}
 }
 
 type registerRequest struct {
@@ -74,7 +75,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		Value:    token,
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   false, // set to true in production behind HTTPS
+		Secure:   h.secureCookies,
 		SameSite: http.SameSiteStrictMode,
 		MaxAge:   7 * 24 * 60 * 60,
 	})

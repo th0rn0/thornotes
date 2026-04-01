@@ -74,6 +74,7 @@ All options are available as environment variables and CLI flags.
 | `THORNOTES_DB` | `--db` | `thornotes.db` | SQLite database path |
 | `THORNOTES_NOTES_ROOT` | `--notes-root` | `notes` | Root directory for `.md` files |
 | `THORNOTES_ALLOW_REGISTRATION` | `--allow-registration` | `true` | Allow new user sign-up |
+| `THORNOTES_SECURE_COOKIES` | `--secure-cookies` | `false` | Set `Secure` flag on session cookie — enable when serving over HTTPS |
 | `THORNOTES_TRUSTED_PROXY` | `--trusted-proxy` | _(none)_ | CIDR of trusted reverse proxy (e.g. `10.0.0.0/8`) — enables `X-Forwarded-For` for rate limiting |
 | `THORNOTES_WATCH_INTERVAL` | `--watch-interval` | `30s` | How often to poll the notes directory for external file changes. Set to `0` to disable |
 

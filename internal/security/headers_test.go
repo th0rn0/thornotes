@@ -24,7 +24,8 @@ func TestSecureHeaders_SetsExpectedHeaders(t *testing.T) {
 
 	csp := rr.Header().Get("Content-Security-Policy")
 	assert.Contains(t, csp, "default-src 'self'")
-	assert.Contains(t, csp, "script-src 'self' 'unsafe-inline'")
+	assert.Contains(t, csp, "script-src 'self'")
+	assert.NotContains(t, csp, "script-src 'self' 'unsafe-inline'", "script-src must not allow unsafe-inline")
 	assert.Contains(t, csp, "style-src 'self' 'unsafe-inline'")
 	assert.Contains(t, csp, "img-src 'self' data:")
 	assert.Contains(t, csp, "font-src 'self'")
