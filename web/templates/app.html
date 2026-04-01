@@ -2,77 +2,122 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#222222" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#252526" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="thornotes">
+<link rel="manifest" href="/static/manifest.json">
+<link rel="apple-touch-icon" href="/static/icons/icon-192.svg">
 <title>thornotes</title>
 <link rel="stylesheet" href="/static/css/font-awesome.min.css">
 <link rel="stylesheet" href="/static/css/easymde.min.css">
 <link rel="stylesheet" href="/static/css/highlight-github.min.css" id="hljs-theme">
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: system-ui, -apple-system, sans-serif; font-size: 13px; background: #f5f5f5; color: #222; height: 100vh; overflow: hidden; }
+body {
+  font-family: system-ui, -apple-system, sans-serif;
+  font-size: 13px;
+  background: #f5f5f5;
+  color: #222;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
 
 /* AUTH */
-#auth-screen { display: flex; align-items: center; justify-content: center; height: 100vh; background: #f0f0f0; }
+#auth-screen { display: flex; align-items: center; justify-content: center; height: 100%; background: #f0f0f0; }
 .auth-box { background: #fff; border: 1px solid #ccc; padding: 32px; width: 320px; }
 .auth-box h1 { font-size: 18px; margin-bottom: 4px; letter-spacing: -0.5px; }
 .auth-box .tagline { font-size: 11px; color: #888; margin-bottom: 24px; }
 .auth-box label { display: block; font-size: 11px; color: #555; margin-bottom: 4px; }
 .auth-box input { display: block; width: 100%; border: 1px solid #ccc; padding: 7px 10px; font-size: 13px; margin-bottom: 14px; }
-.auth-box button { width: 100%; background: #222; color: #fff; border: none; padding: 8px; font-size: 13px; cursor: pointer; }
+.auth-box button { width: 100%; background: #222; color: #fff; border: none; padding: 10px; font-size: 13px; cursor: pointer; }
 .auth-box button:hover { background: #444; }
 .auth-box .switch-link { text-align: center; margin-top: 14px; font-size: 11px; color: #888; }
 .auth-box .switch-link a { color: #444; cursor: pointer; }
 .auth-box .error { color: #c00; font-size: 11px; margin-top: 8px; }
 
 /* APP */
-#app-screen { display: none; height: 100vh; flex-direction: column; }
-.topbar { display: flex; align-items: center; justify-content: space-between; background: #fff; border-bottom: 1px solid #ddd; padding: 0 12px; height: 38px; flex-shrink: 0; }
+#app-screen { display: none; height: 100%; flex-direction: column; }
+.topbar { display: flex; align-items: center; justify-content: space-between; background: #fff; border-bottom: 1px solid #ddd; padding: 0 12px; height: 44px; flex-shrink: 0; gap: 8px; }
 .topbar .logo { font-size: 14px; font-weight: 600; letter-spacing: -0.5px; }
-.topbar .user { font-size: 11px; color: #888; }
-.topbar .user button { background: none; border: none; color: #555; cursor: pointer; font-size: 11px; }
-.main { display: flex; flex: 1; overflow: hidden; }
+.topbar .user { font-size: 11px; color: #888; display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.topbar .user button { background: none; border: none; color: #555; cursor: pointer; font-size: 11px; padding: 4px 6px; min-height: 32px; }
+.main { display: flex; flex: 1; overflow: hidden; position: relative; }
+
+/* MOBILE TOPBAR MENU BUTTON */
+.topbar-menu-btn {
+  display: none;
+  background: none;
+  border: none;
+  font-size: 18px;
+  cursor: pointer;
+  color: #444;
+  padding: 0 6px;
+  min-height: 44px;
+  min-width: 36px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+/* SIDEBAR OVERLAY (mobile) */
+.sidebar-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 200;
+  touch-action: none;
+}
+.sidebar-overlay.active { display: block; }
 
 /* SIDEBAR */
 .sidebar { width: 220px; flex-shrink: 0; background: #fafafa; border-right: 1px solid #ddd; display: flex; flex-direction: column; overflow: hidden; }
 .sidebar-toolbar { display: flex; gap: 4px; padding: 8px; border-bottom: 1px solid #eee; }
-.sidebar-toolbar button { flex: 1; padding: 5px 0; font-size: 11px; border: 1px solid #ccc; background: #fff; cursor: pointer; color: #333; }
+.sidebar-toolbar button { flex: 1; padding: 8px 0; font-size: 11px; border: 1px solid #ccc; background: #fff; cursor: pointer; color: #333; min-height: 36px; }
 .sidebar-toolbar button:hover { background: #f0f0f0; }
 .sidebar-search { padding: 6px 8px; border-bottom: 1px solid #eee; }
-.sidebar-search input { width: 100%; border: 1px solid #ddd; padding: 4px 8px; font-size: 12px; }
-.tree { flex: 1; overflow-y: auto; padding: 4px 0; }
-.tree-folder-label { display: flex; align-items: center; gap: 4px; padding: 4px 8px; cursor: pointer; color: #444; font-size: 12px; user-select: none; }
+.sidebar-search input { width: 100%; border: 1px solid #ddd; padding: 6px 8px; font-size: 12px; }
+.tree { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 4px 0; }
+.tree-folder-label { display: flex; align-items: center; gap: 4px; padding: 6px 8px; cursor: pointer; color: #444; font-size: 12px; user-select: none; min-height: 34px; }
 .tree-folder-label:hover { background: #eee; }
 .tree-folder-label.active { background: #e0e0e0; color: #111; font-weight: 500; }
 .tree-folder-label .icon { font-size: 10px; color: #888; width: 12px; }
 .tree-notes { padding-left: 8px; }
-.tree-note { padding: 3px 8px 3px 20px; cursor: pointer; font-size: 12px; color: #555; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tree-note { padding: 5px 8px 5px 20px; cursor: pointer; font-size: 12px; color: #555; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-height: 32px; display: flex; align-items: center; }
 .tree-note:hover { background: #eee; }
 .tree-note.active { background: #222; color: #fff; }
 .tree-unsorted { padding: 8px 8px 2px; font-size: 10px; color: #aaa; text-transform: uppercase; letter-spacing: 0.5px; }
 
 /* EDITOR */
-.editor-pane { flex: 1; display: flex; flex-direction: column; overflow: hidden; background: #fff; }
+.editor-pane { flex: 1; display: flex; flex-direction: column; overflow: hidden; background: #fff; min-width: 0; }
 .editor-titlebar { display: flex; align-items: center; justify-content: space-between; padding: 0 16px; height: 44px; border-bottom: 1px solid #eee; flex-shrink: 0; gap: 12px; }
-.editor-titlebar input { border: none; outline: none; font-size: 16px; font-weight: 600; letter-spacing: -0.3px; flex: 1; background: transparent; }
+.editor-titlebar input { border: none; outline: none; font-size: 16px; font-weight: 600; letter-spacing: -0.3px; flex: 1; background: transparent; min-width: 0; }
 .editor-meta { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 .save-status { font-size: 11px; color: #aaa; }
 .save-status.saving { color: #f80; }
 .save-status.saved { color: #080; }
 .save-status.error { color: #c00; }
-.share-btn { font-size: 11px; border: 1px solid #ccc; padding: 4px 10px; background: #fff; cursor: pointer; color: #333; }
+.share-btn { font-size: 11px; border: 1px solid #ccc; padding: 5px 10px; background: #fff; cursor: pointer; color: #333; min-height: 30px; }
 .tags-input { font-size: 11px; border: 1px solid #eee; padding: 3px 6px; color: #666; min-width: 80px; }
 .editor-area { flex: 1; overflow: hidden; }
 .editor-area .CodeMirror { height: 100%; }
 .editor-area .EasyMDEContainer { height: 100%; display: flex; flex-direction: column; }
 .editor-area .EasyMDEContainer .CodeMirror { flex: 1; }
 .editor-statusbar-custom { padding: 0 16px; height: 26px; border-top: 1px solid #eee; background: #fafafa; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
-.editor-statusbar-custom span { font-size: 11px; color: #999; }
+.editor-statusbar-custom span { font-size: 11px; color: #999; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* EMPTY STATE */
 .empty-state { display: flex; align-items: center; justify-content: center; flex: 1; color: #aaa; font-size: 13px; }
 
 /* NOTIFICATIONS */
-#notification { position: fixed; top: 12px; left: 50%; transform: translateX(-50%); background: #222; color: #fff; padding: 8px 16px; font-size: 12px; z-index: 1000; display: none; border-radius: 2px; }
+#notification { position: fixed; top: 12px; left: 50%; transform: translateX(-50%); background: #222; color: #fff; padding: 8px 16px; font-size: 12px; z-index: 1000; display: none; border-radius: 2px; max-width: calc(100vw - 32px); text-align: center; }
 #notification.error { background: #c00; }
 
 /* MODALS */
@@ -81,10 +126,10 @@ body { font-family: system-ui, -apple-system, sans-serif; font-size: 13px; backg
 .modal h2 { font-size: 15px; margin-bottom: 16px; }
 .modal p { font-size: 12px; color: #666; margin-bottom: 16px; }
 .modal label { display: block; font-size: 11px; color: #555; margin-bottom: 4px; }
-.modal input[type=text], .modal select { display: block; width: 100%; border: 1px solid #ccc; padding: 6px 8px; font-size: 13px; margin-bottom: 14px; background: #fff; }
+.modal input[type=text], .modal select { display: block; width: 100%; border: 1px solid #ccc; padding: 8px; font-size: 13px; margin-bottom: 14px; background: #fff; }
 .modal input[type=text]:focus, .modal select:focus { outline: none; border-color: #888; }
 .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 4px; }
-.modal-actions button { padding: 6px 14px; font-size: 12px; border: 1px solid #ccc; cursor: pointer; background: #fff; }
+.modal-actions button { padding: 8px 14px; font-size: 12px; border: 1px solid #ccc; cursor: pointer; background: #fff; min-height: 36px; }
 .modal-actions button:hover { background: #f0f0f0; }
 .modal-actions button.primary { background: #222; color: #fff; border-color: #222; }
 .modal-actions button.primary:hover { background: #444; }
@@ -115,6 +160,7 @@ body.dark .topbar { background: #252526; border-bottom-color: #3e3e42; }
 body.dark .topbar .logo { color: #d4d4d4; }
 body.dark .topbar .user { color: #858585; }
 body.dark .topbar .user button { color: #9cdcfe; }
+body.dark .topbar-menu-btn { color: #ccc; }
 body.dark .toggle-track { background: #555; }
 body.dark .theme-toggle input:checked + .toggle-track { background: #0e639c; }
 body.dark .toggle-label { color: #858585; }
@@ -164,19 +210,19 @@ body.dark #notification.error { background: #8b0000; }
 .token-list { margin-bottom: 12px; max-height: 200px; overflow-y: auto; }
 .token-item { display: flex; align-items: center; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #eee; gap: 8px; }
 .token-item:last-child { border-bottom: none; }
-.token-name { font-size: 12px; font-weight: 500; flex: 1; }
-.token-prefix { font-size: 11px; font-family: monospace; color: #888; }
-.token-date { font-size: 10px; color: #aaa; }
-.token-revoke { background: none; border: 1px solid #ccc; padding: 2px 8px; font-size: 10px; cursor: pointer; color: #c00; }
+.token-name { font-size: 12px; font-weight: 500; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.token-prefix { font-size: 11px; font-family: monospace; color: #888; flex-shrink: 0; }
+.token-date { font-size: 10px; color: #aaa; flex-shrink: 0; }
+.token-revoke { background: none; border: 1px solid #ccc; padding: 4px 8px; font-size: 10px; cursor: pointer; color: #c00; min-height: 28px; flex-shrink: 0; }
 .token-revoke:hover { background: #fff0f0; }
 .token-new-reveal { margin-bottom: 14px; }
 .token-new-reveal label { display: block; font-size: 11px; color: #555; margin-bottom: 4px; }
 .token-new-reveal .token-value { font-family: monospace; font-size: 11px; background: #f5f5f5; border: 1px solid #ddd; padding: 6px 8px; word-break: break-all; margin-bottom: 6px; }
-.token-copy-btn { font-size: 11px; border: 1px solid #ccc; background: #fff; padding: 3px 10px; cursor: pointer; }
+.token-copy-btn { font-size: 11px; border: 1px solid #ccc; background: #fff; padding: 5px 10px; cursor: pointer; min-height: 30px; }
 .token-copy-btn:hover { background: #f0f0f0; }
 .account-section-title { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 8px; }
 .mcp-info { font-size: 11px; color: #666; background: #f9f9f9; border: 1px solid #eee; padding: 8px 10px; margin-bottom: 12px; line-height: 1.6; }
-.mcp-info code { font-family: monospace; font-size: 10px; background: #eee; padding: 1px 4px; }
+.mcp-info code { font-family: monospace; font-size: 10px; background: #eee; padding: 1px 4px; word-break: break-all; }
 body.dark .token-item { border-bottom-color: #3e3e42; }
 body.dark .token-prefix { color: #666; }
 body.dark .token-date { color: #555; }
@@ -193,12 +239,12 @@ body.dark .account-section-title { color: #666; }
 .journal-section { border-bottom: 1px solid #eee; }
 .journal-toolbar { display: flex; align-items: center; padding: 5px 8px; gap: 4px; }
 .journal-toolbar-label { font-size: 10px; color: #aaa; text-transform: uppercase; letter-spacing: 0.5px; flex: 1; }
-.journal-today-btn { flex: 1; padding: 4px 0; font-size: 11px; border: 1px solid #ccc; background: #fff; cursor: pointer; color: #333; }
+.journal-today-btn { flex: 1; padding: 6px 0; font-size: 11px; border: 1px solid #ccc; background: #fff; cursor: pointer; color: #333; min-height: 32px; }
 .journal-today-btn:hover { background: #f0f0f0; }
-.journal-manage-btn { padding: 4px 6px; font-size: 11px; border: 1px solid #ccc; background: #fff; cursor: pointer; color: #888; }
+.journal-manage-btn { padding: 4px 8px; font-size: 11px; border: 1px solid #ccc; background: #fff; cursor: pointer; color: #888; min-height: 32px; }
 .journal-manage-btn:hover { background: #f0f0f0; }
 .journal-picker { padding: 0 8px 6px; }
-.journal-picker select { width: 100%; border: 1px solid #ddd; padding: 3px 6px; font-size: 11px; background: #fff; }
+.journal-picker select { width: 100%; border: 1px solid #ddd; padding: 5px 6px; font-size: 11px; background: #fff; }
 body.dark .journal-section { border-bottom-color: #3e3e42; }
 body.dark .journal-toolbar-label { color: #555; }
 body.dark .journal-today-btn { border-color: #4a4a4a; background: #2d2d2d; color: #ccc; }
@@ -212,12 +258,61 @@ body.dark .journal-picker select { border-color: #4a4a4a; background: #3c3c3c; c
 .journal-item { display: flex; align-items: center; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #eee; }
 .journal-item:last-child { border-bottom: none; }
 .journal-item-name { font-size: 12px; flex: 1; }
-.journal-delete-btn { background: none; border: 1px solid #ccc; padding: 2px 8px; font-size: 10px; cursor: pointer; color: #c00; }
+.journal-delete-btn { background: none; border: 1px solid #ccc; padding: 4px 8px; font-size: 10px; cursor: pointer; color: #c00; min-height: 28px; }
 .journal-delete-btn:hover { background: #fff0f0; }
 body.dark .journal-item { border-bottom-color: #3e3e42; }
 body.dark .journal-item-name { color: #ccc; }
 body.dark .journal-delete-btn { border-color: #4a4a4a; color: #f48771; }
 body.dark .journal-delete-btn:hover { background: #3c2020; }
+
+/* ── RESPONSIVE / MOBILE ──────────────────────────────────────────────────── */
+@media (max-width: 640px) {
+  /* Show hamburger, hide desktop-only topbar items */
+  .topbar-menu-btn { display: flex; align-items: center; justify-content: center; }
+  .toggle-label { display: none; }
+  .topbar .user { gap: 2px; }
+
+  /* Off-canvas sidebar — slides in from left */
+  .sidebar {
+    position: fixed;
+    left: -220px;
+    top: 0;
+    bottom: 0;
+    z-index: 300;
+    transition: left 0.22s ease;
+    padding-top: env(safe-area-inset-top);
+  }
+  .sidebar.mobile-open { left: 0; }
+
+  /* More touch-friendly tree items */
+  .tree-note { min-height: 40px; font-size: 13px; padding-top: 0; padding-bottom: 0; }
+  .tree-folder-label { min-height: 40px; font-size: 13px; }
+  .sidebar-toolbar button { min-height: 40px; padding: 0; }
+  .journal-today-btn, .journal-manage-btn { min-height: 36px; }
+
+  /* Editor pane fills full width */
+  .editor-pane { width: 100%; }
+
+  /* Wrap editor titlebar on narrow screens */
+  .editor-titlebar { height: auto; min-height: 44px; flex-wrap: wrap; padding: 8px 12px; gap: 8px; }
+  .editor-meta { width: 100%; }
+  .editor-statusbar-custom span:first-child { display: none; }
+
+  /* Bottom-sheet modals on mobile */
+  .modal-overlay { align-items: flex-end; padding: 0; }
+  .modal {
+    max-width: 100%;
+    width: 100%;
+    border-left: none;
+    border-right: none;
+    border-bottom: none;
+    border-top: 1px solid #ccc;
+    border-radius: 0;
+    padding: 20px 16px;
+    padding-bottom: max(20px, env(safe-area-inset-bottom));
+  }
+  body.dark .modal { border-top-color: #3e3e42; }
+}
 </style>
 </head>
 <body>
@@ -251,6 +346,7 @@ body.dark .journal-delete-btn:hover { background: #3c2020; }
 <!-- APP SCREEN -->
 <div id="app-screen">
   <div class="topbar">
+    <button class="topbar-menu-btn" onclick="toggleSidebar()" aria-label="Toggle sidebar">&#9776;</button>
     <span class="logo">thornotes</span>
     <label class="theme-toggle" title="Toggle dark mode">
       <input type="checkbox" id="dark-mode-toggle" onchange="toggleDarkMode(this.checked)">
@@ -264,7 +360,8 @@ body.dark .journal-delete-btn:hover { background: #3c2020; }
     </span>
   </div>
   <div class="main">
-    <div class="sidebar">
+    <div class="sidebar-overlay" id="sidebar-overlay" onclick="closeSidebar()"></div>
+    <div class="sidebar" id="sidebar">
       <div class="sidebar-toolbar">
         <button onclick="promptCreateNote()">+ Note</button>
         <button onclick="promptCreateFolder()">+ Folder</button>
@@ -367,8 +464,8 @@ body.dark .journal-delete-btn:hover { background: #3c2020; }
       <button class="token-copy-btn" onclick="copyNewToken()">Copy</button>
     </div>
     <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px">
-      <input id="new-token-name" type="text" placeholder="Token name (e.g. Claude Desktop)" style="flex:1;border:1px solid #ccc;padding:5px 8px;font-size:12px" />
-      <button onclick="createToken()" style="padding:5px 14px;font-size:12px;border:1px solid #ccc;background:#fff;cursor:pointer">+ New token</button>
+      <input id="new-token-name" type="text" placeholder="Token name (e.g. Claude Desktop)" style="flex:1;border:1px solid #ccc;padding:7px 8px;font-size:12px" />
+      <button onclick="createToken()" style="padding:7px 14px;font-size:12px;border:1px solid #ccc;background:#fff;cursor:pointer;white-space:nowrap">+ New token</button>
     </div>
     <div class="modal-actions">
       <button class="primary" onclick="closeAccountModal()">Done</button>
@@ -382,8 +479,8 @@ body.dark .journal-delete-btn:hover { background: #3c2020; }
     <h2>Journals</h2>
     <div class="journal-list" id="journal-list"></div>
     <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px">
-      <input id="new-journal-name" type="text" placeholder="Journal name (e.g. Personal)" onkeydown="if(event.key==='Enter')submitNewJournal();if(event.key==='Escape')closeManageJournalsModal()" style="flex:1;border:1px solid #ccc;padding:5px 8px;font-size:12px" />
-      <button onclick="submitNewJournal()" style="padding:5px 14px;font-size:12px;border:1px solid #ccc;background:#fff;cursor:pointer">+ Add</button>
+      <input id="new-journal-name" type="text" placeholder="Journal name (e.g. Personal)" onkeydown="if(event.key==='Enter')submitNewJournal();if(event.key==='Escape')closeManageJournalsModal()" style="flex:1;border:1px solid #ccc;padding:7px 8px;font-size:12px" />
+      <button onclick="submitNewJournal()" style="padding:7px 14px;font-size:12px;border:1px solid #ccc;background:#fff;cursor:pointer">+ Add</button>
     </div>
     <div class="error" id="journal-error"></div>
     <div class="modal-actions">
@@ -398,5 +495,10 @@ body.dark .journal-delete-btn:hover { background: #3c2020; }
 <script src="/static/js/vendor/marked.min.js"></script>
 <script src="/static/js/vendor/highlight.min.js"></script>
 <script src="/static/js/app.js"></script>
+<script>
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').catch(() => {});
+}
+</script>
 </body>
 </html>

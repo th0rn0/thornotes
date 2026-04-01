@@ -95,11 +95,14 @@ Max 200,000 chars (~50k tokens). Truncates oldest notes first.
 
 ---
 
-### Mobile / PWA
-**What:** EasyMDE is not good on mobile. Evaluate CodeMirror 6 as a replacement.
-Add viewport meta, touch-friendly UI adjustments.
+### CodeMirror 6 editor (mobile editor experience)
+**What:** EasyMDE (built on CodeMirror 5) has a poor touch experience. CodeMirror 6 is a complete rewrite with first-class mobile support and a modular architecture.
 
-**Why:** Research shows mobile-responsive web UI is now expected for self-hosted apps.
+**Why:** The PWA shell and responsive layout shipped in v0.9.0.0. The remaining mobile gap is the editor itself — toolbar overflow, virtual keyboard handling, and cursor interaction are all suboptimal on touch devices.
+
+**How:** Replace EasyMDE with a CodeMirror 6 setup: `@codemirror/view`, `@codemirror/lang-markdown`, `@codemirror/commands`. Requires reimplementing the preview toggle and toolbar. Significant effort — evaluate bundling approach (esbuild/rollup) vs. serving modules directly.
+
+**Where:** `web/static/js/app.js`, `web/static/js/vendor/`, `web/templates/app.html`
 
 ---
 
@@ -140,6 +143,9 @@ Add viewport meta, touch-friendly UI adjustments.
 
 ### Lazy-loading note list: GET /api/v1/folders/{id}/notes
 **Completed:** v0.1.0.0 (2026-03-29) — Endpoint registered in router, `loadedFolderIds` tracking in `app.js`, folder expand fetches notes lazily.
+
+### Mobile / PWA
+**Completed:** v0.9.0.0 — PWA manifest + service worker (SW at `/sw.js` for root scope); SVG icons 192×192 and 512×512; responsive off-canvas sidebar with hamburger toggle and overlay; touch-friendly tap targets (≥ 32–44 px); safe-area insets; `100dvh`; bottom-sheet modals on mobile; auto-close sidebar on note open. CodeMirror 6 editor replacement deferred (significant effort, separate TODO).
 
 ### MySQL/PostgreSQL support
 **Completed:** v0.7.0.0 — `internal/repository/mysql/` implements all repository interfaces against `database/sql`. MySQL migrations in `internal/db/mysql_migrations/`. FULLTEXT search via `MATCH...AGAINST` in boolean mode. Select via `THORNOTES_DB_DRIVER=mysql` + `THORNOTES_DB_DSN`. Docker Compose with MySQL example in README.
