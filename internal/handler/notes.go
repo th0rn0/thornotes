@@ -3,7 +3,7 @@ package handler
 import (
 	"net/http"
 
-	"github.com/th0rn0/thornotes/internal/auth"
+	"github.com/gin-gonic/gin"
 	"github.com/th0rn0/thornotes/internal/model"
 	"github.com/th0rn0/thornotes/internal/notes"
 )
@@ -22,73 +22,73 @@ type createNoteRequest struct {
 	Tags     []string `json:"tags"`
 }
 
-func (h *NotesHandler) Create(w http.ResponseWriter, r *http.Request) {
-	user := auth.UserFromContext(r.Context())
+func (h *NotesHandler) Create(c *gin.Context) {
+	user := ginUser(c)
 	var req createNoteRequest
-	if err := readJSON(r, &req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+	if err := readJSON(c, &req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	note, err := h.svc.CreateNote(r.Context(), user.ID, req.FolderID, req.Title, req.Tags)
+	note, err := h.svc.CreateNote(c.Request.Context(), user.ID, req.FolderID, req.Title, req.Tags)
 	if err != nil {
-		writeError(w, err)
+		writeError(c, err)
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, note)
+	c.JSON(http.StatusCreated, note)
 }
 
-func (h *NotesHandler) Get(w http.ResponseWriter, r *http.Request) {
-	user := auth.UserFromContext(r.Context())
-	noteID, err := pathParamInt64(r, "id")
+func (h *NotesHandler) Get(c *gin.Context) {
+	user := ginUser(c)
+	noteID, err := ginParamInt64(c, "id")
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid note id"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid note id"})
 		return
 	}
 
-	note, err := h.svc.GetNote(r.Context(), user.ID, noteID)
+	note, err := h.svc.GetNote(c.Request.Context(), user.ID, noteID)
 	if err != nil {
-		writeError(w, err)
+		writeError(c, err)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, note)
+	c.JSON(http.StatusOK, note)
 }
 
 type patchNoteRequest struct {
-	Content      *string  `json:"content"`
-	ContentHash  *string  `json:"content_hash"` // required when patching content
-	Title        *string  `json:"title"`
-	Tags         []string `json:"tags"`
+	Content     *string  `json:"content"`
+	ContentHash *string  `json:"content_hash"` // required when patching content
+	Title       *string  `json:"title"`
+	Tags        []string `json:"tags"`
 }
 
-func (h *NotesHandler) Patch(w http.ResponseWriter, r *http.Request) {
-	user := auth.UserFromContext(r.Context())
-	noteID, err := pathParamInt64(r, "id")
+func (h *NotesHandler) Patch(c *gin.Context) {
+	user := ginUser(c)
+	noteID, err := ginParamInt64(c, "id")
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid note id"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid note id"})
 		return
 	}
 
 	var req patchNoteRequest
-	if err := readJSON(r, &req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+	if err := readJSON(c, &req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
 	// Update content if provided.
 	if req.Content != nil {
 		if req.ContentHash == nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "content_hash required when patching content"})
+			c.JSON(http.StatusBadRequest, gin.H{"error": "content_hash required when patching content"})
 			return
 		}
-		newHash, err := h.svc.UpdateNoteContent(r.Context(), user.ID, noteID, *req.Content, *req.ContentHash)
+		newHash, err := h.svc.UpdateNoteContent(c.Request.Context(), user.ID, noteID, *req.Content, *req.ContentHash)
 		if err != nil {
-			writeError(w, err)
+			writeError(c, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]string{"content_hash": newHash})
+		c.JSON(http.StatusOK, gin.H{"content_hash": newHash})
 		return
 	}
 
@@ -97,104 +97,101 @@ func (h *NotesHandler) Patch(w http.ResponseWriter, r *http.Request) {
 	if req.Title != nil {
 		title = *req.Title
 	}
-	if err := h.svc.UpdateNoteMetadata(r.Context(), user.ID, noteID, title, req.Tags); err != nil {
-		writeError(w, err)
+	if err := h.svc.UpdateNoteMetadata(c.Request.Context(), user.ID, noteID, title, req.Tags); err != nil {
+		writeError(c, err)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{"message": "updated"})
+	c.JSON(http.StatusOK, gin.H{"message": "updated"})
 }
 
-func (h *NotesHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	user := auth.UserFromContext(r.Context())
-	noteID, err := pathParamInt64(r, "id")
+func (h *NotesHandler) Delete(c *gin.Context) {
+	user := ginUser(c)
+	noteID, err := ginParamInt64(c, "id")
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid note id"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid note id"})
 		return
 	}
 
-	if err := h.svc.DeleteNote(r.Context(), user.ID, noteID); err != nil {
-		writeError(w, err)
+	if err := h.svc.DeleteNote(c.Request.Context(), user.ID, noteID); err != nil {
+		writeError(c, err)
 		return
 	}
 
-	w.WriteHeader(http.StatusNoContent)
+	c.Status(http.StatusNoContent)
 }
 
 type shareRequest struct {
 	Clear bool `json:"clear"`
 }
 
-func (h *NotesHandler) Share(w http.ResponseWriter, r *http.Request) {
-	user := auth.UserFromContext(r.Context())
-	noteID, err := pathParamInt64(r, "id")
+func (h *NotesHandler) Share(c *gin.Context) {
+	user := ginUser(c)
+	noteID, err := ginParamInt64(c, "id")
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid note id"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid note id"})
 		return
 	}
 
 	var req shareRequest
-	_ = readJSON(r, &req) // optional body
+	_ = readJSON(c, &req) // optional body
 
-	token, err := h.svc.SetShareToken(r.Context(), user.ID, noteID, req.Clear)
+	token, err := h.svc.SetShareToken(c.Request.Context(), user.ID, noteID, req.Clear)
 	if err != nil {
-		writeError(w, err)
+		writeError(c, err)
 		return
 	}
 
 	if token == nil {
-		writeJSON(w, http.StatusOK, map[string]any{"share_token": nil})
+		c.JSON(http.StatusOK, gin.H{"share_token": nil})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"share_token": *token})
+	c.JSON(http.StatusOK, gin.H{"share_token": *token})
 }
 
-func (h *NotesHandler) ListRoot(w http.ResponseWriter, r *http.Request) {
-	user := auth.UserFromContext(r.Context())
-	items, err := h.svc.ListNotes(r.Context(), user.ID, nil)
+func (h *NotesHandler) ListRoot(c *gin.Context) {
+	user := ginUser(c)
+	items, err := h.svc.ListNotes(c.Request.Context(), user.ID, nil)
 	if err != nil {
-		writeError(w, err)
+		writeError(c, err)
 		return
 	}
 	if items == nil {
 		items = []*model.NoteListItem{}
 	}
-	writeJSON(w, http.StatusOK, items)
+	c.JSON(http.StatusOK, items)
 }
 
-func (h *NotesHandler) ListAll(w http.ResponseWriter, r *http.Request) {
-	user := auth.UserFromContext(r.Context())
-	items, err := h.svc.ListAllNotes(r.Context(), user.ID)
+func (h *NotesHandler) ListAll(c *gin.Context) {
+	user := ginUser(c)
+	items, err := h.svc.ListAllNotes(c.Request.Context(), user.ID)
 	if err != nil {
-		writeError(w, err)
+		writeError(c, err)
 		return
 	}
 	if items == nil {
 		items = []*model.NoteListItem{}
 	}
-	writeJSON(w, http.StatusOK, items)
+	c.JSON(http.StatusOK, items)
 }
 
-func (h *NotesHandler) Search(w http.ResponseWriter, r *http.Request) {
-	user := auth.UserFromContext(r.Context())
-	q := r.URL.Query().Get("q")
+func (h *NotesHandler) Search(c *gin.Context) {
+	user := ginUser(c)
+	q := c.Query("q")
 	if q == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "q parameter required"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "q parameter required"})
 		return
 	}
 
-	var tags []string
-	if tagParam := r.URL.Query()["tag"]; tagParam != nil {
-		tags = tagParam
-	}
+	tags := c.QueryArray("tag")
 
-	results, err := h.svc.Search(r.Context(), user.ID, q, tags)
+	results, err := h.svc.Search(c.Request.Context(), user.ID, q, tags)
 	if err != nil {
-		writeError(w, err)
+		writeError(c, err)
 		return
 	}
 	if results == nil {
 		results = []*model.SearchResult{}
 	}
-	writeJSON(w, http.StatusOK, results)
+	c.JSON(http.StatusOK, results)
 }

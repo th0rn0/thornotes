@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/gin-gonic/gin"
 	"github.com/th0rn0/thornotes/internal/apperror"
 	"github.com/th0rn0/thornotes/internal/auth"
 	"github.com/th0rn0/thornotes/internal/model"
@@ -90,7 +91,13 @@ type mcpTextContent struct {
 
 // ── Handler ───────────────────────────────────────────────────────────────────
 
-func (h *MCPHandler) Handle(w http.ResponseWriter, r *http.Request) {
+// Handle is the gin handler — delegates to handle(w, r) to keep all internal
+// MCP logic unchanged.
+func (h *MCPHandler) Handle(c *gin.Context) {
+	h.handle(c.Writer, c.Request)
+}
+
+func (h *MCPHandler) handle(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	var req rpcRequest

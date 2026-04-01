@@ -4,7 +4,6 @@ import (
 	"context"
 	"html/template"
 	iofs "io/fs"
-	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -12,6 +11,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 	thornotes "github.com/th0rn0/thornotes"
 	"github.com/th0rn0/thornotes/internal/auth"
 	"github.com/th0rn0/thornotes/internal/config"
@@ -26,13 +27,12 @@ import (
 )
 
 func main() {
-	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.LevelInfo,
-	})))
+	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: time.RFC3339})
+	zerolog.SetGlobalLevel(zerolog.InfoLevel)
 
 	cfg, err := config.Parse()
 	if err != nil {
-		slog.Error("parse config", "err", err)
+		log.Error().Err(err).Msg("parse config")
 		os.Exit(1)
 	}
 
@@ -41,7 +41,7 @@ func main() {
 	switch strings.ToLower(cfg.DBDriver) {
 	case "mysql":
 		if cfg.DBDSN == "" {
-			slog.Error("--db-dsn / THORNOTES_DB_DSN is required when using mysql driver")
+			log.Error().Msg("--db-dsn / THORNOTES_DB_DSN is required when using mysql driver")
 			os.Exit(1)
 		}
 		pool, err = db.OpenMySQL(cfg.DBDSN)
@@ -49,7 +49,7 @@ func main() {
 		pool, err = db.Open(cfg.DBPath)
 	}
 	if err != nil {
-		slog.Error("open database", "driver", cfg.DBDriver, "err", err)
+		log.Error().Err(err).Str("driver", cfg.DBDriver).Msg("open database")
 		os.Exit(1)
 	}
 	defer pool.Close()
@@ -87,7 +87,7 @@ func main() {
 	// Build file store.
 	fs, err := notes.NewFileStore(cfg.NotesRoot)
 	if err != nil {
-		slog.Error("init file store", "err", err)
+		log.Error().Err(err).Msg("init file store")
 		os.Exit(1)
 	}
 
@@ -101,7 +101,7 @@ func main() {
 	// Parse templates from embedded FS.
 	tmpl, err := template.ParseFS(thornotes.TemplatesFS, "web/templates/*.html")
 	if err != nil {
-		slog.Error("parse templates", "err", err)
+		log.Error().Err(err).Msg("parse templates")
 		os.Exit(1)
 	}
 
@@ -111,7 +111,7 @@ func main() {
 	// Sub the embedded FS to "web/static" so FileServer sees it as the root.
 	staticSub, err := iofs.Sub(thornotes.StaticFS, "web/static")
 	if err != nil {
-		slog.Error("sub static fs", "err", err)
+		log.Error().Err(err).Msg("sub static fs")
 		os.Exit(1)
 	}
 	h := router.New(authSvc, notesSvc, apiTokenRepo, userRepo, rateLimiter, tmpl, http.FS(staticSub), notifyHub, cfg.SecureCookies)
@@ -132,9 +132,9 @@ func main() {
 	defer watchCancel()
 
 	go func() {
-		slog.Info("thornotes starting", "addr", cfg.Addr, "driver", cfg.DBDriver)
+		log.Info().Str("addr", cfg.Addr).Str("driver", cfg.DBDriver).Msg("thornotes starting")
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			slog.Error("server error", "err", err)
+			log.Error().Err(err).Msg("server error")
 			os.Exit(1)
 		}
 	}()
@@ -145,29 +145,29 @@ func main() {
 		defer ticker.Stop()
 		for range ticker.C {
 			if err := sessionRepo.DeleteExpired(context.Background()); err != nil {
-				slog.Warn("delete expired sessions", "err", err)
+				log.Warn().Err(err).Msg("delete expired sessions")
 			}
 		}
 	}()
 
 	// Disk watcher: poll for file changes and push SSE notifications.
 	if cfg.WatchInterval > 0 {
-		slog.Info("disk watcher enabled", "interval", cfg.WatchInterval)
+		log.Info().Dur("interval", cfg.WatchInterval).Msg("disk watcher enabled")
 		go notes.Watch(watchCtx, cfg.WatchInterval, notesSvc, userRepo, notifyHub)
 	}
 
 	<-stop
-	slog.Info("shutting down...")
+	log.Info().Msg("shutting down...")
 	watchCancel()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	if err := srv.Shutdown(ctx); err != nil {
-		slog.Error("shutdown error", "err", err)
+		log.Error().Err(err).Msg("shutdown error")
 	}
 
 	// Wait for in-flight file writes to complete.
 	fs.Wait()
-	slog.Info("shutdown complete")
+	log.Info().Msg("shutdown complete")
 }

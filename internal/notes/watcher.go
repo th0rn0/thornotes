@@ -2,9 +2,9 @@ package notes
 
 import (
 	"context"
-	"log/slog"
 	"time"
 
+	"github.com/rs/zerolog/log"
 	"github.com/th0rn0/thornotes/internal/hub"
 	"github.com/th0rn0/thornotes/internal/repository"
 )
@@ -32,17 +32,17 @@ func Watch(ctx context.Context, interval time.Duration, notesSvc *Service, userR
 func reconcileAllUsers(ctx context.Context, notesSvc *Service, userRepo repository.UserRepository, h *hub.Hub) {
 	ids, err := userRepo.IDs(ctx)
 	if err != nil {
-		slog.Warn("watcher: list user ids", "err", err)
+		log.Warn().Err(err).Msg("watcher: list user ids")
 		return
 	}
 	for _, userID := range ids {
 		changed, err := reconcileUserForWatch(ctx, notesSvc, userID)
 		if err != nil {
-			slog.Warn("watcher: reconcile user", "user_id", userID, "err", err)
+			log.Warn().Err(err).Int64("user_id", userID).Msg("watcher: reconcile user")
 			continue
 		}
 		if changed > 0 {
-			slog.Info("watcher: disk changes detected", "user_id", userID, "notes_updated", changed)
+			log.Info().Int64("user_id", userID).Int("notes_updated", changed).Msg("watcher: disk changes detected")
 			h.Notify(userID, "notes_changed")
 		}
 	}
@@ -70,9 +70,9 @@ func reconcileUserForWatch(ctx context.Context, svc *Service, userID int64) (int
 			continue
 		}
 
-		slog.Info("watcher: updating changed note", "id", rec.ID, "disk_path", rec.DiskPath)
+		log.Info().Int64("id", rec.ID).Str("disk_path", rec.DiskPath).Msg("watcher: updating changed note")
 		if err := svc.notes.UpdateContent(ctx, userID, rec.ID, fileContent, fileHash, rec.ContentHash); err != nil {
-			slog.Warn("watcher: update content", "id", rec.ID, "err", err)
+			log.Warn().Err(err).Int64("id", rec.ID).Msg("watcher: update content")
 			continue
 		}
 		updated++

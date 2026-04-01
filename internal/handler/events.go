@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/th0rn0/thornotes/internal/auth"
+	"github.com/gin-gonic/gin"
 	"github.com/th0rn0/thornotes/internal/hub"
 )
 
@@ -25,27 +25,27 @@ func NewEventsHandler(h *hub.Hub) *EventsHandler {
 // Stream handles GET /api/v1/events.
 // The response is an infinite SSE stream; the connection is held open until the
 // client disconnects or the server shuts down.
-func (h *EventsHandler) Stream(w http.ResponseWriter, r *http.Request) {
-	user := auth.UserFromContext(r.Context())
+func (h *EventsHandler) Stream(c *gin.Context) {
+	user := ginUser(c)
 	if user == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return
 	}
 
 	// Verify the client accepts SSE (nice to have, not strictly required).
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("X-Accel-Buffering", "no") // disable nginx buffering
+	c.Writer.Header().Set("Content-Type", "text/event-stream")
+	c.Writer.Header().Set("Cache-Control", "no-cache")
+	c.Writer.Header().Set("X-Accel-Buffering", "no") // disable nginx buffering
 
-	flusher, ok := w.(http.Flusher)
+	flusher, ok := c.Writer.(http.Flusher)
 	if !ok {
-		http.Error(w, "streaming not supported", http.StatusInternalServerError)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "streaming not supported"})
 		return
 	}
 
 	// Send an initial connection-established comment so the client knows the
 	// stream is live. SSE comments start with ":".
-	fmt.Fprintf(w, ": connected\n\n")
+	fmt.Fprintf(c.Writer, ": connected\n\n")
 	flusher.Flush()
 
 	ch, unsub := h.hub.Subscribe(user.ID)
@@ -54,7 +54,7 @@ func (h *EventsHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	keepalive := time.NewTicker(sseKeepaliveInterval)
 	defer keepalive.Stop()
 
-	ctx := r.Context()
+	ctx := c.Request.Context()
 	for {
 		select {
 		case <-ctx.Done():
@@ -63,11 +63,11 @@ func (h *EventsHandler) Stream(w http.ResponseWriter, r *http.Request) {
 			if !ok {
 				return
 			}
-			fmt.Fprintf(w, "event: %s\ndata: {}\n\n", event)
+			fmt.Fprintf(c.Writer, "event: %s\ndata: {}\n\n", event)
 			flusher.Flush()
 		case <-keepalive.C:
 			// SSE comment as keepalive to prevent proxies from closing the connection.
-			fmt.Fprintf(w, ": keepalive\n\n")
+			fmt.Fprintf(c.Writer, ": keepalive\n\n")
 			flusher.Flush()
 		}
 	}

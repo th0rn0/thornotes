@@ -2,9 +2,8 @@ package handler
 
 import (
 	"net/http"
-	"strconv"
 
-	"github.com/th0rn0/thornotes/internal/auth"
+	"github.com/gin-gonic/gin"
 	"github.com/th0rn0/thornotes/internal/model"
 	"github.com/th0rn0/thornotes/internal/notes"
 )
@@ -17,17 +16,17 @@ func NewFoldersHandler(svc *notes.Service) *FoldersHandler {
 	return &FoldersHandler{svc: svc}
 }
 
-func (h *FoldersHandler) List(w http.ResponseWriter, r *http.Request) {
-	user := auth.UserFromContext(r.Context())
-	tree, err := h.svc.FolderTree(r.Context(), user.ID)
+func (h *FoldersHandler) List(c *gin.Context) {
+	user := ginUser(c)
+	tree, err := h.svc.FolderTree(c.Request.Context(), user.ID)
 	if err != nil {
-		writeError(w, err)
+		writeError(c, err)
 		return
 	}
 	if tree == nil {
 		tree = []*model.FolderTreeItem{}
 	}
-	writeJSON(w, http.StatusOK, tree)
+	c.JSON(http.StatusOK, tree)
 }
 
 type createFolderRequest struct {
@@ -35,86 +34,80 @@ type createFolderRequest struct {
 	Name     string `json:"name"`
 }
 
-func (h *FoldersHandler) Create(w http.ResponseWriter, r *http.Request) {
-	user := auth.UserFromContext(r.Context())
+func (h *FoldersHandler) Create(c *gin.Context) {
+	user := ginUser(c)
 	var req createFolderRequest
-	if err := readJSON(r, &req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+	if err := readJSON(c, &req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	folder, err := h.svc.CreateFolder(r.Context(), user.ID, req.ParentID, req.Name)
+	folder, err := h.svc.CreateFolder(c.Request.Context(), user.ID, req.ParentID, req.Name)
 	if err != nil {
-		writeError(w, err)
+		writeError(c, err)
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, folder)
+	c.JSON(http.StatusCreated, folder)
 }
 
 type renameFolderRequest struct {
 	Name string `json:"name"`
 }
 
-func (h *FoldersHandler) Rename(w http.ResponseWriter, r *http.Request) {
-	user := auth.UserFromContext(r.Context())
-	folderID, err := pathParamInt64(r, "id")
+func (h *FoldersHandler) Rename(c *gin.Context) {
+	user := ginUser(c)
+	folderID, err := ginParamInt64(c, "id")
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid folder id"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid folder id"})
 		return
 	}
 
 	var req renameFolderRequest
-	if err := readJSON(r, &req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+	if err := readJSON(c, &req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	if err := h.svc.RenameFolder(r.Context(), user.ID, folderID, req.Name); err != nil {
-		writeError(w, err)
+	if err := h.svc.RenameFolder(c.Request.Context(), user.ID, folderID, req.Name); err != nil {
+		writeError(c, err)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{"message": "renamed"})
+	c.JSON(http.StatusOK, gin.H{"message": "renamed"})
 }
 
-func (h *FoldersHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	user := auth.UserFromContext(r.Context())
-	folderID, err := pathParamInt64(r, "id")
+func (h *FoldersHandler) Delete(c *gin.Context) {
+	user := ginUser(c)
+	folderID, err := ginParamInt64(c, "id")
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid folder id"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid folder id"})
 		return
 	}
 
-	if err := h.svc.DeleteFolder(r.Context(), user.ID, folderID); err != nil {
-		writeError(w, err)
+	if err := h.svc.DeleteFolder(c.Request.Context(), user.ID, folderID); err != nil {
+		writeError(c, err)
 		return
 	}
 
-	w.WriteHeader(http.StatusNoContent)
+	c.Status(http.StatusNoContent)
 }
 
-func (h *FoldersHandler) ListNotes(w http.ResponseWriter, r *http.Request) {
-	user := auth.UserFromContext(r.Context())
-	folderID, err := pathParamInt64(r, "id")
+func (h *FoldersHandler) ListNotes(c *gin.Context) {
+	user := ginUser(c)
+	folderID, err := ginParamInt64(c, "id")
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid folder id"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid folder id"})
 		return
 	}
 
-	items, err := h.svc.ListNotes(r.Context(), user.ID, &folderID)
+	items, err := h.svc.ListNotes(c.Request.Context(), user.ID, &folderID)
 	if err != nil {
-		writeError(w, err)
+		writeError(c, err)
 		return
 	}
 	if items == nil {
 		items = []*model.NoteListItem{}
 	}
-	writeJSON(w, http.StatusOK, items)
-}
-
-// pathParamInt64 extracts a named path parameter from Go 1.22 ServeMux.
-func pathParamInt64(r *http.Request, name string) (int64, error) {
-	s := r.PathValue(name)
-	return strconv.ParseInt(s, 10, 64)
+	c.JSON(http.StatusOK, items)
 }

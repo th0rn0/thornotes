@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"golang.org/x/time/rate"
 )
 
@@ -38,6 +39,7 @@ func NewAuthRateLimiter(trustedProxy *net.IPNet) *AuthRateLimiter {
 }
 
 // Middleware wraps an HTTP handler with per-IP rate limiting.
+// Kept for backward compat with tests.
 func (rl *AuthRateLimiter) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ip := rl.extractIP(r)
@@ -51,6 +53,22 @@ func (rl *AuthRateLimiter) Middleware(next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, r)
 	})
+}
+
+// GinMiddleware returns a gin.HandlerFunc with per-IP rate limiting.
+func (rl *AuthRateLimiter) GinMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ip := rl.extractIP(c.Request)
+		limiter := rl.getLimiter(ip)
+
+		if !limiter.Allow() {
+			c.Header("Retry-After", "900")
+			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{"error": "rate limit exceeded"})
+			return
+		}
+
+		c.Next()
+	}
 }
 
 func (rl *AuthRateLimiter) getLimiter(ip string) *rate.Limiter {
