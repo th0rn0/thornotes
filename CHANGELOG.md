@@ -2,6 +2,11 @@
 
 All notable changes to thornotes are documented here.
 
+## [0.13.3.0] - 2026-04-01
+
+### Fixed
+- **MariaDB/MySQL migrations now run correctly** — the `go-sql-driver/mysql` driver rejects SQL files containing more than one semicolon-separated statement unless `multiStatements=true` is set in the DSN. Migration files (e.g. `001_initial.up.sql`) contain multiple `CREATE TABLE` statements, causing a syntax error on first startup. Migrations now use a separate short-lived connection with `multiStatements=true`; the main connection pool keeps it off to avoid any multi-statement injection risk in the app itself.
+
 ## [0.13.2.0] - 2026-04-01
 
 ### Fixed

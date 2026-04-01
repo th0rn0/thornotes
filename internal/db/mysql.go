@@ -5,6 +5,7 @@ import (
 	"embed"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/golang-migrate/migrate/v4"
 	migratemysql "github.com/golang-migrate/migrate/v4/database/mysql"
@@ -15,7 +16,7 @@ import (
 //go:embed mysql_migrations/*.sql
 var mysqlMigrationsFS embed.FS
 
-// OpenMySQL opens a MySQL connection, runs migrations, and returns a Pool.
+// OpenMySQL opens a MySQL/MariaDB connection, runs migrations, and returns a Pool.
 // For MySQL there is no read/write split — both ReadDB and WriteDB point to
 // the same *sql.DB connection pool. MySQL handles concurrency internally.
 func OpenMySQL(dsn string) (*Pool, error) {
@@ -32,22 +33,35 @@ func OpenMySQL(dsn string) (*Pool, error) {
 		return nil, fmt.Errorf("ping mysql: %w", err)
 	}
 
-	p := &Pool{ReadDB: db, WriteDB: db}
-	if err := p.migrateMySQL(); err != nil {
+	// Migrations run on a separate connection with multiStatements=true.
+	// The go-sql-driver/mysql driver rejects SQL files that contain more than
+	// one semicolon-separated statement unless this flag is set. Keeping it off
+	// on the main pool avoids any risk of multi-statement injection via the app.
+	if err := runMySQLMigrations(dsn); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("mysql migrate: %w", err)
 	}
 
-	return p, nil
+	return &Pool{ReadDB: db, WriteDB: db}, nil
 }
 
-func (p *Pool) migrateMySQL() error {
+func runMySQLMigrations(dsn string) error {
+	sep := "?"
+	if strings.Contains(dsn, "?") {
+		sep = "&"
+	}
+	migDB, err := sql.Open("mysql", dsn+sep+"multiStatements=true")
+	if err != nil {
+		return fmt.Errorf("open migration db: %w", err)
+	}
+	defer migDB.Close()
+
 	src, err := iofs.New(mysqlMigrationsFS, "mysql_migrations")
 	if err != nil {
 		return fmt.Errorf("iofs: %w", err)
 	}
 
-	driver, err := migratemysql.WithInstance(p.WriteDB, &migratemysql.Config{})
+	driver, err := migratemysql.WithInstance(migDB, &migratemysql.Config{})
 	if err != nil {
 		return fmt.Errorf("migrate driver: %w", err)
 	}
@@ -65,7 +79,7 @@ func (p *Pool) migrateMySQL() error {
 			// CREATE TABLE IF NOT EXISTS so re-running a partially applied migration
 			// is safe.
 			if ferr := m.Force(dirtyErr.Version - 1); ferr != nil {
-				return fmt.Errorf("migrate up: force version after dirty state: %w", ferr)
+				return fmt.Errorf("force version after dirty state: %w", ferr)
 			}
 			if err := m.Up(); err != nil && err != migrate.ErrNoChange {
 				return fmt.Errorf("migrate up: %w", err)
