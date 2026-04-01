@@ -110,3 +110,21 @@ func TestParse_InvalidCIDR_ReturnsError(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid --trusted-proxy CIDR")
 }
+
+func TestParse_SkipReconciliation_Default(t *testing.T) {
+	resetFlags()
+	os.Unsetenv("THORNOTES_SKIP_RECONCILIATION")
+
+	cfg, err := Parse()
+	require.NoError(t, err)
+	assert.False(t, cfg.SkipReconciliation)
+}
+
+func TestParse_SkipReconciliation_EnvTrue(t *testing.T) {
+	resetFlags()
+	t.Setenv("THORNOTES_SKIP_RECONCILIATION", "true")
+
+	cfg, err := Parse()
+	require.NoError(t, err)
+	assert.True(t, cfg.SkipReconciliation)
+}

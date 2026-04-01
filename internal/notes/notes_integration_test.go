@@ -482,6 +482,21 @@ func TestService_Reconcile(t *testing.T) {
 	assert.Equal(t, notes.HashContent("manually changed content"), updated.ContentHash)
 }
 
+func TestService_Reconcile_ProgressLogging(t *testing.T) {
+	// Verify Reconcile completes without error when there are > 100 notes
+	// (exercises the progress-log branch at i%100==0).
+	svc, userID := newTestStack(t)
+	ctx := context.Background()
+
+	for i := range 105 {
+		_, err := svc.CreateNote(ctx, userID, nil, fmt.Sprintf("note-%03d", i), nil)
+		require.NoError(t, err)
+	}
+
+	err := svc.Reconcile(ctx, userID)
+	require.NoError(t, err)
+}
+
 func TestService_Reconcile_MissingFile(t *testing.T) {
 	dir := t.TempDir()
 	pool, err := db.Open(filepath.Join(dir, "test.db"))
