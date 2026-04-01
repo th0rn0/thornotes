@@ -25,7 +25,7 @@ CREATE TABLE IF NOT EXISTS folders (
     -- Generated column coalesces NULL parent_id to 0 for the unique index.
     -- MySQL UNIQUE indexes treat NULL as distinct, so without this trick
     -- multiple root folders with the same name would be allowed.
-    parent_id_key BIGINT       NOT NULL AS (COALESCE(parent_id, 0)) VIRTUAL,
+    parent_id_key BIGINT       AS (COALESCE(parent_id, 0)) VIRTUAL,
     created_at    DATETIME     NOT NULL DEFAULT (UTC_TIMESTAMP()),
     CONSTRAINT fk_folders_user   FOREIGN KEY (user_id)   REFERENCES users(id)   ON DELETE CASCADE,
     CONSTRAINT fk_folders_parent FOREIGN KEY (parent_id) REFERENCES folders(id) ON DELETE CASCADE,

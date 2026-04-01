@@ -2,6 +2,11 @@
 
 All notable changes to thornotes are documented here.
 
+## [0.13.5.0] - 2026-04-01
+
+### Fixed
+- **MariaDB virtual column syntax** — `parent_id_key` in the `folders` table was defined as `BIGINT NOT NULL AS (expr) VIRTUAL`. MySQL 8.0 accepts `NOT NULL` before `AS`, but MariaDB requires the constraint to come after the generated column clause. MariaDB also does not accept `NOT NULL` on a `VIRTUAL` column at all. The `NOT NULL` constraint was removed; it was semantically redundant since `COALESCE(parent_id, 0)` never returns NULL. Fixes migration failure (`Error 1064`) on MariaDB 11 introduced in v0.7.0.0.
+
 ## [0.13.4.0] - 2026-04-01
 
 ### Fixed
