@@ -24,6 +24,10 @@ type SessionRepository interface {
 type FolderRepository interface {
 	Create(ctx context.Context, userID int64, parentID *int64, name, diskPath string) (*model.Folder, error)
 	GetByID(ctx context.Context, userID, folderID int64) (*model.Folder, error)
+	// GetByDiskPath returns the folder with the given disk_path, or ErrNotFound.
+	// disk_path is unique across all users so no userID filter is needed, but callers
+	// should still verify ownership via the returned Folder.UserID.
+	GetByDiskPath(ctx context.Context, diskPath string) (*model.Folder, error)
 	Tree(ctx context.Context, userID int64) ([]*model.FolderTreeItem, error)
 	Rename(ctx context.Context, userID, folderID int64, newName, newDiskPath string) error
 	// UpdateDescendantPaths is called as part of folder rename to cascade disk_path updates.
@@ -36,7 +40,12 @@ type NoteRepository interface {
 	Create(ctx context.Context, n *model.Note) (*model.Note, error)
 	GetByID(ctx context.Context, userID, noteID int64) (*model.Note, error)
 	GetByShareToken(ctx context.Context, token string) (*model.Note, error)
+	// GetByFolderAndSlug returns a note by folder + slug, or ErrNotFound.
+	// Pass nil folderID to look up root (unsorted) notes.
+	GetByFolderAndSlug(ctx context.Context, userID int64, folderID *int64, slug string) (*model.Note, error)
 	ListByFolder(ctx context.Context, userID int64, folderID *int64) ([]*model.NoteListItem, error)
+	// ListAll returns note metadata for all notes owned by userID, across all folders.
+	ListAll(ctx context.Context, userID int64) ([]*model.NoteListItem, error)
 	// ListAllForWatch returns lightweight records for all notes owned by userID.
 	// Used by the disk watcher to detect content changes without loading full content.
 	ListAllForWatch(ctx context.Context, userID int64) ([]*model.NoteWatchRecord, error)
@@ -52,6 +61,13 @@ type APITokenRepository interface {
 	ListByUser(ctx context.Context, userID int64) ([]*model.APIToken, error)
 	Delete(ctx context.Context, userID, tokenID int64) error
 	TouchLastUsed(ctx context.Context, tokenID int64) error
+}
+
+type JournalRepository interface {
+	Create(ctx context.Context, userID int64, name string) (*model.Journal, error)
+	GetByID(ctx context.Context, userID, journalID int64) (*model.Journal, error)
+	ListByUser(ctx context.Context, userID int64) ([]*model.Journal, error)
+	Delete(ctx context.Context, userID, journalID int64) error
 }
 
 type SearchRepository interface {

@@ -43,6 +43,7 @@ type Note struct {
 
 type NoteListItem struct {
 	ID        int64     `json:"id"`
+	FolderID  *int64    `json:"folder_id"`
 	Title     string    `json:"title"`
 	Slug      string    `json:"slug"`
 	Tags      []string  `json:"tags"`
@@ -71,6 +72,13 @@ type NoteWatchRecord struct {
 	ID          int64
 	DiskPath    string
 	ContentHash string
+}
+
+type Journal struct {
+	ID        int64     `json:"id"`
+	UserID    int64     `json:"user_id"`
+	Name      string    `json:"name"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 type APIToken struct {
