@@ -701,7 +701,7 @@ function renderJournalList() {
   list.innerHTML = journals.map(j =>
     `<div class="journal-item">
        <span class="journal-item-name">${esc(j.name)}</span>
-       <button class="journal-delete-btn" onclick="deleteJournal(${j.id})">Remove</button>
+       <button class="journal-delete-btn" data-journal-id="${j.id}">Remove</button>
      </div>`
   ).join('');
 }
@@ -747,3 +747,77 @@ function esc(s) {
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('/sw.js').catch(() => {});
 }
+
+// ── Event bindings (replaces inline onclick/onchange/oninput attrs) ─────────
+// Auth
+document.getElementById('login-btn').addEventListener('click', login);
+document.getElementById('show-register-link').addEventListener('click', showRegister);
+document.getElementById('register-btn').addEventListener('click', register);
+document.getElementById('show-login-link').addEventListener('click', showLogin);
+
+// Topbar
+document.querySelector('.topbar-menu-btn').addEventListener('click', toggleSidebar);
+document.getElementById('dark-mode-toggle').addEventListener('change', function() { toggleDarkMode(this.checked); });
+document.getElementById('account-btn').addEventListener('click', showAccountModal);
+document.getElementById('logout-btn').addEventListener('click', logout);
+
+// Sidebar
+document.getElementById('sidebar-overlay').addEventListener('click', closeSidebar);
+document.getElementById('create-note-btn').addEventListener('click', promptCreateNote);
+document.getElementById('create-folder-btn').addEventListener('click', promptCreateFolder);
+document.getElementById('search-input').addEventListener('input', function() { onSearch(this.value); });
+document.querySelector('.journal-today-btn').addEventListener('click', openTodayJournal);
+document.querySelector('.journal-manage-btn').addEventListener('click', showManageJournalsModal);
+
+// Editor
+document.getElementById('note-title').addEventListener('change', onTitleChange);
+document.getElementById('note-tags').addEventListener('change', onTagsChange);
+document.querySelector('.share-btn').addEventListener('click', shareNote);
+
+// Conflict modal
+document.getElementById('conflict-discard-btn').addEventListener('click', function() { resolveConflict('discard'); });
+document.getElementById('conflict-overwrite-btn').addEventListener('click', function() { resolveConflict('overwrite'); });
+
+// New note modal
+document.getElementById('new-note-modal').addEventListener('click', function(e) { if (e.target === this) closeNewNoteModal(); });
+document.getElementById('new-note-title').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') submitNewNote();
+  if (e.key === 'Escape') closeNewNoteModal();
+});
+document.getElementById('new-note-folder').addEventListener('keydown', function(e) { if (e.key === 'Escape') closeNewNoteModal(); });
+document.getElementById('new-note-cancel-btn').addEventListener('click', closeNewNoteModal);
+document.getElementById('new-note-submit-btn').addEventListener('click', submitNewNote);
+
+// New folder modal
+document.getElementById('new-folder-modal').addEventListener('click', function(e) { if (e.target === this) closeNewFolderModal(); });
+document.getElementById('new-folder-name').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') submitNewFolder();
+  if (e.key === 'Escape') closeNewFolderModal();
+});
+document.getElementById('new-folder-parent').addEventListener('keydown', function(e) { if (e.key === 'Escape') closeNewFolderModal(); });
+document.getElementById('new-folder-cancel-btn').addEventListener('click', closeNewFolderModal);
+document.getElementById('new-folder-submit-btn').addEventListener('click', submitNewFolder);
+
+// Account modal
+document.getElementById('account-modal').addEventListener('click', function(e) { if (e.target === this) closeAccountModal(); });
+document.querySelector('.token-copy-btn').addEventListener('click', copyNewToken);
+document.getElementById('create-token-btn').addEventListener('click', createToken);
+document.getElementById('account-done-btn').addEventListener('click', closeAccountModal);
+
+// Manage journals modal
+document.getElementById('manage-journals-modal').addEventListener('click', function(e) { if (e.target === this) closeManageJournalsModal(); });
+document.getElementById('new-journal-name').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') submitNewJournal();
+  if (e.key === 'Escape') closeManageJournalsModal();
+});
+document.getElementById('add-journal-btn').addEventListener('click', submitNewJournal);
+document.getElementById('manage-journals-done-btn').addEventListener('click', closeManageJournalsModal);
+
+// Journal list — event delegation for dynamically rendered delete buttons
+document.getElementById('journal-list').addEventListener('click', function(e) {
+  const btn = e.target.closest('.journal-delete-btn');
+  if (btn) deleteJournal(Number(btn.dataset.journalId));
+});
+
+// Disk full banner
+document.getElementById('disk-full-dismiss').addEventListener('click', function() { document.getElementById('disk-full-banner').style.display = 'none'; });

@@ -329,8 +329,8 @@ body.dark .journal-delete-btn:hover { background: #3c2020; }
       <input id="login-username" type="text" autocomplete="username" />
       <label>Password</label>
       <input id="login-password" type="password" autocomplete="current-password" />
-      <button onclick="login()">Sign in</button>
-      <div class="switch-link"><a onclick="showRegister()">Create account</a></div>
+      <button id="login-btn">Sign in</button>
+      <div class="switch-link"><a id="show-register-link">Create account</a></div>
       <div class="error" id="login-error"></div>
     </div>
     <div id="auth-form-register" style="display:none">
@@ -338,8 +338,8 @@ body.dark .journal-delete-btn:hover { background: #3c2020; }
       <input id="reg-username" type="text" autocomplete="username" />
       <label>Password (min 12 characters)</label>
       <input id="reg-password" type="password" autocomplete="new-password" />
-      <button onclick="register()">Create account</button>
-      <div class="switch-link"><a onclick="showLogin()">Sign in instead</a></div>
+      <button id="register-btn">Create account</button>
+      <div class="switch-link"><a id="show-login-link">Sign in instead</a></div>
       <div class="error" id="reg-error"></div>
     </div>
   </div>
@@ -348,34 +348,34 @@ body.dark .journal-delete-btn:hover { background: #3c2020; }
 <!-- APP SCREEN -->
 <div id="app-screen">
   <div class="topbar">
-    <button class="topbar-menu-btn" onclick="toggleSidebar()" aria-label="Toggle sidebar">&#9776;</button>
+    <button class="topbar-menu-btn" aria-label="Toggle sidebar">&#9776;</button>
     <span class="logo">thornotes</span>
     <label class="theme-toggle" title="Toggle dark mode">
-      <input type="checkbox" id="dark-mode-toggle" onchange="toggleDarkMode(this.checked)">
+      <input type="checkbox" id="dark-mode-toggle">
       <span class="toggle-track"><span class="toggle-thumb"></span></span>
       <span class="toggle-label">Dark</span>
     </label>
     <span class="user">
       <span id="topbar-username"></span>&nbsp;·&nbsp;
-      <button onclick="showAccountModal()">Account</button>&nbsp;·&nbsp;
-      <button onclick="logout()">Sign out</button>
+      <button id="account-btn">Account</button>&nbsp;·&nbsp;
+      <button id="logout-btn">Sign out</button>
     </span>
   </div>
   <div class="main">
-    <div class="sidebar-overlay" id="sidebar-overlay" onclick="closeSidebar()"></div>
+    <div class="sidebar-overlay" id="sidebar-overlay"></div>
     <div class="sidebar" id="sidebar">
       <div class="sidebar-toolbar">
-        <button onclick="promptCreateNote()">+ Note</button>
-        <button onclick="promptCreateFolder()">+ Folder</button>
+        <button id="create-note-btn">+ Note</button>
+        <button id="create-folder-btn">+ Folder</button>
       </div>
       <div class="sidebar-search">
-        <input id="search-input" type="search" placeholder="Search notes…" oninput="onSearch(this.value)" />
+        <input id="search-input" type="search" placeholder="Search notes…" />
       </div>
       <div class="journal-section" id="journal-section" style="display:none">
         <div class="journal-toolbar">
           <span class="journal-toolbar-label">Journal</span>
-          <button class="journal-today-btn" onclick="openTodayJournal()">Today</button>
-          <button class="journal-manage-btn" onclick="showManageJournalsModal()" title="Manage journals">⚙</button>
+          <button class="journal-today-btn">Today</button>
+          <button class="journal-manage-btn" title="Manage journals">⚙</button>
         </div>
         <div class="journal-picker" id="journal-picker" style="display:none">
           <select id="journal-select"></select>
@@ -387,11 +387,11 @@ body.dark .journal-delete-btn:hover { background: #3c2020; }
       <div class="empty-state" id="empty-state">Select or create a note</div>
       <div id="editor-container" style="display:none; flex:1; flex-direction:column; overflow:hidden;">
         <div class="editor-titlebar">
-          <input id="note-title" type="text" placeholder="Note title" onchange="onTitleChange()" />
+          <input id="note-title" type="text" placeholder="Note title" />
           <div class="editor-meta">
-            <input id="note-tags" type="text" class="tags-input" placeholder="tags, comma, separated" onchange="onTagsChange()" title="Tags (comma-separated)" />
+            <input id="note-tags" type="text" class="tags-input" placeholder="tags, comma, separated" title="Tags (comma-separated)" />
             <span class="save-status" id="save-status">Saved</span>
-            <button class="share-btn" onclick="shareNote()">Share ↗</button>
+            <button class="share-btn">Share ↗</button>
           </div>
         </div>
         <div class="editor-area" id="editor-area"></div>
@@ -410,46 +410,46 @@ body.dark .journal-delete-btn:hover { background: #3c2020; }
     <h2>Edit conflict</h2>
     <p>This note was modified from another location. Your changes and the server version conflict.</p>
     <div class="modal-actions">
-      <button onclick="resolveConflict('discard')">Discard my changes</button>
-      <button class="primary" onclick="resolveConflict('overwrite')">Overwrite with my version</button>
+      <button id="conflict-discard-btn">Discard my changes</button>
+      <button id="conflict-overwrite-btn" class="primary">Overwrite with my version</button>
     </div>
   </div>
 </div>
 
 <!-- NEW NOTE MODAL -->
-<div class="modal-overlay" id="new-note-modal" onclick="if(event.target===this)closeNewNoteModal()">
+<div class="modal-overlay" id="new-note-modal">
   <div class="modal">
     <h2>New note</h2>
     <label for="new-note-title">Title</label>
-    <input id="new-note-title" type="text" placeholder="Note title" onkeydown="if(event.key==='Enter')submitNewNote();if(event.key==='Escape')closeNewNoteModal()" />
+    <input id="new-note-title" type="text" placeholder="Note title" />
     <label for="new-note-folder">Folder</label>
-    <select id="new-note-folder" onkeydown="if(event.key==='Escape')closeNewNoteModal()"></select>
+    <select id="new-note-folder"></select>
     <div class="error" id="new-note-error"></div>
     <div class="modal-actions">
-      <button onclick="closeNewNoteModal()">Cancel</button>
-      <button class="primary" onclick="submitNewNote()">Create</button>
+      <button id="new-note-cancel-btn">Cancel</button>
+      <button id="new-note-submit-btn" class="primary">Create</button>
     </div>
   </div>
 </div>
 
 <!-- NEW FOLDER MODAL -->
-<div class="modal-overlay" id="new-folder-modal" onclick="if(event.target===this)closeNewFolderModal()">
+<div class="modal-overlay" id="new-folder-modal">
   <div class="modal">
     <h2>New folder</h2>
     <label for="new-folder-name">Name</label>
-    <input id="new-folder-name" type="text" placeholder="Folder name" onkeydown="if(event.key==='Enter')submitNewFolder();if(event.key==='Escape')closeNewFolderModal()" />
+    <input id="new-folder-name" type="text" placeholder="Folder name" />
     <label for="new-folder-parent">Parent folder</label>
-    <select id="new-folder-parent" onkeydown="if(event.key==='Escape')closeNewFolderModal()"></select>
+    <select id="new-folder-parent"></select>
     <div class="error" id="new-folder-error"></div>
     <div class="modal-actions">
-      <button onclick="closeNewFolderModal()">Cancel</button>
-      <button class="primary" onclick="submitNewFolder()">Create</button>
+      <button id="new-folder-cancel-btn">Cancel</button>
+      <button id="new-folder-submit-btn" class="primary">Create</button>
     </div>
   </div>
 </div>
 
 <!-- ACCOUNT MODAL -->
-<div class="modal-overlay" id="account-modal" onclick="if(event.target===this)closeAccountModal()">
+<div class="modal-overlay" id="account-modal">
   <div class="modal" style="max-width:480px">
     <h2>Account</h2>
     <p class="account-section-title">MCP Server</p>
@@ -463,36 +463,36 @@ body.dark .journal-delete-btn:hover { background: #3c2020; }
     <div id="token-reveal-area" style="display:none" class="token-new-reveal">
       <label>New token (copy it now — it won't be shown again):</label>
       <div class="token-value" id="token-reveal-value"></div>
-      <button class="token-copy-btn" onclick="copyNewToken()">Copy</button>
+      <button class="token-copy-btn">Copy</button>
     </div>
     <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px">
       <input id="new-token-name" type="text" placeholder="Token name (e.g. Claude Desktop)" style="flex:1;border:1px solid #ccc;padding:7px 8px;font-size:12px" />
-      <button onclick="createToken()" style="padding:7px 14px;font-size:12px;border:1px solid #ccc;background:#fff;cursor:pointer;white-space:nowrap">+ New token</button>
+      <button id="create-token-btn" style="padding:7px 14px;font-size:12px;border:1px solid #ccc;background:#fff;cursor:pointer;white-space:nowrap">+ New token</button>
     </div>
     <div class="modal-actions">
-      <button class="primary" onclick="closeAccountModal()">Done</button>
+      <button id="account-done-btn" class="primary">Done</button>
     </div>
   </div>
 </div>
 
 <!-- MANAGE JOURNALS MODAL -->
-<div class="modal-overlay" id="manage-journals-modal" onclick="if(event.target===this)closeManageJournalsModal()">
+<div class="modal-overlay" id="manage-journals-modal">
   <div class="modal">
     <h2>Journals</h2>
     <div class="journal-list" id="journal-list"></div>
     <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px">
-      <input id="new-journal-name" type="text" placeholder="Journal name (e.g. Personal)" onkeydown="if(event.key==='Enter')submitNewJournal();if(event.key==='Escape')closeManageJournalsModal()" style="flex:1;border:1px solid #ccc;padding:7px 8px;font-size:12px" />
-      <button onclick="submitNewJournal()" style="padding:7px 14px;font-size:12px;border:1px solid #ccc;background:#fff;cursor:pointer">+ Add</button>
+      <input id="new-journal-name" type="text" placeholder="Journal name (e.g. Personal)" style="flex:1;border:1px solid #ccc;padding:7px 8px;font-size:12px" />
+      <button id="add-journal-btn" style="padding:7px 14px;font-size:12px;border:1px solid #ccc;background:#fff;cursor:pointer">+ Add</button>
     </div>
     <div class="error" id="journal-error"></div>
     <div class="modal-actions">
-      <button class="primary" onclick="closeManageJournalsModal()">Done</button>
+      <button id="manage-journals-done-btn" class="primary">Done</button>
     </div>
   </div>
 </div>
 
 <div id="notification"></div>
-<div id="disk-full-banner">&#9888; Your disk is full &mdash; note could not be saved. Free up space to continue.<a onclick="document.getElementById('disk-full-banner').style.display='none'">Dismiss</a></div>
+<div id="disk-full-banner">&#9888; Your disk is full &mdash; note could not be saved. Free up space to continue.<a id="disk-full-dismiss">Dismiss</a></div>
 
 <script src="/static/js/vendor/easymde.min.js"></script>
 <script src="/static/js/vendor/marked.min.js"></script>
