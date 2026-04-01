@@ -2,6 +2,11 @@
 
 All notable changes to thornotes are documented here.
 
+## [0.11.0.0] - 2026-04-01
+
+### Added
+- **Disk-full error handling** — when `FileStore.Write()` fails with `ENOSPC`, the server returns HTTP 507 (Insufficient Storage) instead of silently dropping the save. The auto-save handler in the browser detects 507 and shows a persistent red banner: "Your disk is full — note could not be saved." with a dismiss button. Prevents silent data loss for self-hosters with small disks.
+
 ## [0.10.0.0] - 2026-04-01
 
 ### Added

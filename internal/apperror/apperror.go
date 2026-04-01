@@ -30,6 +30,7 @@ var (
 	ErrForbidden     = errors.New("forbidden")
 	ErrPathTraversal = errors.New("path traversal detected")
 	ErrTooLarge      = errors.New("content too large")
+	ErrDiskFull      = errors.New("disk full")
 )
 
 func New(code int, message string, err error) *AppError {
@@ -58,4 +59,8 @@ func BadRequest(msg string) *AppError {
 
 func Internal(msg string, err error) *AppError {
 	return &AppError{Code: http.StatusInternalServerError, Message: msg, Err: err}
+}
+
+func DiskFull() *AppError {
+	return &AppError{Code: http.StatusInsufficientStorage, Message: "disk full", Err: ErrDiskFull}
 }

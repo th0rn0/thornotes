@@ -55,19 +55,6 @@ Add `--skip-reconciliation` flag to bypass scan on trusted restarts.
 
 ---
 
-### Disk-full error → clear user notification (507 response)
-**What:** When `FileStore.Write()` fails because disk is full, the auto-save silently
-fails and the user loses their last 2 seconds of edits with no notification.
-
-**Why:** Prevents silent data loss. Users on self-hosted deployments with small disks
-will hit this.
-
-**How:** Detect `syscall.ENOSPC` in `fs.go`. Map to `ErrDiskFull` sentinel. In the
-PATCH note handler, map `ErrDiskFull` → HTTP 507. In `app.js`, display a persistent
-error banner: "Your disk is full — note could not be saved."
-
-**Where:** `internal/notes/fs.go`, `internal/handler/notes.go`, `web/static/js/app.js`
-
 ---
 
 ### Git-backed version history
@@ -130,6 +117,9 @@ Max 200,000 chars (~50k tokens). Truncates oldest notes first.
 
 ### Rate limiter: X-Forwarded-For + --trusted-proxy flag
 **Completed:** v0.1.0.0 (2026-03-29) — Implemented in `internal/security/ratelimit.go` with `--trusted-proxy` CIDR flag in `internal/config/config.go`.
+
+### Disk-full error → 507 response + persistent UI banner
+**Completed:** v0.11.0.0 — `isENOSPC` detects `syscall.ENOSPC` in `fs.go`; wraps as `apperror.DiskFull()` (HTTP 507). `autoSave` in `app.js` detects `e.status === 507` and shows a persistent red banner: "Your disk is full — note could not be saved."
 
 ### Lazy-loading note list: GET /api/v1/folders/{id}/notes
 **Completed:** v0.1.0.0 (2026-03-29) — Endpoint registered in router, `loadedFolderIds` tracking in `app.js`, folder expand fetches notes lazily.

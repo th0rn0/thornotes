@@ -119,6 +119,8 @@ body {
 /* NOTIFICATIONS */
 #notification { position: fixed; top: 12px; left: 50%; transform: translateX(-50%); background: #222; color: #fff; padding: 8px 16px; font-size: 12px; z-index: 1000; display: none; border-radius: 2px; max-width: calc(100vw - 32px); text-align: center; }
 #notification.error { background: #c00; }
+#disk-full-banner { position: fixed; bottom: 0; left: 0; right: 0; background: #c00; color: #fff; padding: 10px 16px; font-size: 13px; text-align: center; z-index: 1100; display: none; }
+#disk-full-banner a { color: #fff; text-decoration: underline; cursor: pointer; margin-left: 12px; font-size: 12px; }
 
 /* MODALS */
 .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 500; display: none; align-items: center; justify-content: center; }
@@ -490,6 +492,7 @@ body.dark .journal-delete-btn:hover { background: #3c2020; }
 </div>
 
 <div id="notification"></div>
+<div id="disk-full-banner">&#9888; Your disk is full &mdash; note could not be saved. Free up space to continue.<a onclick="document.getElementById('disk-full-banner').style.display='none'">Dismiss</a></div>
 
 <script src="/static/js/vendor/easymde.min.js"></script>
 <script src="/static/js/vendor/marked.min.js"></script>
