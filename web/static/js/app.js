@@ -341,6 +341,9 @@ async function autoSave() {
   } catch (e) {
     if (e.status === 409) {
       showConflictModal();
+    } else if (e.status === 507) {
+      setSaveStatus('error');
+      document.getElementById('disk-full-banner').style.display = 'block';
     } else {
       setSaveStatus('error');
     }

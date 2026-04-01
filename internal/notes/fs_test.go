@@ -1,8 +1,10 @@
 package notes
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -368,4 +370,11 @@ func TestFileStore_RenameDir_TraversalNewPath(t *testing.T) {
 	require.NoError(t, fs.EnsureDir("src"))
 	err = fs.RenameDir("src", "../../malicious")
 	assert.Error(t, err)
+}
+
+func TestIsENOSPC(t *testing.T) {
+	assert.True(t, isENOSPC(syscall.ENOSPC))
+	assert.True(t, isENOSPC(fmt.Errorf("wrapped: %w", syscall.ENOSPC)))
+	assert.False(t, isENOSPC(syscall.ENOENT))
+	assert.False(t, isENOSPC(fmt.Errorf("some other error")))
 }

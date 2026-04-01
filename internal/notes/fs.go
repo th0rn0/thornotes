@@ -1,11 +1,13 @@
 package notes
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 
 	"github.com/th0rn0/thornotes/internal/apperror"
 )
@@ -54,15 +56,24 @@ func (fs *FileStore) Write(relativePath, content string) error {
 	if _, err := tmp.WriteString(content); err != nil {
 		tmp.Close()
 		os.Remove(tmpName)
+		if isENOSPC(err) {
+			return apperror.DiskFull()
+		}
 		return fmt.Errorf("write temp: %w", err)
 	}
 	if err := tmp.Sync(); err != nil {
 		tmp.Close()
 		os.Remove(tmpName)
+		if isENOSPC(err) {
+			return apperror.DiskFull()
+		}
 		return fmt.Errorf("sync temp: %w", err)
 	}
 	if err := tmp.Close(); err != nil {
 		os.Remove(tmpName)
+		if isENOSPC(err) {
+			return apperror.DiskFull()
+		}
 		return fmt.Errorf("close temp: %w", err)
 	}
 
@@ -71,6 +82,9 @@ func (fs *FileStore) Write(relativePath, content string) error {
 
 	if err := os.Rename(tmpName, absPath); err != nil {
 		os.Remove(tmpName)
+		if isENOSPC(err) {
+			return apperror.DiskFull()
+		}
 		return fmt.Errorf("rename: %w", err)
 	}
 	return nil
@@ -145,6 +159,12 @@ func (fs *FileStore) RemoveDir(relativePath string) error {
 // Wait blocks until all in-flight writes complete (for graceful shutdown).
 func (fs *FileStore) Wait() {
 	fs.wg.Wait()
+}
+
+// isENOSPC reports whether err is (or wraps) a "no space left on device" error.
+func isENOSPC(err error) bool {
+	var errno syscall.Errno
+	return errors.As(err, &errno) && errno == syscall.ENOSPC
 }
 
 // safePath resolves relativePath against notesRoot and verifies the result
