@@ -72,6 +72,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	}
 
 	maxAge := 7 * 24 * 60 * 60
+	c.SetSameSite(http.SameSiteLaxMode)
 	c.SetCookie("session", token, maxAge, "/", "", h.secureCookies, true)
 
 	c.JSON(http.StatusOK, gin.H{"csrf_token": csrfToken})
