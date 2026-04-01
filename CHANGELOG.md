@@ -2,6 +2,12 @@
 
 All notable changes to thornotes are documented here.
 
+## [0.12.1.0] - 2026-04-01
+
+### Fixed
+- **CSP: inline event handlers migrated to `addEventListener`** — since v0.6.0.0 the Content Security Policy has used `script-src 'self'` without `'unsafe-inline'`, but `app.html` still had 33 `onclick`/`onchange`/`oninput` attributes and the tree/token/journal dynamic HTML was injecting `onclick` strings via `innerHTML`. Browsers enforcing the CSP silently blocked every handler, making the entire UI non-interactive. All static inline handlers are now bound via `addEventListener` at the bottom of `app.js`; dynamic handlers use `data-action`/`data-*-id` attributes with event delegation on the container elements.
+- **Service worker cache bump** — cache key updated from `thornotes-v0.9.0.0` to `thornotes-v0.12.1.0` so browsers with the stale cached `app.js` pick up the fix immediately on next load.
+
 ## [0.12.0.0] - 2026-04-01
 
 ### Added
