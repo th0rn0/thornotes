@@ -64,9 +64,9 @@ docker compose up -d
 
 The `/data` volume holds the SQLite database (`thornotes.db`) and all note files (`notes/`). Back it up with any standard volume backup tool.
 
-### Docker Compose with MySQL
+### Docker Compose with MariaDB
 
-For multi-user or hosted deployments, swap the SQLite default for MySQL (requires MySQL 8.0+):
+For multi-user or hosted deployments, swap the SQLite default for MariaDB:
 
 ```yaml
 services:
@@ -88,17 +88,17 @@ services:
         condition: service_healthy
 
   db:
-    image: mysql:8.0
+    image: mariadb:11
     restart: unless-stopped
     environment:
-      MYSQL_DATABASE: thornotes
-      MYSQL_USER: thornotes
-      MYSQL_PASSWORD: secret
-      MYSQL_ROOT_PASSWORD: rootsecret
+      MARIADB_DATABASE: thornotes
+      MARIADB_USER: thornotes
+      MARIADB_PASSWORD: secret
+      MARIADB_ROOT_PASSWORD: rootsecret
     volumes:
       - thornotes-db:/var/lib/mysql
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -117,7 +117,7 @@ All options are available as environment variables and CLI flags.
 | `THORNOTES_ADDR` | `--addr` | `:8080` | Listen address |
 | `THORNOTES_DB_DRIVER` | `--db-driver` | `sqlite` | Database driver: `sqlite` or `mysql` |
 | `THORNOTES_DB` | `--db` | `thornotes.db` | SQLite database path (sqlite driver only) |
-| `THORNOTES_DB_DSN` | `--db-dsn` | _(none)_ | MySQL DSN e.g. `user:pass@tcp(host:3306)/dbname?parseTime=true` (mysql driver only) |
+| `THORNOTES_DB_DSN` | `--db-dsn` | _(none)_ | MySQL/MariaDB DSN e.g. `user:pass@tcp(host:3306)/dbname?parseTime=true` (mysql driver only) |
 | `THORNOTES_NOTES_ROOT` | `--notes-root` | `notes` | Root directory for `.md` files |
 | `THORNOTES_ALLOW_REGISTRATION` | `--allow-registration` | `true` | Allow new user sign-up |
 | `THORNOTES_SECURE_COOKIES` | `--secure-cookies` | `false` | Set `Secure` flag on session cookie — enable when serving over HTTPS |
