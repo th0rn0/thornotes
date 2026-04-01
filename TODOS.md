@@ -106,17 +106,6 @@ Max 200,000 chars (~50k tokens). Truncates oldest notes first.
 
 ---
 
-### MySQL/PostgreSQL support
-**What:** Implement the `SearchRepository` MySQL FULLTEXT variant and the core repository
-interfaces against MySQL/PostgreSQL.
-
-**Why:** Hosted-service deployment needs a shared DB, not SQLite.
-
-**How:** Create `internal/repository/mysql/` when implementing. The interfaces in
-`internal/repository/interfaces.go` are already the abstraction point.
-
----
-
 ### Mobile / PWA
 **What:** EasyMDE is not good on mobile. Evaluate CodeMirror 6 as a replacement.
 Add viewport meta, touch-friendly UI adjustments.
@@ -162,3 +151,6 @@ Add viewport meta, touch-friendly UI adjustments.
 
 ### Lazy-loading note list: GET /api/v1/folders/{id}/notes
 **Completed:** v0.1.0.0 (2026-03-29) — Endpoint registered in router, `loadedFolderIds` tracking in `app.js`, folder expand fetches notes lazily.
+
+### MySQL/PostgreSQL support
+**Completed:** v0.7.0.0 — `internal/repository/mysql/` implements all repository interfaces against `database/sql`. MySQL migrations in `internal/db/mysql_migrations/`. FULLTEXT search via `MATCH...AGAINST` in boolean mode. Select via `THORNOTES_DB_DRIVER=mysql` + `THORNOTES_DB_DSN`. Docker Compose with MySQL example in README.
