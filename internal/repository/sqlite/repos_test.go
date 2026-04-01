@@ -1071,3 +1071,160 @@ func TestNoteRepo_ListAll_Empty(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, all)
 }
+
+// ─── NoteRepo.ListAllForWatch tests ──────────────────────────────────────────
+
+func TestNoteRepo_ListAllForWatch(t *testing.T) {
+	pool := openTestDB(t)
+	user := createUser(t, pool)
+	noteRepo := NewNoteRepo(pool.ReadDB, pool.WriteDB)
+
+	_, err := noteRepo.Create(context.Background(), &model.Note{UserID: user.ID, Title: "watch-note", Content: "body"})
+	require.NoError(t, err)
+
+	records, err := noteRepo.ListAllForWatch(context.Background(), user.ID)
+	require.NoError(t, err)
+	require.Len(t, records, 1)
+	assert.NotZero(t, records[0].ID)
+}
+
+// ─── UserRepo.IDs tests ───────────────────────────────────────────────────────
+
+func TestUserRepo_IDs(t *testing.T) {
+	pool := openTestDB(t)
+	userRepo := NewUserRepo(pool.WriteDB)
+
+	ids, err := userRepo.IDs(context.Background())
+	require.NoError(t, err)
+	assert.Empty(t, ids)
+
+	u1, err := userRepo.Create(context.Background(), "alice", "hash")
+	require.NoError(t, err)
+	u2, err := userRepo.Create(context.Background(), "bob", "hash")
+	require.NoError(t, err)
+
+	ids, err = userRepo.IDs(context.Background())
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []int64{u1.ID, u2.ID}, ids)
+}
+
+// ─── APITokenRepo tests ───────────────────────────────────────────────────────
+
+func TestAPITokenRepo_CreateAndGetByToken(t *testing.T) {
+	pool := openTestDB(t)
+	user := createUser(t, pool)
+	repo := NewAPITokenRepo(pool.ReadDB, pool.WriteDB)
+
+	rawToken := "tn_testtoken12345678"
+	created, err := repo.Create(context.Background(), user.ID, "my token", rawToken)
+	require.NoError(t, err)
+	assert.NotZero(t, created.ID)
+	assert.Equal(t, rawToken, created.Token) // raw returned once
+	assert.Equal(t, "tn_testt", created.Prefix)
+	assert.Equal(t, "my token", created.Name)
+
+	// GetByToken must find via hash.
+	found, err := repo.GetByToken(context.Background(), rawToken)
+	require.NoError(t, err)
+	assert.Equal(t, created.ID, found.ID)
+	assert.Equal(t, "tn_testt", found.Prefix)
+}
+
+func TestAPITokenRepo_GetByToken_NotFound(t *testing.T) {
+	pool := openTestDB(t)
+	repo := NewAPITokenRepo(pool.ReadDB, pool.WriteDB)
+
+	_, err := repo.GetByToken(context.Background(), "tn_doesnotexist000")
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, apperror.ErrNotFound))
+}
+
+func TestAPITokenRepo_ListByUser(t *testing.T) {
+	pool := openTestDB(t)
+	user := createUser(t, pool)
+	repo := NewAPITokenRepo(pool.ReadDB, pool.WriteDB)
+
+	_, err := repo.Create(context.Background(), user.ID, "token-a", "tn_aaaaaaaa12345678")
+	require.NoError(t, err)
+	_, err = repo.Create(context.Background(), user.ID, "token-b", "tn_bbbbbbbb12345678")
+	require.NoError(t, err)
+
+	tokens, err := repo.ListByUser(context.Background(), user.ID)
+	require.NoError(t, err)
+	require.Len(t, tokens, 2)
+	assert.Equal(t, "token-a", tokens[0].Name)
+	assert.Equal(t, "token-b", tokens[1].Name)
+	// Raw token must NOT be present in list results.
+	assert.Empty(t, tokens[0].Token)
+	assert.Empty(t, tokens[1].Token)
+}
+
+func TestAPITokenRepo_Delete(t *testing.T) {
+	pool := openTestDB(t)
+	user := createUser(t, pool)
+	repo := NewAPITokenRepo(pool.ReadDB, pool.WriteDB)
+
+	token, err := repo.Create(context.Background(), user.ID, "to-delete", "tn_deletetoken12345")
+	require.NoError(t, err)
+
+	err = repo.Delete(context.Background(), user.ID, token.ID)
+	require.NoError(t, err)
+
+	_, err = repo.GetByToken(context.Background(), "tn_deletetoken12345")
+	require.Error(t, err)
+}
+
+func TestAPITokenRepo_Delete_NotFound(t *testing.T) {
+	pool := openTestDB(t)
+	user := createUser(t, pool)
+	repo := NewAPITokenRepo(pool.ReadDB, pool.WriteDB)
+
+	err := repo.Delete(context.Background(), user.ID, 99999)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, apperror.ErrNotFound))
+}
+
+func TestAPITokenRepo_Delete_WrongUser(t *testing.T) {
+	pool := openTestDB(t)
+	user1 := createUser(t, pool)
+	userRepo := NewUserRepo(pool.WriteDB)
+	user2, err := userRepo.Create(context.Background(), "user2", "hash")
+	require.NoError(t, err)
+
+	repo := NewAPITokenRepo(pool.ReadDB, pool.WriteDB)
+	token, err := repo.Create(context.Background(), user1.ID, "tok", "tn_crossusertoken123")
+	require.NoError(t, err)
+
+	// user2 cannot delete user1's token.
+	err = repo.Delete(context.Background(), user2.ID, token.ID)
+	require.Error(t, err)
+}
+
+func TestAPITokenRepo_TouchLastUsed(t *testing.T) {
+	pool := openTestDB(t)
+	user := createUser(t, pool)
+	repo := NewAPITokenRepo(pool.ReadDB, pool.WriteDB)
+
+	token, err := repo.Create(context.Background(), user.ID, "touch-tok", "tn_touchtokenabcdef")
+	require.NoError(t, err)
+
+	err = repo.TouchLastUsed(context.Background(), token.ID)
+	require.NoError(t, err)
+
+	found, err := repo.GetByToken(context.Background(), "tn_touchtokenabcdef")
+	require.NoError(t, err)
+	assert.NotNil(t, found.LastUsedAt)
+}
+
+func TestHashToken_Deterministic(t *testing.T) {
+	h1 := hashToken("tn_sometoken")
+	h2 := hashToken("tn_sometoken")
+	assert.Equal(t, h1, h2)
+	assert.Len(t, h1, 64) // SHA-256 hex = 64 chars
+}
+
+func TestHashToken_DifferentInputs(t *testing.T) {
+	h1 := hashToken("tn_sometoken")
+	h2 := hashToken("tn_othertoken")
+	assert.NotEqual(t, h1, h2)
+}

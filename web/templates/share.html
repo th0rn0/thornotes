@@ -35,10 +35,7 @@ h1.note-title { font-size: 26px; margin-bottom: 6px; letter-spacing: -0.5px; }
 <pre id="note-raw" style="display:none">{{.Content}}</pre>
 <script src="/static/js/vendor/marked.min.js"></script>
 <script src="/static/js/vendor/highlight.min.js"></script>
-<script>
-  const raw = document.getElementById('note-raw').textContent;
-  document.getElementById('content').innerHTML = marked.parse(raw);
-  document.querySelectorAll('pre code').forEach(el => hljs.highlightElement(el));
-</script>
+<script src="/static/js/vendor/purify.min.js"></script>
+<script src="/static/js/share.js"></script>
 </body>
 </html>
