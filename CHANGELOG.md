@@ -2,6 +2,11 @@
 
 All notable changes to thornotes are documented here.
 
+## [0.10.0.0] - 2026-04-01
+
+### Added
+- **Timezone-aware journal "today"** — `GET /api/v1/journals/{id}/today` now accepts a `?tz=` query parameter (e.g. `?tz=America/New_York`). The server uses `time.LoadLocation` to compute the correct local date for the user. Without the parameter the server falls back to UTC (previous behaviour). The frontend passes the browser's IANA timezone via `Intl.DateTimeFormat().resolvedOptions().timeZone`. Invalid timezone strings return HTTP 400.
+
 ## [0.9.0.0] - 2026-04-01
 
 ### Added

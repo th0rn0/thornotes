@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -722,14 +723,14 @@ func TestService_TodayEntry_CreateAndRetrieve(t *testing.T) {
 	require.NoError(t, err)
 
 	// First call creates the entry.
-	note, err := svc.TodayEntry(ctx, userID, j.ID)
+	note, err := svc.TodayEntry(ctx, userID, j.ID, time.UTC)
 	require.NoError(t, err)
 	assert.NotZero(t, note.ID)
 	assert.Contains(t, note.Tags, "journal entry")
 	assert.Contains(t, note.Tags, "Daily")
 
 	// Second call returns the same note.
-	note2, err := svc.TodayEntry(ctx, userID, j.ID)
+	note2, err := svc.TodayEntry(ctx, userID, j.ID, time.UTC)
 	require.NoError(t, err)
 	assert.Equal(t, note.ID, note2.ID)
 }
@@ -738,7 +739,7 @@ func TestService_TodayEntry_NotFoundJournal(t *testing.T) {
 	svc, userID := newTestStack(t)
 	ctx := context.Background()
 
-	_, err := svc.TodayEntry(ctx, userID, 99999)
+	_, err := svc.TodayEntry(ctx, userID, 99999, time.UTC)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, apperror.ErrNotFound)
 }

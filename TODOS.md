@@ -106,23 +106,13 @@ Max 200,000 chars (~50k tokens). Truncates oldest notes first.
 
 ---
 
-### Timezone-aware "today" for journal entries
-**What:** Pass the user's browser timezone to `GET /api/v1/journals/{id}/today` so the server computes the correct local date.
-
-**Why:** Currently uses server UTC. A user in UTC+9 or UTC-8 may get the wrong date for several hours of their day. Cosmetic but affects daily journaling correctness for non-UTC users.
-
-**How:** Frontend adds `?tz=America/New_York` (via `Intl.DateTimeFormat().resolvedOptions().timeZone`). Handler uses `time.LoadLocation(tz)` to compute today's date in that zone. Validate the timezone string to prevent injection.
-
-**Where:** `internal/handler/journals.go`, `web/static/js/app.js`
-
-**Depends on / blocked by:** Daily journal feature (v0.5.0.0) must ship first.
-
----
-
 ---
 
 
 ## Completed
+
+### Timezone-aware "today" for journal entries
+**Completed:** v0.10.0.0 — `GET /api/v1/journals/{id}/today?tz=America/New_York`. Handler validates via `time.LoadLocation`, falls back to UTC if omitted. Frontend passes `Intl.DateTimeFormat().resolvedOptions().timeZone`. Invalid tz → HTTP 400.
 
 ### Security: hash API tokens before DB storage
 **Completed:** v0.6.0.0 — Migration 004 adds `token_hash` + `prefix` columns. `Create` stores `SHA-256(raw)`, returns raw once. `GetByToken` hashes before lookup. Existing tokens invalidated by migration (users must regenerate).

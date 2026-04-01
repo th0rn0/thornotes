@@ -2,6 +2,7 @@ package handler
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/th0rn0/thornotes/internal/notes"
@@ -65,7 +66,18 @@ func (h *JournalsHandler) Today(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
 		return
 	}
-	note, err := h.svc.TodayEntry(c.Request.Context(), user.ID, id)
+
+	loc := time.UTC
+	if tz := c.Query("tz"); tz != "" {
+		parsed, err := time.LoadLocation(tz)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid timezone"})
+			return
+		}
+		loc = parsed
+	}
+
+	note, err := h.svc.TodayEntry(c.Request.Context(), user.ID, id, loc)
 	if err != nil {
 		writeError(c, err)
 		return
