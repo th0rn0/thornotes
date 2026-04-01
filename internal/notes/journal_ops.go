@@ -54,13 +54,14 @@ func (s *Service) DeleteJournal(ctx context.Context, userID, journalID int64) er
 // e.g. "Personal Journal/2026/04/2026-04-01.md" for user 1.
 //
 // The note is auto-tagged with "journal entry" and the journal name.
-func (s *Service) TodayEntry(ctx context.Context, userID, journalID int64) (*model.Note, error) {
+// loc determines which calendar day counts as "today"; pass time.UTC if unknown.
+func (s *Service) TodayEntry(ctx context.Context, userID, journalID int64, loc *time.Location) (*model.Note, error) {
 	j, err := s.journals.GetByID(ctx, userID, journalID)
 	if err != nil {
 		return nil, err
 	}
 
-	today := time.Now().UTC()
+	today := time.Now().In(loc)
 	year := today.Format("2006")
 	month := today.Format("01")
 	dateSlug := today.Format("2006-01-02")

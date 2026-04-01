@@ -644,7 +644,8 @@ async function openTodayJournal() {
   }
 
   try {
-    const note = await api('GET', `/api/v1/journals/${journalId}/today`);
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const note = await api('GET', `/api/v1/journals/${journalId}/today?tz=${encodeURIComponent(tz)}`);
     // Ensure the note's folder hierarchy is loaded in the tree.
     if (note.folder_id) {
       await ensureFolderLoaded(note.folder_id);

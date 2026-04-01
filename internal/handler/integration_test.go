@@ -1125,6 +1125,36 @@ func TestHandler_JournalToday_NotFound(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 }
 
+func TestHandler_JournalToday_WithTimezone(t *testing.T) {
+	c := newTestClient(t)
+	c.registerAndLogin(t)
+
+	createResp := c.do(t, http.MethodPost, "/api/v1/journals", map[string]interface{}{"name": "TZTest"})
+	var j map[string]interface{}
+	require.NoError(t, json.NewDecoder(createResp.Body).Decode(&j))
+	createResp.Body.Close()
+
+	id := int64(j["id"].(float64))
+	resp := c.do(t, http.MethodGet, "/api/v1/journals/"+i64str(id)+"/today?tz=America%2FNew_York", nil)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+}
+
+func TestHandler_JournalToday_InvalidTimezone(t *testing.T) {
+	c := newTestClient(t)
+	c.registerAndLogin(t)
+
+	createResp := c.do(t, http.MethodPost, "/api/v1/journals", map[string]interface{}{"name": "TZBad"})
+	var j map[string]interface{}
+	require.NoError(t, json.NewDecoder(createResp.Body).Decode(&j))
+	createResp.Body.Close()
+
+	id := int64(j["id"].(float64))
+	resp := c.do(t, http.MethodGet, "/api/v1/journals/"+i64str(id)+"/today?tz=Not%2FA%2FReal%2FZone", nil)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+}
+
 // ─── ListAll handler tests ────────────────────────────────────────────────────
 
 func TestHandler_ListAll_AcrossFolders(t *testing.T) {
