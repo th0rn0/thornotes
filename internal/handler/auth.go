@@ -4,15 +4,17 @@ import (
 	"net/http"
 
 	"github.com/th0rn0/thornotes/internal/auth"
+	"github.com/th0rn0/thornotes/internal/notes"
 	"github.com/th0rn0/thornotes/internal/security"
 )
 
 type AuthHandler struct {
-	svc *auth.Service
+	svc      *auth.Service
+	notesSvc *notes.Service
 }
 
-func NewAuthHandler(svc *auth.Service) *AuthHandler {
-	return &AuthHandler{svc: svc}
+func NewAuthHandler(svc *auth.Service, notesSvc *notes.Service) *AuthHandler {
+	return &AuthHandler{svc: svc, notesSvc: notesSvc}
 }
 
 type registerRequest struct {
@@ -32,6 +34,8 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
+
+	h.notesSvc.CreateGettingStartedNote(r.Context(), user.ID)
 
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"id":         user.ID,

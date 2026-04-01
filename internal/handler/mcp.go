@@ -6,6 +6,7 @@ import (
 
 	"github.com/th0rn0/thornotes/internal/apperror"
 	"github.com/th0rn0/thornotes/internal/auth"
+	"github.com/th0rn0/thornotes/internal/model"
 	"github.com/th0rn0/thornotes/internal/notes"
 )
 
@@ -137,47 +138,54 @@ func (h *MCPHandler) handleInitialize(w http.ResponseWriter, req rpcRequest) {
 func (h *MCPHandler) handleToolsList(w http.ResponseWriter, req rpcRequest) {
 	tools := []mcpTool{
 		{
-			Name:        "search_notes",
-			Description: "Search notes by keyword query.",
+			Name: "list_notes",
+			Description: "List note metadata (id, title, slug, tags, folder_id, updated_at) across all folders. " +
+				"Omit folder_id to get all notes. Use get_note to fetch the full markdown content of a specific note.",
 			InputSchema: jsonSchema(map[string]any{
-				"query": prop("string", "Search query string"),
-			}, []string{"query"}),
-		},
-		{
-			Name:        "get_note",
-			Description: "Get the full content of a note by its ID.",
-			InputSchema: jsonSchema(map[string]any{
-				"id": prop("integer", "Note ID"),
-			}, []string{"id"}),
-		},
-		{
-			Name:        "list_notes",
-			Description: "List all notes (optionally filtered by folder ID).",
-			InputSchema: jsonSchema(map[string]any{
-				"folder_id": prop("integer", "Optional folder ID to filter by"),
+				"folder_id": prop("integer", "Filter to a specific folder. Omit to list all notes across all folders."),
 			}, nil),
 		},
 		{
-			Name:        "create_note",
-			Description: "Create a new note.",
+			Name: "get_note",
+			Description: "Fetch the complete markdown content of a note by ID. " +
+				"Returns title, content, tags, folder_id, and metadata. " +
+				"Use list_notes or search_notes to find note IDs.",
 			InputSchema: jsonSchema(map[string]any{
-				"title":     prop("string", "Note title"),
-				"content":   prop("string", "Initial note content (markdown)"),
-				"folder_id": prop("integer", "Optional folder ID"),
+				"id": prop("integer", "Note ID (from list_notes or search_notes results)"),
+			}, []string{"id"}),
+		},
+		{
+			Name: "search_notes",
+			Description: "Full-text search across all notes. Returns id, title, snippet, and tags. " +
+				"Use get_note to read full content. Optionally filter by one or more tags.",
+			InputSchema: jsonSchema(map[string]any{
+				"query": prop("string", "Full-text search query"),
+				"tags":  map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Filter results to notes with all of these tags"},
+			}, []string{"query"}),
+		},
+		{
+			Name: "list_folders",
+			Description: "Get the full folder hierarchy (id, parent_id, name, note_count). " +
+				"Use folder IDs with list_notes or create_note to scope to a specific folder.",
+			InputSchema: jsonSchema(nil, nil),
+		},
+		{
+			Name: "create_note",
+			Description: "Create a new markdown note. Returns the created note including its ID.",
+			InputSchema: jsonSchema(map[string]any{
+				"title":     prop("string", "Note title (1–500 characters)"),
+				"content":   prop("string", "Initial markdown content (optional)"),
+				"folder_id": prop("integer", "Folder to create the note in (optional, defaults to root)"),
+				"tags":      map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Tags to apply to the note"},
 			}, []string{"title"}),
 		},
 		{
-			Name:        "update_note",
-			Description: "Update the content of an existing note.",
+			Name: "update_note",
+			Description: "Replace the markdown content of an existing note. Handles optimistic concurrency automatically.",
 			InputSchema: jsonSchema(map[string]any{
 				"id":      prop("integer", "Note ID"),
-				"content": prop("string", "New content (markdown)"),
+				"content": prop("string", "New full markdown content (replaces existing content)"),
 			}, []string{"id", "content"}),
-		},
-		{
-			Name:        "list_folders",
-			Description: "List all folders.",
-			InputSchema: jsonSchema(nil, nil),
 		},
 	}
 	writeRPCResult(w, req.ID, map[string]any{"tools": tools})
@@ -198,13 +206,14 @@ func (h *MCPHandler) handleToolsCall(w http.ResponseWriter, r *http.Request, req
 	switch params.Name {
 	case "search_notes":
 		var args struct {
-			Query string `json:"query"`
+			Query string   `json:"query"`
+			Tags  []string `json:"tags"`
 		}
 		if err := json.Unmarshal(params.Arguments, &args); err != nil || args.Query == "" {
 			writeRPCError(w, req.ID, rpcInvalidParams, "query is required")
 			return
 		}
-		results, err := h.notes.Search(ctx, userID, args.Query, nil)
+		results, err := h.notes.Search(ctx, userID, args.Query, args.Tags)
 		if err != nil {
 			writeRPCError(w, req.ID, rpcInternalError, "search failed")
 			return
@@ -233,7 +242,15 @@ func (h *MCPHandler) handleToolsCall(w http.ResponseWriter, r *http.Request, req
 			FolderID *int64 `json:"folder_id"`
 		}
 		_ = json.Unmarshal(params.Arguments, &args)
-		items, err := h.notes.ListNotes(ctx, userID, args.FolderID)
+		var (
+			items []*model.NoteListItem
+			err   error
+		)
+		if args.FolderID != nil {
+			items, err = h.notes.ListNotes(ctx, userID, args.FolderID)
+		} else {
+			items, err = h.notes.ListAllNotes(ctx, userID)
+		}
 		if err != nil {
 			writeRPCError(w, req.ID, rpcInternalError, "list failed")
 			return
@@ -243,15 +260,19 @@ func (h *MCPHandler) handleToolsCall(w http.ResponseWriter, r *http.Request, req
 
 	case "create_note":
 		var args struct {
-			Title    string `json:"title"`
-			Content  string `json:"content"`
-			FolderID *int64 `json:"folder_id"`
+			Title    string   `json:"title"`
+			Content  string   `json:"content"`
+			FolderID *int64   `json:"folder_id"`
+			Tags     []string `json:"tags"`
 		}
 		if err := json.Unmarshal(params.Arguments, &args); err != nil || args.Title == "" {
 			writeRPCError(w, req.ID, rpcInvalidParams, "title is required")
 			return
 		}
-		note, err := h.notes.CreateNote(ctx, userID, args.FolderID, args.Title, []string{})
+		if args.Tags == nil {
+			args.Tags = []string{}
+		}
+		note, err := h.notes.CreateNote(ctx, userID, args.FolderID, args.Title, args.Tags)
 		if err != nil {
 			writeRPCError(w, req.ID, rpcInternalError, errorString(err))
 			return
@@ -307,17 +328,23 @@ func (h *MCPHandler) handleToolsCall(w http.ResponseWriter, r *http.Request, req
 }
 
 func (h *MCPHandler) handleResourcesList(w http.ResponseWriter, r *http.Request, req rpcRequest, userID int64) {
-	items, err := h.notes.ListNotes(r.Context(), userID, nil)
+	items, err := h.notes.ListAllNotes(r.Context(), userID)
 	if err != nil {
 		writeRPCError(w, req.ID, rpcInternalError, "list notes failed")
 		return
 	}
 	resources := make([]mcpResource, 0, len(items))
 	for _, item := range items {
+		desc := ""
+		if len(item.Tags) > 0 {
+			tagsJSON, _ := json.Marshal(item.Tags)
+			desc = "tags: " + string(tagsJSON)
+		}
 		resources = append(resources, mcpResource{
-			URI:      "note://" + itoa(item.ID),
-			Name:     item.Title,
-			MimeType: "text/markdown",
+			URI:         "note://" + itoa(item.ID),
+			Name:        item.Title,
+			Description: desc,
+			MimeType:    "text/markdown",
 		})
 	}
 	writeRPCResult(w, req.ID, map[string]any{"resources": resources})
