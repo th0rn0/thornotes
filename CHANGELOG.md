@@ -2,6 +2,18 @@
 
 All notable changes to thornotes are documented here.
 
+## [0.6.0.0] - 2026-04-01
+
+### Security
+- **API tokens now stored as SHA-256 hashes** — raw tokens are returned once on creation and never stored; `GetByToken` hashes before lookup; DB migration 004 renames `token` → `token_hash` and adds `prefix` column for display. Existing tokens are invalidated — regenerate after upgrade.
+- **SHA-pinned GitHub Actions** — all third-party actions in CI workflow pinned to immutable commit SHAs (with version tag comments) preventing supply chain attacks via mutable tags
+- **`THORNOTES_SECURE_COOKIES` / `--secure-cookies`** — new config option sets the `Secure` flag on session cookies (default `false`; enable when serving over HTTPS)
+
+### Documentation
+- Added `THORNOTES_SECURE_COOKIES` to README configuration table and Dockerfile comments
+- Added Docker Compose example to README
+- Added vibe-coded research disclaimer to README
+
 ## [0.5.0.0] - 2026-04-01
 
 ### Added
