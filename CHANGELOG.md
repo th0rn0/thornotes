@@ -2,6 +2,20 @@
 
 All notable changes to thornotes are documented here.
 
+## [0.9.0.0] - 2026-04-01
+
+### Added
+- **Progressive Web App (PWA)** — thornotes is now installable on desktop and mobile via the browser's "Add to Home Screen" / "Install" prompt
+- **PWA manifest** (`/static/manifest.json`) — defines app name, theme colour, icons, standalone display mode, and portrait orientation
+- **Service worker** (`/sw.js`) — caches static assets (JS, CSS, fonts, icons) for fast loads and basic offline support; network-first for the app shell, cache-first for static files, network-only for API calls
+- **App icons** — SVG icons at 192×192 and 512×512 for home screen and splash screens (`/static/icons/`)
+- **Responsive layout** — sidebar collapses off-canvas on screens ≤ 640 px wide; hamburger toggle button in the topbar opens/closes it; a backdrop overlay closes it on tap
+- **Touch-friendly tap targets** — all buttons, tree items, and interactive elements raised to ≥ 32–44 px height
+- **Safe-area insets** — `env(safe-area-inset-*)` padding applied to body and sidebar so content clears notches and home-indicator bars on iOS/Android
+- **Dynamic viewport height** — `height: 100dvh` (with `100vh` fallback) prevents layout being obscured by mobile browser chrome
+- **Bottom-sheet modals** — on mobile, modals slide up from the bottom edge with safe-area padding so buttons are not hidden behind the home indicator
+- **Auto-close sidebar on note open** — opening a note on mobile automatically closes the sidebar so the editor is immediately visible
+
 ## [0.8.0.0] - 2026-04-01
 
 ### Changed

@@ -106,6 +106,24 @@ function showApp() {
   connectEventSource();
 }
 
+// ── Mobile sidebar ─────────────────────────────────────────────────────────
+function toggleSidebar() {
+  const sidebar = document.getElementById('sidebar');
+  const overlay = document.getElementById('sidebar-overlay');
+  const isOpen = sidebar.classList.contains('mobile-open');
+  sidebar.classList.toggle('mobile-open', !isOpen);
+  overlay.classList.toggle('active', !isOpen);
+}
+
+function closeSidebar() {
+  document.getElementById('sidebar').classList.remove('mobile-open');
+  document.getElementById('sidebar-overlay').classList.remove('active');
+}
+
+function isMobile() {
+  return window.matchMedia('(max-width: 640px)').matches;
+}
+
 // ── Disk-change SSE ────────────────────────────────────────────────────────
 let _sse = null;
 let _sseReconnectTimer = null;
@@ -263,6 +281,7 @@ function renderSearchResults() {
 async function openNote(noteId) {
   const note = await api('GET', `/api/v1/notes/${noteId}`);
   currentNote = note;
+  if (isMobile()) closeSidebar();
 
   document.getElementById('empty-state').style.display = 'none';
   const container = document.getElementById('editor-container');
@@ -719,4 +738,8 @@ function esc(s) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
+}
+
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').catch(() => {});
 }

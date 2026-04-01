@@ -66,3 +66,28 @@ func TestRouter_Serves404(t *testing.T) {
 	h.ServeHTTP(rr, req)
 	assert.Equal(t, http.StatusNotFound, rr.Code)
 }
+
+func TestRouter_ServesServiceWorker(t *testing.T) {
+	h := buildHandler(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/sw.js", nil)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+	assert.Contains(t, rr.Header().Get("Content-Type"), "javascript")
+	assert.Equal(t, "no-cache", rr.Header().Get("Cache-Control"))
+	assert.Equal(t, "/", rr.Header().Get("Service-Worker-Allowed"))
+}
+
+func TestRouter_ServesManifest(t *testing.T) {
+	h := buildHandler(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/static/manifest.json", nil)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+	assert.Contains(t, rr.Header().Get("Content-Type"), "json")
+	assert.Contains(t, rr.Body.String(), "thornotes")
+}

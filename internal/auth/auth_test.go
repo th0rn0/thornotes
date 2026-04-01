@@ -240,16 +240,6 @@ func TestGetSession_UnknownToken(t *testing.T) {
 	require.Error(t, err)
 }
 
-// ginTestContext creates a gin.Context backed by an httptest.ResponseRecorder.
-// The returned cancel func should be called to avoid goroutine leaks.
-func ginTestContext(req *http.Request) (*gin.Context, *httptest.ResponseRecorder) {
-	gin.SetMode(gin.TestMode)
-	rr := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(rr)
-	c.Request = req
-	return c, rr
-}
-
 // serveGinHandler runs a gin.HandlerFunc as if it were a simple handler under
 // a minimal gin router so that Abort / status propagation works correctly.
 func serveGinHandler(handler gin.HandlerFunc, req *http.Request) *httptest.ResponseRecorder {

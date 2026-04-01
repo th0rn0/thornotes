@@ -53,6 +53,13 @@ func New(
 	// Static files.
 	r.StaticFS("/static", staticFS)
 
+	// Service worker must be served at root scope (not under /static/).
+	r.GET("/sw.js", func(c *gin.Context) {
+		c.Header("Cache-Control", "no-cache")
+		c.Header("Service-Worker-Allowed", "/")
+		c.FileFromFS("sw.js", staticFS)
+	})
+
 	// App shell.
 	r.GET("/", func(c *gin.Context) {
 		c.Header("Content-Type", "text/html; charset=utf-8")
