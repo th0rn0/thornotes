@@ -2,6 +2,20 @@
 
 All notable changes to thornotes are documented here.
 
+## [0.5.0.0] - 2026-04-01
+
+### Added
+- **Daily journal** — create named journals (e.g. "Personal", "Work") and open today's entry with one click; entries are auto-named `YYYY-MM-DD.md` and filed under `{journal name}/{year}/{month}/`, auto-tagged with "journal entry" and the journal name
+- Multiple journals supported; sidebar shows a direct Today button for single journals or a dropdown picker for multiple
+- **Getting Started note** — every new user gets a "Getting Started" note in their root folder on registration documenting all app features
+- **`GET /api/v1/notes/all`** — new REST endpoint listing all notes across every folder in one call (includes `folder_id` on each item)
+- **`folder_id` on note list items** — all listing responses now include `folder_id` so callers know where each note lives without a separate lookup
+- **MCP improvements for LLM use** — `list_notes` with no `folder_id` now returns all notes across all folders; `search_notes` accepts a `tags` array filter; `create_note` accepts `tags`; `resources/list` enumerates all notes (not just root); tool descriptions rewritten to be LLM-actionable
+
+### Changed
+- `NoteListItem` model now includes `folder_id` field (non-breaking addition)
+- MCP `list_notes` with no `folder_id` now returns all notes instead of root-only
+
 ## [0.4.0.0] - 2026-04-01
 
 ### Added
