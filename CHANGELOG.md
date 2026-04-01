@@ -2,6 +2,12 @@
 
 All notable changes to thornotes are documented here.
 
+## [0.13.6.0] - 2026-04-01
+
+### Fixed
+- **Copy button works in non-HTTPS contexts** — `navigator.clipboard` is unavailable on HTTP (e.g. `http://192.168.x.x:8080`); the `.catch(() => {})` silently swallowed the error so the "Token copied" notification fired but nothing reached the clipboard. Added a `copyToClipboard` helper with a `document.execCommand('copy')` fallback. Fixes the token copy button in the account modal and the share-link copy button.
+- **Service worker cache bumped** — cache key updated to `thornotes-v0.13.6.0` so browsers with the stale cached `app.js` pick up the fix on next load.
+
 ## [0.13.5.0] - 2026-04-01
 
 ### Fixed

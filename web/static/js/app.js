@@ -452,12 +452,26 @@ async function submitNewFolder() {
   }
 }
 
+async function copyToClipboard(text) {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  // Fallback for HTTP (non-secure) contexts where navigator.clipboard is unavailable
+  const el = document.createElement('textarea');
+  el.value = text;
+  el.style.cssText = 'position:fixed;top:0;left:0;opacity:0;pointer-events:none';
+  document.body.appendChild(el);
+  el.select();
+  document.execCommand('copy');
+  document.body.removeChild(el);
+}
+
 async function shareNote() {
   if (!currentNote) return;
   const res = await api('POST', `/api/v1/notes/${currentNote.id}/share`, {});
-  const token = res.share_token;
-  const url = `${location.origin}/s/${token}`;
-  await navigator.clipboard.writeText(url).catch(() => {});
+  const url = `${location.origin}/s/${res.share_token}`;
+  await copyToClipboard(url).catch(() => {});
   showNotification(`Share link copied: ${url}`);
 }
 
@@ -592,9 +606,9 @@ async function revokeToken(id) {
   await refreshTokenList();
 }
 
-function copyNewToken() {
+async function copyNewToken() {
   if (!_newTokenValue) return;
-  navigator.clipboard.writeText(_newTokenValue).catch(() => {});
+  await copyToClipboard(_newTokenValue).catch(() => {});
   showNotification('Token copied to clipboard');
 }
 
