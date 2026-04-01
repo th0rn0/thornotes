@@ -189,6 +189,45 @@ Or with `make dev` for development defaults (separate dev database, registration
 make test
 ```
 
+## Release process
+
+Releases are version-tagged commits on `main`. The CI pipeline automatically builds and pushes the Docker image and creates a GitHub release when a `v*` tag is pushed.
+
+### Automated (via CI)
+
+1. Merge all changes to `main`.
+2. Update `VERSION` (e.g. `0.9.0.0`) and add a `## [0.9.0.0] - YYYY-MM-DD` section to `CHANGELOG.md`.
+3. Commit: `git commit -m "chore: release v0.9.0.0"`
+4. Tag: `git tag v0.9.0.0`
+5. Push branch and tag:
+   ```sh
+   git push origin main
+   git push origin v0.9.0.0
+   ```
+
+CI will then:
+- Run lint and tests.
+- Build and push `th0rn0/thornotes:latest` and `th0rn0/thornotes:v0.9.0.0` to Docker Hub.
+- Create a GitHub release with the changelog section for that version as release notes.
+
+### Manual (no CI)
+
+If you need to release without CI, run the Docker build and push yourself:
+
+```sh
+# Build
+docker build -t th0rn0/thornotes:latest -t th0rn0/thornotes:v0.9.0.0 .
+
+# Push
+docker push th0rn0/thornotes:latest
+docker push th0rn0/thornotes:v0.9.0.0
+
+# Create GitHub release (requires gh CLI)
+VERSION=$(cat VERSION | tr -d '[:space:]')
+awk '/^## \['"$VERSION"'\]/{found=1; next} found && /^## \[/{exit} found{print}' CHANGELOG.md > /tmp/release_notes.md
+gh release create "v$VERSION" --title "v$VERSION" --notes-file /tmp/release_notes.md
+```
+
 ## License
 
 MIT
