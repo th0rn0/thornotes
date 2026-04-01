@@ -13,23 +13,26 @@ import (
 
 // Service coordinates note and folder operations across the FileStore and repositories.
 type Service struct {
-	notes   repository.NoteRepository
-	folders repository.FolderRepository
-	search  repository.SearchRepository
-	fs      *FileStore
+	notes    repository.NoteRepository
+	folders  repository.FolderRepository
+	search   repository.SearchRepository
+	journals repository.JournalRepository
+	fs       *FileStore
 }
 
 func NewService(
 	notes repository.NoteRepository,
 	folders repository.FolderRepository,
 	search repository.SearchRepository,
+	journals repository.JournalRepository,
 	fs *FileStore,
 ) *Service {
 	return &Service{
-		notes:   notes,
-		folders: folders,
-		search:  search,
-		fs:      fs,
+		notes:    notes,
+		folders:  folders,
+		search:   search,
+		journals: journals,
+		fs:       fs,
 	}
 }
 

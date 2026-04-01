@@ -79,6 +79,11 @@ func (s *Service) ListNotes(ctx context.Context, userID int64, folderID *int64) 
 	return s.notes.ListByFolder(ctx, userID, folderID)
 }
 
+// ListAllNotes returns note metadata for all notes owned by userID, across all folders.
+func (s *Service) ListAllNotes(ctx context.Context, userID int64) ([]*model.NoteListItem, error) {
+	return s.notes.ListAll(ctx, userID)
+}
+
 // UpdateNoteContent saves new content using optimistic concurrency.
 // expectedHash must match the current content_hash in the DB.
 func (s *Service) UpdateNoteContent(ctx context.Context, userID, noteID int64, content, expectedHash string) (string, error) {
