@@ -2,6 +2,11 @@
 
 All notable changes to thornotes are documented here.
 
+## [0.13.2.0] - 2026-04-01
+
+### Fixed
+- **golangci-lint config format** — `.golangci.yml` was written in v2 format (`version: "2"`, `linters.default`, `linters.settings`) but the CI action installs v1.x. Rewrote in v1 format: `disable-all: true` replaces `default: none`, `linters-settings` is a top-level key. Linter set is unchanged.
+
 ## [0.13.1.0] - 2026-04-01
 
 ### Fixed
