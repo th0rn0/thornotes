@@ -49,6 +49,21 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
+    services:
+      mariadb:
+        image: mariadb:11
+        env:
+          MARIADB_ROOT_PASSWORD: rootpassword
+          MARIADB_DATABASE: thornotes_test
+          MARIADB_USER: thornotes
+          MARIADB_PASSWORD: thornotes
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=10
     steps:
       - name: Discord Webhook Action - Build Start
         uses: tsickert/discord-webhook@86dc739f3f165f16dadc5666051c367efa1692f4 # v6.0.0
@@ -65,6 +80,8 @@ jobs:
           cache: true
       - name: Run tests
         run: go test -race ./...
+        env:
+          THORNOTES_TEST_MYSQL_DSN: "thornotes:thornotes@tcp(127.0.0.1:3306)/thornotes_test?parseTime=true"
 
       - name: Discord Webhook Action - Build Success
         uses: tsickert/discord-webhook@86dc739f3f165f16dadc5666051c367efa1692f4 # v6.0.0

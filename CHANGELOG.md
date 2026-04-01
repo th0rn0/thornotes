@@ -2,6 +2,14 @@
 
 All notable changes to thornotes are documented here.
 
+## [0.13.4.0] - 2026-04-01
+
+### Fixed
+- **Dirty migration recovery now uses `Force(-1)` instead of `Force(0)`** — `Force(0)` caused golang-migrate to look for a non-existent version 0 down file, producing a "no migration found for version 0" error. `Force(-1)` is the correct way to clear version tracking entirely; `Up()` then re-runs all migrations from scratch, which is safe because all up migrations use `CREATE TABLE IF NOT EXISTS`.
+
+### Added
+- **MariaDB/MySQL integration tests** — three tests in `internal/db/mysql_test.go` run when `THORNOTES_TEST_MYSQL_DSN` is set: migration correctness (all 6 tables exist), idempotency (second `OpenMySQL` call is a no-op), and dirty state recovery (manually marks version 1 dirty, verifies next open self-heals). CI test job now spins up a `mariadb:11` service container and sets the DSN automatically.
+
 ## [0.13.3.0] - 2026-04-01
 
 ### Fixed

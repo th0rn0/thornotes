@@ -75,10 +75,12 @@ func runMySQLMigrations(dsn string) error {
 		var dirtyErr migrate.ErrDirty
 		if errors.As(err, &dirtyErr) {
 			// A previous run was interrupted and left the schema in a dirty state.
-			// Roll back to the last clean version and retry. All up migrations use
-			// CREATE TABLE IF NOT EXISTS so re-running a partially applied migration
-			// is safe.
-			if ferr := m.Force(dirtyErr.Version - 1); ferr != nil {
+			// Force(-1) clears the version tracking entirely (golang-migrate convention:
+			// -1 = no migrations applied). Up() then re-runs all migrations from
+			// scratch; all up migrations use CREATE TABLE IF NOT EXISTS so this is safe.
+			// We cannot use Force(version-1) because Force(0) is invalid — golang-migrate
+			// tries to read a down file for version 0 which does not exist.
+			if ferr := m.Force(-1); ferr != nil {
 				return fmt.Errorf("force version after dirty state: %w", ferr)
 			}
 			if err := m.Up(); err != nil && err != migrate.ErrNoChange {
