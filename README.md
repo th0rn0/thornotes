@@ -31,6 +31,35 @@ docker run -d \
 
 Open [http://localhost:8080](http://localhost:8080), register an account, and start writing.
 
+### Docker Compose
+
+```yaml
+services:
+  thornotes:
+    image: th0rn0/thornotes
+    container_name: thornotes
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - thornotes-data:/data
+    environment:
+      THORNOTES_ADDR: ":8080"
+      THORNOTES_DB: "/data/thornotes.db"
+      THORNOTES_NOTES_ROOT: "/data/notes"
+      THORNOTES_ALLOW_REGISTRATION: "true"   # set to "false" after first user
+      # THORNOTES_TRUSTED_PROXY: "172.16.0.0/12"  # uncomment if behind a proxy
+
+volumes:
+  thornotes-data:
+```
+
+Save as `docker-compose.yml` and run:
+
+```sh
+docker compose up -d
+```
+
 The `/data` volume holds the SQLite database (`thornotes.db`) and all note files (`notes/`). Back it up with any standard volume backup tool.
 
 ## Configuration
