@@ -22,10 +22,11 @@ func New(
 	tmpl *template.Template,
 	staticFS http.FileSystem,
 	h *hub.Hub,
+	secureCookies bool,
 ) http.Handler {
 	mux := http.NewServeMux()
 
-	authH := handler.NewAuthHandler(authSvc, notesSvc)
+	authH := handler.NewAuthHandler(authSvc, notesSvc, secureCookies)
 	foldersH := handler.NewFoldersHandler(notesSvc)
 	notesH := handler.NewNotesHandler(notesSvc)
 	shareH := handler.NewShareHandler(notesSvc, tmpl)

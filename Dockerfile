@@ -27,6 +27,7 @@ COPY --from=builder /thornotes /thornotes
 #   THORNOTES_DB                SQLite database path   (default /data/thornotes.db)
 #   THORNOTES_NOTES_ROOT        notes directory        (default /data/notes)
 #   THORNOTES_ALLOW_REGISTRATION                       (default true)
+#   THORNOTES_SECURE_COOKIES    set true behind HTTPS  (default false)
 #   THORNOTES_TRUSTED_PROXY     CIDR of trusted proxy  (optional)
 #   THORNOTES_WATCH_INTERVAL    disk poll interval     (default 30s, set 0 to disable)
 #

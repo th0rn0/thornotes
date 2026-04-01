@@ -14,6 +14,7 @@ type Config struct {
 	DBPath            string
 	NotesRoot         string
 	AllowRegistration bool
+	SecureCookies     bool       // set true when serving over HTTPS
 	TrustedProxy      *net.IPNet // nil means trust nothing (direct connections only)
 	MaxContentBytes   int64
 	WatchInterval     time.Duration // 0 disables the disk watcher
@@ -27,6 +28,7 @@ func Parse() (*Config, error) {
 	flag.StringVar(&cfg.DBPath, "db", envOr("THORNOTES_DB", "thornotes.db"), "SQLite database path")
 	flag.StringVar(&cfg.NotesRoot, "notes-root", envOr("THORNOTES_NOTES_ROOT", "notes"), "root directory for note files")
 	flag.BoolVar(&cfg.AllowRegistration, "allow-registration", envBool("THORNOTES_ALLOW_REGISTRATION", true), "allow new user registration")
+	flag.BoolVar(&cfg.SecureCookies, "secure-cookies", envBool("THORNOTES_SECURE_COOKIES", false), "set Secure flag on session cookie (enable when serving over HTTPS)")
 	flag.StringVar(&trustedProxy, "trusted-proxy", envOr("THORNOTES_TRUSTED_PROXY", ""), "CIDR of trusted reverse proxy (e.g. 10.0.0.0/8)")
 	flag.DurationVar(&cfg.WatchInterval, "watch-interval", envDuration("THORNOTES_WATCH_INTERVAL", 30*time.Second), "disk watch poll interval (0 to disable)")
 	flag.Parse()

@@ -80,7 +80,7 @@ func main() {
 		slog.Error("sub static fs", "err", err)
 		os.Exit(1)
 	}
-	h := router.New(authSvc, notesSvc, apiTokenRepo, userRepo, rateLimiter, tmpl, http.FS(staticSub), notifyHub)
+	h := router.New(authSvc, notesSvc, apiTokenRepo, userRepo, rateLimiter, tmpl, http.FS(staticSub), notifyHub, cfg.SecureCookies)
 
 	srv := &http.Server{
 		Addr:         cfg.Addr,
