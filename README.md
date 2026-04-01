@@ -1,5 +1,7 @@
 # thornotes
 
+> **Disclaimer:** This is a vibe-coded project built for personal research and experimentation. It is not production-hardened. Use at your own risk.
+
 A self-hosted Markdown note-taking app with file-as-canonical storage. Every note is a real `.md` file on disk. The database is an index, not the source of truth.
 
 ![thornotes editor — light mode](docs/screenshot-editor.png)
