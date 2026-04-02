@@ -606,6 +606,24 @@ async function shareNote() {
   showNotification(`Share link copied: ${url}`);
 }
 
+// ── Note deletion ───────────────────────────────────────────────────────────
+async function deleteNote(noteId, title) {
+  if (!confirm(`Delete "${title}"?\n\nThis cannot be undone.`)) return;
+  await api('DELETE', `/api/v1/notes/${noteId}`);
+  if (currentNote && currentNote.id === noteId) {
+    currentNote = null;
+    document.getElementById('editor-container').style.display = 'none';
+    document.getElementById('empty-state').style.display = '';
+    history.pushState(null, '', '/');
+  }
+  // Remove the note from local state so the tree re-renders immediately.
+  rootNotes = rootNotes.filter(n => n.id !== noteId);
+  for (const fid of Object.keys(notesByFolder)) {
+    notesByFolder[fid] = notesByFolder[fid].filter(n => n.id !== noteId);
+  }
+  await loadFolderTree();
+}
+
 // ── Conflict resolution ─────────────────────────────────────────────────────
 function showConflictModal() {
   document.getElementById('conflict-modal').style.display = 'flex';
@@ -1068,6 +1086,11 @@ document.getElementById('journal-list').addEventListener('click', function(e) {
   if (btn) deleteJournal(Number(btn.dataset.journalId));
 });
 
+// Delete note button in titlebar
+document.getElementById('delete-note-btn').addEventListener('click', function() {
+  if (currentNote) deleteNote(currentNote.id, currentNote.title);
+});
+
 // Tree — event delegation for dynamically rendered folder/note items
 document.getElementById('tree').addEventListener('click', function(e) {
   const el = e.target.closest('[data-action]');
@@ -1075,6 +1098,38 @@ document.getElementById('tree').addEventListener('click', function(e) {
   if (el.dataset.action === 'open-note') openNote(Number(el.dataset.noteId));
   if (el.dataset.action === 'select-folder') selectFolder(Number(el.dataset.folderId));
 });
+
+// Right-click context menu on note items in the tree
+let ctxNoteId = null, ctxNoteTitle = null;
+
+function hideNoteCtxMenu() {
+  document.getElementById('note-ctx-menu').style.display = 'none';
+}
+
+document.getElementById('tree').addEventListener('contextmenu', function(e) {
+  const el = e.target.closest('[data-action="open-note"]');
+  if (!el) return;
+  e.preventDefault();
+  ctxNoteId = Number(el.dataset.noteId);
+  ctxNoteTitle = el.title;
+  const menu = document.getElementById('note-ctx-menu');
+  menu.style.display = 'block';
+  // Keep menu inside viewport
+  const mw = 140, mh = 80;
+  menu.style.left = Math.min(e.clientX, window.innerWidth - mw) + 'px';
+  menu.style.top = Math.min(e.clientY, window.innerHeight - mh) + 'px';
+});
+
+document.getElementById('note-ctx-menu').addEventListener('click', function(e) {
+  const btn = e.target.closest('[data-ctx-action]');
+  if (!btn) return;
+  hideNoteCtxMenu();
+  if (btn.dataset.ctxAction === 'open') openNote(ctxNoteId);
+  if (btn.dataset.ctxAction === 'delete') deleteNote(ctxNoteId, ctxNoteTitle);
+});
+
+document.addEventListener('click', hideNoteCtxMenu);
+document.addEventListener('keydown', function(e) { if (e.key === 'Escape') hideNoteCtxMenu(); });
 
 // Token list — event delegation for dynamically rendered revoke buttons
 document.getElementById('token-list').addEventListener('click', function(e) {
