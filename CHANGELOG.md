@@ -2,6 +2,15 @@
 
 All notable changes to thornotes are documented here.
 
+## [0.18.0.0] - 2026-04-02
+
+### Added
+- **Git-backed version history** — every note save, delete, and folder rename is recorded as a git commit in the notes directory when `--enable-git-history` / `THORNOTES_ENABLE_GIT_HISTORY=true` is set. Uses [go-git](https://github.com/go-git/go-git) (pure Go, no git binary required). A `.gitignore` for thornotes temp files is written on first run.
+  - `GET /api/v1/notes/:id/history` — list commits for a note, newest first. Optional `limit` query param (default 50, 0 = unlimited).
+  - `GET /api/v1/notes/:id/history/:sha` — retrieve a note's content at a specific commit.
+  - `POST /api/v1/notes/:id/history/:sha/restore` — restore a note to a past commit (requires `content_hash` body field for optimistic concurrency). The restoration is itself committed to history.
+  - All three endpoints return HTTP 501 when git history is not enabled.
+
 ## [0.17.0.0] - 2026-04-02
 
 ### Added

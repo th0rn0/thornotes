@@ -131,6 +131,8 @@ All options are available as environment variables and CLI flags.
 | `THORNOTES_SECURE_COOKIES` | `--secure-cookies` | `false` | Set `Secure` flag on session cookie — enable when serving over HTTPS |
 | `THORNOTES_TRUSTED_PROXY` | `--trusted-proxy` | _(none)_ | CIDR of trusted reverse proxy (e.g. `10.0.0.0/8`) — enables `X-Forwarded-For` for rate limiting |
 | `THORNOTES_WATCH_INTERVAL` | `--watch-interval` | `30s` | How often to poll the notes directory for external file changes. Set to `0` to disable |
+| `THORNOTES_SKIP_RECONCILIATION` | `--skip-reconciliation` | `false` | Skip the startup hash-check scan (safe on trusted restarts with large note corpora) |
+| `THORNOTES_ENABLE_GIT_HISTORY` | `--enable-git-history` | `false` | Record every note save/delete as a git commit in the notes directory. Enables the history API (`GET /api/v1/notes/:id/history`, `GET /api/v1/notes/:id/history/:sha`, `POST /api/v1/notes/:id/history/:sha/restore`). Uses [go-git](https://github.com/go-git/go-git) — no git binary required. |
 
 ## Running behind a reverse proxy
 

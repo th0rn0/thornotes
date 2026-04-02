@@ -8,8 +8,11 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
+	"github.com/rs/zerolog/log"
 	"github.com/th0rn0/thornotes/internal/apperror"
+	"github.com/th0rn0/thornotes/internal/model"
 )
 
 // FileStore manages note files on disk.
@@ -18,6 +21,7 @@ import (
 type FileStore struct {
 	notesRoot string
 	wg        sync.WaitGroup // tracks in-flight writes for graceful shutdown
+	git       *gitHistory    // nil when git history is disabled
 }
 
 func NewFileStore(notesRoot string) (*FileStore, error) {
@@ -104,6 +108,14 @@ func (fs *FileStore) Write(relativePath, content string) error {
 		}
 		return fmt.Errorf("rename: %w", err)
 	}
+
+	// Record the save as a git commit (non-fatal: log and continue).
+	if fs.git != nil {
+		if err := fs.git.CommitSave(relativePath); err != nil {
+			log.Warn().Err(err).Str("path", relativePath).Msg("git commit save")
+		}
+	}
+
 	return nil
 }
 
@@ -132,6 +144,12 @@ func (fs *FileStore) Delete(relativePath string) error {
 	if err := os.Remove(absPath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("delete file: %w", err)
 	}
+	// Record the deletion as a git commit (non-fatal).
+	if fs.git != nil {
+		if err := fs.git.CommitDelete(relativePath); err != nil {
+			log.Warn().Err(err).Str("path", relativePath).Msg("git commit delete")
+		}
+	}
 	return nil
 }
 
@@ -149,7 +167,16 @@ func (fs *FileStore) RenameDir(oldRelPath, newRelPath string) error {
 	if err := os.MkdirAll(filepath.Dir(newAbs), 0700); err != nil {
 		return fmt.Errorf("mkdir parent: %w", err)
 	}
-	return os.Rename(oldAbs, newAbs)
+	if err := os.Rename(oldAbs, newAbs); err != nil {
+		return err
+	}
+	// Record the rename as a git commit (non-fatal).
+	if fs.git != nil {
+		if err := fs.git.CommitRename(oldRelPath, newRelPath); err != nil {
+			log.Warn().Err(err).Str("old", oldRelPath).Str("new", newRelPath).Msg("git commit rename")
+		}
+	}
+	return nil
 }
 
 // EnsureDir creates the directory at relativePath if it doesn't exist.
@@ -171,6 +198,41 @@ func (fs *FileStore) RemoveDir(relativePath string) error {
 		return fmt.Errorf("remove dir: %w", err)
 	}
 	return nil
+}
+
+// EnableGitHistory initialises (or opens) a git repository at the notes root
+// so that every subsequent Write/Delete/RenameDir is recorded as a commit.
+// Call this once after NewFileStore, before serving requests.
+func (fs *FileStore) EnableGitHistory() error {
+	g, err := openOrInitGitRepo(fs.notesRoot)
+	if err != nil {
+		return err
+	}
+	fs.git = g
+	return nil
+}
+
+// GitHistoryEnabled reports whether git history tracking is active.
+func (fs *FileStore) GitHistoryEnabled() bool {
+	return fs.git != nil
+}
+
+// GitLogFile returns the commit history for the file at relativePath,
+// newest first. Returns nil when git history is disabled.
+func (fs *FileStore) GitLogFile(relativePath string, limit int) ([]model.HistoryEntry, error) {
+	if fs.git == nil {
+		return nil, nil
+	}
+	return fs.git.LogFile(relativePath, limit)
+}
+
+// GitFileAt returns the content of relativePath at the given commit SHA,
+// along with the commit timestamp. Returns empty strings when git is disabled.
+func (fs *FileStore) GitFileAt(sha, relativePath string) (string, time.Time, error) {
+	if fs.git == nil {
+		return "", time.Time{}, nil
+	}
+	return fs.git.FileAt(sha, relativePath)
 }
 
 // Wait blocks until all in-flight writes complete (for graceful shutdown).
