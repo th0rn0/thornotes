@@ -719,7 +719,9 @@ func TestHandler_AppPage(t *testing.T) {
 func TestHandler_NotFound(t *testing.T) {
 	c := newTestClient(t)
 
-	resp, err := c.httpClient.Get(c.server.URL + "/nonexistent/path/that/does/not/exist")
+	// Non-API paths serve the app shell (SPA deep linking), so use an API path
+	// that doesn't exist to get a real 404.
+	resp, err := c.httpClient.Get(c.server.URL + "/api/v1/nonexistent-endpoint")
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode)

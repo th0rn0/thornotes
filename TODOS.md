@@ -21,6 +21,9 @@ app does this well.
 
 ## Completed
 
+### Deep linking
+**Completed:** v0.17.0.0 — Note URLs reflect the folder path and note slug (`/My-Folder/my-note`). `history.pushState` on open, `popstate` for back/forward. Server-side `NoRoute` serves the app shell for all non-API/MCP paths so deep links survive a hard refresh. `document.title` updates to the note name.
+
 ### CodeMirror 6 editor
 **Completed:** v0.16.0.0 — EasyMDE (CM5, 320KB) replaced with CM6 bundle (493KB, built with bun from `web/cm6-bundle/index.js`). Custom toolbar (bold, italic, H#, quote, lists, link, preview toggle, undo, redo). Preview pane using existing marked + hljs pipeline. Live dark-mode switching via CM6 `Compartment`. `make build-cm6` rebuilds the vendor file.
 

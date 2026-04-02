@@ -41,6 +41,7 @@ const AUTO_SAVE_DELAY_MS = 1500;
     csrfToken = csrf.csrf_token;
     await Promise.all([loadFolderTree(), loadJournals()]);
     showApp();
+    await resolveDeepLink(window.location.pathname).catch(() => {});
   } catch {
     showAuth();
   }
@@ -71,6 +72,7 @@ async function login() {
     document.getElementById('topbar-username').textContent = me.username;
     await Promise.all([loadFolderTree(), loadJournals()]);
     showApp();
+    await resolveDeepLink(window.location.pathname).catch(() => {});
   } catch (e) {
     document.getElementById('login-error').textContent = e.message || 'Login failed';
   }
@@ -279,8 +281,63 @@ function renderSearchResults() {
   tree.innerHTML = html;
 }
 
+// ── Deep linking ───────────────────────────────────────────────────────────
+function folderAncestorPath(folderId) {
+  const segments = [];
+  let id = folderId;
+  while (id != null) {
+    const f = folders.find(f => f.id === id);
+    if (!f) break;
+    segments.unshift(encodeURIComponent(f.name));
+    id = f.parent_id;
+  }
+  return segments.join('/');
+}
+
+function noteDeepLink(note) {
+  if (!note.slug) return '/?note=' + note.id;
+  const parts = [];
+  if (note.folder_id != null) {
+    const fp = folderAncestorPath(note.folder_id);
+    if (fp) parts.push(fp);
+  }
+  parts.push(encodeURIComponent(note.slug));
+  return '/' + parts.join('/');
+}
+
+async function resolveDeepLink(pathname) {
+  if (!pathname || pathname === '/') return;
+  const segments = pathname.split('/').filter(Boolean).map(s => decodeURIComponent(s));
+  if (segments.length === 0) return;
+
+  const noteSlug = segments[segments.length - 1];
+  const folderNames = segments.slice(0, -1);
+
+  // Walk folder tree to find target folder.
+  let targetFolderId = null;
+  if (folderNames.length > 0) {
+    let current = folders.find(f => !f.parent_id && f.name === folderNames[0]);
+    if (!current) return;
+    for (let i = 1; i < folderNames.length; i++) {
+      current = folders.find(f => f.parent_id === current.id && f.name === folderNames[i]);
+      if (!current) return;
+    }
+    targetFolderId = current.id;
+  }
+
+  // Ensure notes are loaded for that folder, then find by slug.
+  if (targetFolderId != null) {
+    await ensureFolderLoaded(targetFolderId);
+    const match = (notesByFolder[targetFolderId] || []).find(n => n.slug === noteSlug);
+    if (match) await openNote(match.id, { historyMode: 'replace' });
+  } else {
+    const match = rootNotes.find(n => n.slug === noteSlug);
+    if (match) await openNote(match.id, { historyMode: 'replace' });
+  }
+}
+
 // ── Note ops ───────────────────────────────────────────────────────────────
-async function openNote(noteId) {
+async function openNote(noteId, { historyMode = 'push' } = {}) {
   const note = await api('GET', `/api/v1/notes/${noteId}`);
   currentNote = note;
   if (isMobile()) closeSidebar();
@@ -353,6 +410,16 @@ async function openNote(noteId) {
   }
 
   editor.setValue(note.content);
+
+  // Update URL to reflect the open note.
+  const deepLink = noteDeepLink(note);
+  if (historyMode === 'push') {
+    history.pushState({ noteId: note.id }, '', deepLink);
+  } else if (historyMode === 'replace') {
+    history.replaceState({ noteId: note.id }, '', deepLink);
+  }
+  document.title = 'thornotes \u2014 ' + note.title;
+
   renderTree(); // refresh active state
 }
 
@@ -914,3 +981,10 @@ document.getElementById('token-list').addEventListener('click', function(e) {
 
 // Disk full banner
 document.getElementById('disk-full-dismiss').addEventListener('click', function() { document.getElementById('disk-full-banner').style.display = 'none'; });
+
+// Browser back/forward — reopen the note recorded in history state.
+window.addEventListener('popstate', function(e) {
+  if (e.state && e.state.noteId) {
+    openNote(e.state.noteId, { historyMode: 'none' });
+  }
+});

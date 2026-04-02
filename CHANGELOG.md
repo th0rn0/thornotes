@@ -2,6 +2,11 @@
 
 All notable changes to thornotes are documented here.
 
+## [0.17.0.0] - 2026-04-02
+
+### Added
+- **Deep linking** — note URLs now reflect the folder path and note slug (e.g. `/My-Folder/my-note`). Navigating directly to a deep link or refreshing the page opens the correct note. Browser back/forward work across note navigation. The app shell is served for all non-API paths so deep links survive a hard refresh. `document.title` updates to show the open note name.
+
 ## [0.16.0.0] - 2026-04-02
 
 ### Changed

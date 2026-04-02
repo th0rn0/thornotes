@@ -58,10 +58,42 @@ func TestRouter_New(t *testing.T) {
 	assert.NotNil(t, h)
 }
 
-func TestRouter_Serves404(t *testing.T) {
+// API paths that don't exist still return 404 JSON.
+func TestRouter_API_Serves404(t *testing.T) {
 	h := buildHandler(t)
 
-	req := httptest.NewRequest(http.MethodGet, "/nonexistent", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/nonexistent", nil)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusNotFound, rr.Code)
+	assert.Contains(t, rr.Header().Get("Content-Type"), "json")
+}
+
+// Unknown non-API paths serve the app shell for SPA deep linking.
+func TestRouter_DeepLink_ServesAppShell(t *testing.T) {
+	h := buildHandler(t)
+
+	for _, path := range []string{
+		"/my-folder/my-note",
+		"/my-note",
+		"/a/b/c/note-slug",
+	} {
+		t.Run(path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			rr := httptest.NewRecorder()
+			h.ServeHTTP(rr, req)
+			assert.Equal(t, http.StatusOK, rr.Code)
+			assert.Contains(t, rr.Header().Get("Content-Type"), "text/html")
+			assert.Contains(t, rr.Body.String(), "thornotes")
+		})
+	}
+}
+
+// MCP endpoints still return 404 for unknown sub-paths.
+func TestRouter_MCP_Unknown_Serves404(t *testing.T) {
+	h := buildHandler(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/mcp/unknown", nil)
 	rr := httptest.NewRecorder()
 	h.ServeHTTP(rr, req)
 	assert.Equal(t, http.StatusNotFound, rr.Code)

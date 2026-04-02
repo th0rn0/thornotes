@@ -3,6 +3,7 @@ package router
 import (
 	"html/template"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -33,7 +34,19 @@ func New(
 	r.Use(security.SecureHeadersMiddleware())
 
 	r.NoRoute(func(c *gin.Context) {
-		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+		p := c.Request.URL.Path
+		// API and MCP paths return JSON 404; everything else serves the app
+		// shell so that deep-linked URLs (e.g. /folder/note-slug) work when
+		// navigated to directly.
+		if strings.HasPrefix(p, "/api/") || strings.HasPrefix(p, "/mcp") {
+			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+			return
+		}
+		c.Header("Content-Type", "text/html; charset=utf-8")
+		c.Writer.WriteHeader(http.StatusOK)
+		if err := tmpl.ExecuteTemplate(c.Writer, "app.html", nil); err != nil {
+			log.Error().Err(err).Msg("execute app template")
+		}
 	})
 
 	authH := handler.NewAuthHandler(authSvc, notesSvc, secureCookies)
