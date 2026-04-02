@@ -2,6 +2,14 @@
 
 All notable changes to thornotes are documented here.
 
+## [0.19.2.0] - 2026-04-02
+
+### Fixed
+- **AuthRateLimiter goroutine leak** — `cleanupLoop` used `for range ticker.C` which blocks forever (stopping a ticker does not close its channel). Every test client created a new `AuthRateLimiter`, leaking one goroutine per test. With 70+ MCP handler tests this accumulated thousands of idle goroutines, degrading the Go scheduler enough to push the handler test suite past the 10-minute timeout in CI. Added a `Stop()` method that closes a `stopCh` channel and rewrote `cleanupLoop` to `select` on both `ticker.C` and `stopCh`. Wired `t.Cleanup(rateLimiter.Stop)` into all test helpers and `rateLimiter.Stop()` into the main graceful shutdown.
+
+### Changed
+- **README** — updated editor description from EasyMDE to CodeMirror 6; refreshed screenshots.
+
 ## [0.19.1.0] - 2026-04-02
 
 ### Fixed

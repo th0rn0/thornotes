@@ -55,6 +55,7 @@ func newTestClient(t *testing.T) *testClient {
 	authSvc := auth.NewService(userRepo, sessionRepo, true)
 	notesSvc := notes.NewService(noteRepo, folderRepo, searchRepo, sqlite.NewJournalRepo(pool.ReadDB, pool.WriteDB), fs)
 	rateLimiter := security.NewAuthRateLimiter(nil)
+	t.Cleanup(rateLimiter.Stop)
 
 	tmpl, err := template.ParseFS(thornotes.TemplatesFS, "web/templates/*.html")
 	require.NoError(t, err)
@@ -1450,6 +1451,7 @@ func newTestClientGit(t *testing.T) *testClient {
 	authSvc := auth.NewService(userRepo, sessionRepo, true)
 	notesSvc := notes.NewService(noteRepo, folderRepo, searchRepo, sqlite.NewJournalRepo(pool.ReadDB, pool.WriteDB), fs)
 	rateLimiter := security.NewAuthRateLimiter(nil)
+	t.Cleanup(rateLimiter.Stop)
 
 	tmpl, err := template.ParseFS(thornotes.TemplatesFS, "web/templates/*.html")
 	require.NoError(t, err)

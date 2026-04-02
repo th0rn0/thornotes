@@ -187,6 +187,7 @@ func main() {
 	<-stop
 	log.Info().Msg("shutting down...")
 	watchCancel()
+	rateLimiter.Stop()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()

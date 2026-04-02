@@ -27,15 +27,22 @@ type AuthRateLimiter struct {
 	mu           sync.Mutex
 	limiters     map[string]*ipLimiter
 	trustedProxy *net.IPNet
+	stopCh       chan struct{}
 }
 
 func NewAuthRateLimiter(trustedProxy *net.IPNet) *AuthRateLimiter {
 	rl := &AuthRateLimiter{
 		limiters:     make(map[string]*ipLimiter),
 		trustedProxy: trustedProxy,
+		stopCh:       make(chan struct{}),
 	}
 	go rl.cleanupLoop()
 	return rl
+}
+
+// Stop terminates the background cleanup goroutine.
+func (rl *AuthRateLimiter) Stop() {
+	close(rl.stopCh)
 }
 
 // Middleware wraps an HTTP handler with per-IP rate limiting.
@@ -137,7 +144,12 @@ func (rl *AuthRateLimiter) evictStale(cutoff time.Time) {
 func (rl *AuthRateLimiter) cleanupLoop() {
 	ticker := time.NewTicker(rateLimitCleanup)
 	defer ticker.Stop()
-	for range ticker.C {
-		rl.evictStale(time.Now().Add(-rateLimitCleanup))
+	for {
+		select {
+		case <-rl.stopCh:
+			return
+		case <-ticker.C:
+			rl.evictStale(time.Now().Add(-rateLimitCleanup))
+		}
 	}
 }

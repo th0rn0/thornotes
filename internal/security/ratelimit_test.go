@@ -12,6 +12,7 @@ import (
 
 func TestRateLimit_AllowsUnderLimit(t *testing.T) {
 	rl := NewAuthRateLimiter(nil)
+	t.Cleanup(rl.Stop)
 	handler := rl.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -27,6 +28,7 @@ func TestRateLimit_AllowsUnderLimit(t *testing.T) {
 
 func TestRateLimit_BlocksAfterLimit(t *testing.T) {
 	rl := NewAuthRateLimiter(nil)
+	t.Cleanup(rl.Stop)
 	handler := rl.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -50,6 +52,7 @@ func TestRateLimit_BlocksAfterLimit(t *testing.T) {
 
 func TestRateLimit_DifferentIPsAreIndependent(t *testing.T) {
 	rl := NewAuthRateLimiter(nil)
+	t.Cleanup(rl.Stop)
 	handler := rl.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -73,6 +76,7 @@ func TestRateLimit_DifferentIPsAreIndependent(t *testing.T) {
 func TestRateLimit_TrustedProxy_ExtractsRealIP(t *testing.T) {
 	_, proxyNet, _ := net.ParseCIDR("10.0.0.0/8")
 	rl := NewAuthRateLimiter(proxyNet)
+	t.Cleanup(rl.Stop)
 	handler := rl.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -105,6 +109,7 @@ func TestRateLimit_TrustedProxy_ExtractsRealIP(t *testing.T) {
 
 func TestRateLimit_UntrustedProxy_IgnoresXFF(t *testing.T) {
 	rl := NewAuthRateLimiter(nil) // no trusted proxy
+	t.Cleanup(rl.Stop)
 	handler := rl.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -129,6 +134,7 @@ func TestRateLimit_UntrustedProxy_IgnoresXFF(t *testing.T) {
 
 func TestRateLimit_EvictStale(t *testing.T) {
 	rl := NewAuthRateLimiter(nil)
+	t.Cleanup(rl.Stop)
 
 	// Add an entry via getLimiter.
 	rl.getLimiter("10.1.1.1")
@@ -150,6 +156,7 @@ func TestRateLimit_EvictStale(t *testing.T) {
 
 func TestRateLimit_EvictStale_KeepsRecent(t *testing.T) {
 	rl := NewAuthRateLimiter(nil)
+	t.Cleanup(rl.Stop)
 
 	// Add a fresh entry via getLimiter.
 	rl.getLimiter("10.2.2.2")
@@ -167,6 +174,7 @@ func TestRateLimit_EvictStale_KeepsRecent(t *testing.T) {
 func TestRateLimit_ExtractIP_NoXFF(t *testing.T) {
 	_, proxyNet, _ := net.ParseCIDR("10.0.0.0/8")
 	rl := NewAuthRateLimiter(proxyNet)
+	t.Cleanup(rl.Stop)
 
 	// Trusted proxy configured, but no XFF header — should use RemoteAddr.
 	req := httptest.NewRequest(http.MethodPost, "/", nil)
@@ -180,6 +188,7 @@ func TestRateLimit_ExtractIP_NoXFF(t *testing.T) {
 func TestRateLimit_ExtractIP_AllTrustedChain(t *testing.T) {
 	_, proxyNet, _ := net.ParseCIDR("10.0.0.0/8")
 	rl := NewAuthRateLimiter(proxyNet)
+	t.Cleanup(rl.Stop)
 
 	// XFF chain is all trusted IPs — should fall back to RemoteAddr.
 	req := httptest.NewRequest(http.MethodPost, "/", nil)
@@ -193,6 +202,7 @@ func TestRateLimit_ExtractIP_AllTrustedChain(t *testing.T) {
 func TestRateLimit_ExtractIP_UnparsableRemote(t *testing.T) {
 	_, proxyNet, _ := net.ParseCIDR("10.0.0.0/8")
 	rl := NewAuthRateLimiter(proxyNet)
+	t.Cleanup(rl.Stop)
 
 	// RemoteAddr with no host part → SplitHostPort returns "", so net.ParseIP("") == nil.
 	// Should fall back to the empty string (remoteIP).
@@ -207,6 +217,7 @@ func TestRateLimit_ExtractIP_UnparsableRemote(t *testing.T) {
 func TestRateLimit_ExtractIP_InvalidXFFEntry(t *testing.T) {
 	_, proxyNet, _ := net.ParseCIDR("10.0.0.0/8")
 	rl := NewAuthRateLimiter(proxyNet)
+	t.Cleanup(rl.Stop)
 
 	// XFF header contains an invalid (non-parseable) IP before the real one.
 	// The loop should skip it and continue.
@@ -222,6 +233,7 @@ func TestRateLimit_ExtractIP_InvalidXFFEntry(t *testing.T) {
 func TestRateLimit_ExtractIP_RemoteNotInTrustedRange(t *testing.T) {
 	_, proxyNet, _ := net.ParseCIDR("10.0.0.0/8")
 	rl := NewAuthRateLimiter(proxyNet)
+	t.Cleanup(rl.Stop)
 
 	// RemoteAddr is NOT in the trusted proxy range — XFF must be ignored.
 	req := httptest.NewRequest(http.MethodPost, "/", nil)
