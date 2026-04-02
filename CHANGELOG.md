@@ -2,6 +2,11 @@
 
 All notable changes to thornotes are documented here.
 
+## [0.19.0.0] - 2026-04-02
+
+### Added
+- **Version history UI** — a "History" button appears in the editor titlebar when a note is open. Clicking it opens a modal showing up to 50 past git commits for that note (newest first), with timestamps formatted as relative time (e.g. "5m ago"). Selecting an entry loads the note content at that commit in a read-only preview pane. A "Restore this version" button replaces the current note content with the selected version and commits the restoration to history. When git history is not enabled, the modal shows a friendly message with the flag to use. Fully dark-mode aware with mobile-responsive layout (single-column on narrow screens).
+
 ## [0.18.0.0] - 2026-04-02
 
 ### Added

@@ -881,6 +881,109 @@ async function deleteJournal(id) {
   }
 }
 
+// ── Version History ────────────────────────────────────────────────────────
+let _historyEntries = [];
+let _selectedHistorySha = null;
+
+async function openHistoryModal() {
+  if (!currentNote) return;
+  _historyEntries = [];
+  _selectedHistorySha = null;
+  document.getElementById('history-modal-title').textContent = 'Version History';
+  document.getElementById('history-list').innerHTML = '<div style="font-size:12px;color:#aaa;padding:12px;">Loading…</div>';
+  document.getElementById('history-preview').innerHTML = '<div class="history-preview-empty">Select a version to preview</div>';
+  document.getElementById('history-restore-btn').disabled = true;
+  document.getElementById('history-modal').style.display = 'flex';
+
+  try {
+    const data = await api('GET', `/api/v1/notes/${currentNote.id}/history?limit=50`);
+    _historyEntries = data || [];
+    renderHistoryList();
+  } catch (e) {
+    if (e.status === 501) {
+      document.getElementById('history-list').innerHTML = '';
+      document.getElementById('history-preview').innerHTML =
+        '<div class="history-not-available">Version history is not enabled on this server.<br><br>' +
+        'Start thornotes with <code>--enable-git-history</code> to record changes.</div>';
+    } else {
+      document.getElementById('history-list').innerHTML =
+        `<div style="font-size:12px;color:#c00;padding:12px;">${esc(e.message || 'Failed to load history')}</div>`;
+    }
+  }
+}
+
+function renderHistoryList() {
+  const el = document.getElementById('history-list');
+  if (_historyEntries.length === 0) {
+    el.innerHTML = '<div style="font-size:12px;color:#aaa;padding:12px;">No history yet. Save the note to create a snapshot.</div>';
+    return;
+  }
+  el.innerHTML = _historyEntries.map(entry => `
+    <div class="history-entry" data-sha="${esc(entry.sha)}">
+      <div class="history-entry-time">${esc(formatHistoryTime(entry.timestamp))}</div>
+      <div class="history-entry-sha">${esc(entry.sha.slice(0, 8))}</div>
+    </div>
+  `).join('');
+}
+
+function formatHistoryTime(ts) {
+  const d = new Date(ts);
+  const now = new Date();
+  const diffMs = now - d;
+  const diffMin = Math.floor(diffMs / 60000);
+  if (diffMin < 1) return 'Just now';
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffH = Math.floor(diffMin / 60);
+  if (diffH < 24) return `${diffH}h ago`;
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: d.getFullYear() !== now.getFullYear() ? 'numeric' : undefined });
+}
+
+async function selectHistoryEntry(sha) {
+  _selectedHistorySha = sha;
+  document.querySelectorAll('.history-entry').forEach(el => {
+    el.classList.toggle('active', el.dataset.sha === sha);
+  });
+  document.getElementById('history-restore-btn').disabled = true;
+  document.getElementById('history-preview').innerHTML = '<div class="history-preview-empty">Loading…</div>';
+
+  try {
+    const data = await api('GET', `/api/v1/notes/${currentNote.id}/history/${encodeURIComponent(sha)}`);
+    document.getElementById('history-preview').innerHTML =
+      `<pre class="history-preview-content">${esc(data.content || '')}</pre>`;
+    document.getElementById('history-restore-btn').disabled = false;
+  } catch (e) {
+    document.getElementById('history-preview').innerHTML =
+      `<div class="history-preview-empty">${esc(e.message || 'Failed to load version')}</div>`;
+  }
+}
+
+async function restoreHistoryVersion() {
+  if (!currentNote || !_selectedHistorySha) return;
+  if (!confirm('Restore this version? Your current content will be replaced.')) return;
+
+  try {
+    const res = await api('POST', `/api/v1/notes/${currentNote.id}/history/${encodeURIComponent(_selectedHistorySha)}/restore`, {
+      content_hash: currentNote.content_hash,
+    });
+    currentNote.content_hash = res.content_hash;
+    editor.setValue(res.content);
+    closeHistoryModal();
+    showNotification('Note restored to selected version');
+  } catch (e) {
+    if (e.status === 409) {
+      showNotification('Conflict: note was modified. Reload and try again.', true);
+    } else {
+      showNotification(e.message || 'Failed to restore version', true);
+    }
+  }
+}
+
+function closeHistoryModal() {
+  document.getElementById('history-modal').style.display = 'none';
+  _historyEntries = [];
+  _selectedHistorySha = null;
+}
+
 // ── Utils ──────────────────────────────────────────────────────────────────
 function esc(s) {
   return String(s)
@@ -977,6 +1080,16 @@ document.getElementById('tree').addEventListener('click', function(e) {
 document.getElementById('token-list').addEventListener('click', function(e) {
   const btn = e.target.closest('[data-action="revoke-token"]');
   if (btn) revokeToken(Number(btn.dataset.tokenId));
+});
+
+// History modal
+document.getElementById('history-btn').addEventListener('click', openHistoryModal);
+document.getElementById('history-modal').addEventListener('click', function(e) { if (e.target === this) closeHistoryModal(); });
+document.getElementById('history-cancel-btn').addEventListener('click', closeHistoryModal);
+document.getElementById('history-restore-btn').addEventListener('click', restoreHistoryVersion);
+document.getElementById('history-list').addEventListener('click', function(e) {
+  const entry = e.target.closest('.history-entry');
+  if (entry) selectHistoryEntry(entry.dataset.sha);
 });
 
 // Disk full banner
