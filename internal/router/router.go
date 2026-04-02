@@ -100,6 +100,7 @@ func New(
 		notesGroup.GET("", notesH.Search)
 		notesGroup.GET("/root", notesH.ListRoot)
 		notesGroup.GET("/all", notesH.ListAll)
+		notesGroup.GET("/context", notesH.Context)
 		notesGroup.GET("/:id", notesH.Get)
 		notesGroup.PATCH("/:id", csrfMW, notesH.Patch)
 		notesGroup.DELETE("/:id", csrfMW, notesH.Delete)

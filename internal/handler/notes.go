@@ -2,6 +2,7 @@ package handler
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/th0rn0/thornotes/internal/model"
@@ -173,6 +174,29 @@ func (h *NotesHandler) ListAll(c *gin.Context) {
 		items = []*model.NoteListItem{}
 	}
 	c.JSON(http.StatusOK, items)
+}
+
+// Context assembles a concatenated markdown string from the user's notes for
+// use as LLM prompt context. Optional query param: folder_id (integer).
+func (h *NotesHandler) Context(c *gin.Context) {
+	user := ginUser(c)
+
+	var folderID *int64
+	if raw := c.Query("folder_id"); raw != "" {
+		id, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "folder_id must be an integer"})
+			return
+		}
+		folderID = &id
+	}
+
+	result, err := h.svc.NoteContext(c.Request.Context(), user.ID, folderID)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, result)
 }
 
 func (h *NotesHandler) Search(c *gin.Context) {

@@ -49,6 +49,10 @@ type NoteRepository interface {
 	// ListAllForWatch returns lightweight records for all notes owned by userID.
 	// Used by the disk watcher to detect content changes without loading full content.
 	ListAllForWatch(ctx context.Context, userID int64) ([]*model.NoteWatchRecord, error)
+	// ListForContext returns notes with full content for the LLM context endpoint.
+	// Pass nil folderID to include all notes across all folders.
+	// Results are ordered newest-first (updated_at DESC) for truncation priority.
+	ListForContext(ctx context.Context, userID int64, folderID *int64) ([]*model.Note, error)
 	Update(ctx context.Context, n *model.Note) error
 	UpdateContent(ctx context.Context, userID, noteID int64, content, contentHash, expectedHash string) error
 	Delete(ctx context.Context, userID, noteID int64) error

@@ -214,6 +214,51 @@ func (r *NoteRepo) SetShareToken(ctx context.Context, userID, noteID int64, toke
 	return err
 }
 
+func (r *NoteRepo) ListForContext(ctx context.Context, userID int64, folderID *int64) ([]*model.Note, error) {
+	var (
+		rows *sql.Rows
+		err  error
+	)
+	if folderID == nil {
+		rows, err = r.db.QueryContext(ctx, `
+			SELECT id, user_id, folder_id, title, slug, disk_path, content, content_hash,
+			       tags, share_token, fts_synced_at, created_at, updated_at
+			FROM notes WHERE user_id = ?
+			ORDER BY updated_at DESC`, userID)
+	} else {
+		rows, err = r.db.QueryContext(ctx, `
+			SELECT id, user_id, folder_id, title, slug, disk_path, content, content_hash,
+			       tags, share_token, fts_synced_at, created_at, updated_at
+			FROM notes WHERE user_id = ? AND folder_id = ?
+			ORDER BY updated_at DESC`, userID, *folderID)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("list notes for context: %w", err)
+	}
+	defer rows.Close()
+	return scanNotes(rows)
+}
+
+func scanNotes(rows *sql.Rows) ([]*model.Note, error) {
+	var notes []*model.Note
+	for rows.Next() {
+		n := &model.Note{}
+		var tagsJSON string
+		if err := rows.Scan(
+			&n.ID, &n.UserID, &n.FolderID, &n.Title, &n.Slug, &n.DiskPath,
+			&n.Content, &n.ContentHash, &tagsJSON, &n.ShareToken,
+			&n.FtsSyncedAt, &n.CreatedAt, &n.UpdatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan note: %w", err)
+		}
+		if err := json.Unmarshal([]byte(tagsJSON), &n.Tags); err != nil {
+			n.Tags = nil
+		}
+		notes = append(notes, n)
+	}
+	return notes, rows.Err()
+}
+
 func (r *NoteRepo) scanNote(row *sql.Row) (*model.Note, error) {
 	n := &model.Note{}
 	var tagsJSON string
