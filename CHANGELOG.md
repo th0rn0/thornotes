@@ -2,6 +2,11 @@
 
 All notable changes to thornotes are documented here.
 
+## [0.19.3.0] - 2026-04-02
+
+### Fixed
+- **bcrypt cost in tests** — `auth.NewService` uses bcrypt cost 12 (production default). On GitHub Actions 2-core runners this takes ~1.5 s/hash; with 136 handler tests each performing register+login that pushed the suite past the 10-minute CI timeout. Added `NewServiceForTest(users, sessions, allowRegistration bool)` that uses `bcrypt.MinCost` (cost 4) and updated all test helpers in `internal/auth`, `internal/handler`, and `internal/router` to use it.
+
 ## [0.19.2.0] - 2026-04-02
 
 ### Fixed

@@ -27,10 +27,17 @@ type Service struct {
 	// allowRegistration controls whether new users can register.
 	// The very first user can always register regardless of this flag.
 	allowRegistration bool
+	bcryptCost        int
 }
 
 func NewService(users repository.UserRepository, sessions repository.SessionRepository, allowRegistration bool) *Service {
-	return &Service{users: users, sessions: sessions, allowRegistration: allowRegistration}
+	return &Service{users: users, sessions: sessions, allowRegistration: allowRegistration, bcryptCost: bcryptCost}
+}
+
+// NewServiceForTest returns a Service with a reduced bcrypt cost (bcrypt.MinCost)
+// so that register/login operations complete in milliseconds during tests.
+func NewServiceForTest(users repository.UserRepository, sessions repository.SessionRepository, allowRegistration bool) *Service {
+	return &Service{users: users, sessions: sessions, allowRegistration: allowRegistration, bcryptCost: bcrypt.MinCost}
 }
 
 func (s *Service) Register(ctx context.Context, username, password string) (*model.User, error) {
@@ -50,7 +57,7 @@ func (s *Service) Register(ctx context.Context, username, password string) (*mod
 		return nil, apperror.Forbidden("registration is closed")
 	}
 
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcryptCost)
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), s.bcryptCost)
 	if err != nil {
 		return nil, apperror.Internal("hash password", err)
 	}

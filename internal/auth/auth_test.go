@@ -108,7 +108,7 @@ func (r *fakeSessionRepo) DeleteExpired(_ context.Context) error {
 // ── Tests ──────────────────────────────────────────────────────────────────
 
 func TestRegister_Success(t *testing.T) {
-	svc := NewService(newFakeUserRepo(), newFakeSessionRepo(), true)
+	svc := NewServiceForTest(newFakeUserRepo(), newFakeSessionRepo(), true)
 	u, err := svc.Register(context.Background(), "alice", "longenoughpassword123")
 	require.NoError(t, err)
 	assert.Equal(t, "alice", u.Username)
@@ -116,7 +116,7 @@ func TestRegister_Success(t *testing.T) {
 }
 
 func TestRegister_DuplicateUsername(t *testing.T) {
-	svc := NewService(newFakeUserRepo(), newFakeSessionRepo(), true)
+	svc := NewServiceForTest(newFakeUserRepo(), newFakeSessionRepo(), true)
 	_, err := svc.Register(context.Background(), "alice", "longenoughpassword123")
 	require.NoError(t, err)
 
@@ -128,7 +128,7 @@ func TestRegister_DuplicateUsername(t *testing.T) {
 }
 
 func TestRegister_ShortPassword(t *testing.T) {
-	svc := NewService(newFakeUserRepo(), newFakeSessionRepo(), true)
+	svc := NewServiceForTest(newFakeUserRepo(), newFakeSessionRepo(), true)
 	_, err := svc.Register(context.Background(), "bob", "short")
 	require.Error(t, err)
 	var appErr *apperror.AppError
@@ -138,14 +138,14 @@ func TestRegister_ShortPassword(t *testing.T) {
 
 func TestRegister_FirstUserAlwaysAllowed(t *testing.T) {
 	// allowRegistration = false but first user should still register.
-	svc := NewService(newFakeUserRepo(), newFakeSessionRepo(), false)
+	svc := NewServiceForTest(newFakeUserRepo(), newFakeSessionRepo(), false)
 	u, err := svc.Register(context.Background(), "admin", "longenoughpassword123")
 	require.NoError(t, err)
 	assert.Equal(t, "admin", u.Username)
 }
 
 func TestRegister_SecondUserBlockedWhenClosed(t *testing.T) {
-	svc := NewService(newFakeUserRepo(), newFakeSessionRepo(), false)
+	svc := NewServiceForTest(newFakeUserRepo(), newFakeSessionRepo(), false)
 	_, err := svc.Register(context.Background(), "admin", "longenoughpassword123")
 	require.NoError(t, err)
 
@@ -157,7 +157,7 @@ func TestRegister_SecondUserBlockedWhenClosed(t *testing.T) {
 }
 
 func TestLogin_Success(t *testing.T) {
-	svc := NewService(newFakeUserRepo(), newFakeSessionRepo(), true)
+	svc := NewServiceForTest(newFakeUserRepo(), newFakeSessionRepo(), true)
 	_, err := svc.Register(context.Background(), "alice", "correctpassword123!")
 	require.NoError(t, err)
 
@@ -167,7 +167,7 @@ func TestLogin_Success(t *testing.T) {
 }
 
 func TestLogin_WrongPassword(t *testing.T) {
-	svc := NewService(newFakeUserRepo(), newFakeSessionRepo(), true)
+	svc := NewServiceForTest(newFakeUserRepo(), newFakeSessionRepo(), true)
 	_, err := svc.Register(context.Background(), "alice", "correctpassword123!")
 	require.NoError(t, err)
 
@@ -179,7 +179,7 @@ func TestLogin_WrongPassword(t *testing.T) {
 }
 
 func TestLogin_UnknownUser_SameErrorAsWrongPassword(t *testing.T) {
-	svc := NewService(newFakeUserRepo(), newFakeSessionRepo(), true)
+	svc := NewServiceForTest(newFakeUserRepo(), newFakeSessionRepo(), true)
 
 	_, err := svc.Login(context.Background(), "nobody", "somepassword123!")
 	require.Error(t, err)
@@ -190,7 +190,7 @@ func TestLogin_UnknownUser_SameErrorAsWrongPassword(t *testing.T) {
 }
 
 func TestLogin_ErrorMessageIsUniform(t *testing.T) {
-	svc := NewService(newFakeUserRepo(), newFakeSessionRepo(), true)
+	svc := NewServiceForTest(newFakeUserRepo(), newFakeSessionRepo(), true)
 	_, _ = svc.Register(context.Background(), "alice", "correctpassword123!")
 
 	// Wrong user.
@@ -207,7 +207,7 @@ func TestLogin_ErrorMessageIsUniform(t *testing.T) {
 }
 
 func TestLogout_DeletesSession(t *testing.T) {
-	svc := NewService(newFakeUserRepo(), newFakeSessionRepo(), true)
+	svc := NewServiceForTest(newFakeUserRepo(), newFakeSessionRepo(), true)
 	_, err := svc.Register(context.Background(), "alice", "correctpassword123!")
 	require.NoError(t, err)
 
@@ -222,7 +222,7 @@ func TestLogout_DeletesSession(t *testing.T) {
 }
 
 func TestGetSession_ReturnsActiveSession(t *testing.T) {
-	svc := NewService(newFakeUserRepo(), newFakeSessionRepo(), true)
+	svc := NewServiceForTest(newFakeUserRepo(), newFakeSessionRepo(), true)
 	_, err := svc.Register(context.Background(), "alice", "correctpassword123!")
 	require.NoError(t, err)
 
@@ -235,7 +235,7 @@ func TestGetSession_ReturnsActiveSession(t *testing.T) {
 }
 
 func TestGetSession_UnknownToken(t *testing.T) {
-	svc := NewService(newFakeUserRepo(), newFakeSessionRepo(), true)
+	svc := NewServiceForTest(newFakeUserRepo(), newFakeSessionRepo(), true)
 	_, err := svc.GetSession(context.Background(), "nonexistent-token")
 	require.Error(t, err)
 }
@@ -254,7 +254,7 @@ func serveGinHandler(handler gin.HandlerFunc, req *http.Request) *httptest.Respo
 func TestSessionMiddleware_Valid(t *testing.T) {
 	userRepo := newFakeUserRepo()
 	sessionRepo := newFakeSessionRepo()
-	svc := NewService(userRepo, sessionRepo, true)
+	svc := NewServiceForTest(userRepo, sessionRepo, true)
 
 	_, err := svc.Register(context.Background(), "alice", "correctpassword123!")
 	require.NoError(t, err)
@@ -282,14 +282,14 @@ func TestSessionMiddleware_Valid(t *testing.T) {
 }
 
 func TestSessionMiddleware_NoCookie(t *testing.T) {
-	svc := NewService(newFakeUserRepo(), newFakeSessionRepo(), true)
+	svc := NewServiceForTest(newFakeUserRepo(), newFakeSessionRepo(), true)
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rr := serveGinHandler(svc.SessionMiddleware(), req)
 	assert.Equal(t, http.StatusUnauthorized, rr.Code)
 }
 
 func TestSessionMiddleware_InvalidSession(t *testing.T) {
-	svc := NewService(newFakeUserRepo(), newFakeSessionRepo(), true)
+	svc := NewServiceForTest(newFakeUserRepo(), newFakeSessionRepo(), true)
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.AddCookie(&http.Cookie{Name: "session", Value: "invalid-token"})
 	rr := serveGinHandler(svc.SessionMiddleware(), req)
@@ -299,7 +299,7 @@ func TestSessionMiddleware_InvalidSession(t *testing.T) {
 func TestSessionMiddleware_UserNotFound(t *testing.T) {
 	userRepo := newFakeUserRepo()
 	sessionRepo := newFakeSessionRepo()
-	svc := NewService(userRepo, sessionRepo, true)
+	svc := NewServiceForTest(userRepo, sessionRepo, true)
 
 	_, err := svc.Register(context.Background(), "alice", "correctpassword123!")
 	require.NoError(t, err)
@@ -331,7 +331,7 @@ func TestUserFromContext_Missing(t *testing.T) {
 // ── Additional edge-case tests ──────────────────────────────────────────────
 
 func TestRegister_LongUsername(t *testing.T) {
-	svc := NewService(newFakeUserRepo(), newFakeSessionRepo(), true)
+	svc := NewServiceForTest(newFakeUserRepo(), newFakeSessionRepo(), true)
 	// Username exactly 65 characters — should fail validation.
 	longName := "a" + "b" + "c" + "d" + "e" + "f" + "g" + "h" + "i" + "j" +
 		"a" + "b" + "c" + "d" + "e" + "f" + "g" + "h" + "i" + "j" +
@@ -358,7 +358,7 @@ func (r *errCountUserRepo) Count(_ context.Context) (int, error) {
 
 func TestRegister_CountError(t *testing.T) {
 	repo := &errCountUserRepo{fakeUserRepo: newFakeUserRepo()}
-	svc := NewService(repo, newFakeSessionRepo(), true)
+	svc := NewServiceForTest(repo, newFakeSessionRepo(), true)
 	_, err := svc.Register(context.Background(), "alice", "longenoughpassword123")
 	require.Error(t, err)
 }
@@ -374,7 +374,7 @@ func (r *errGetByUsernameRepo) GetByUsername(_ context.Context, _ string) (*mode
 
 func TestLogin_InternalUserError(t *testing.T) {
 	repo := &errGetByUsernameRepo{fakeUserRepo: newFakeUserRepo()}
-	svc := NewService(repo, newFakeSessionRepo(), true)
+	svc := NewServiceForTest(repo, newFakeSessionRepo(), true)
 	_, err := svc.Login(context.Background(), "alice", "somepassword123!")
 	require.Error(t, err)
 	// Should be an internal error, not Unauthorized.
@@ -403,7 +403,7 @@ func TestLogin_SessionCreateError(t *testing.T) {
 		PasswordHash: string(hash),
 	}
 	sessionRepo := &errCreateSessionRepo{fakeSessionRepo: newFakeSessionRepo()}
-	svc := NewService(userRepo, sessionRepo, true)
+	svc := NewServiceForTest(userRepo, sessionRepo, true)
 
 	_, err := svc.Login(context.Background(), "alice", "testpassword123!")
 	require.Error(t, err)

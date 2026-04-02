@@ -52,7 +52,7 @@ func newTestClient(t *testing.T) *testClient {
 	searchRepo := sqlite.NewSearchRepo(pool.ReadDB, pool.WriteDB)
 	apiTokenRepo := sqlite.NewAPITokenRepo(pool.ReadDB, pool.WriteDB)
 
-	authSvc := auth.NewService(userRepo, sessionRepo, true)
+	authSvc := auth.NewServiceForTest(userRepo, sessionRepo, true)
 	notesSvc := notes.NewService(noteRepo, folderRepo, searchRepo, sqlite.NewJournalRepo(pool.ReadDB, pool.WriteDB), fs)
 	rateLimiter := security.NewAuthRateLimiter(nil)
 	t.Cleanup(rateLimiter.Stop)
@@ -1448,7 +1448,7 @@ func newTestClientGit(t *testing.T) *testClient {
 	searchRepo := sqlite.NewSearchRepo(pool.ReadDB, pool.WriteDB)
 	apiTokenRepo := sqlite.NewAPITokenRepo(pool.ReadDB, pool.WriteDB)
 
-	authSvc := auth.NewService(userRepo, sessionRepo, true)
+	authSvc := auth.NewServiceForTest(userRepo, sessionRepo, true)
 	notesSvc := notes.NewService(noteRepo, folderRepo, searchRepo, sqlite.NewJournalRepo(pool.ReadDB, pool.WriteDB), fs)
 	rateLimiter := security.NewAuthRateLimiter(nil)
 	t.Cleanup(rateLimiter.Stop)
