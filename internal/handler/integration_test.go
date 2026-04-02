@@ -1207,3 +1207,218 @@ func TestHandler_ListAll_DBError(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
 }
 
+// ─── Context endpoint tests ───────────────────────────────────────────────────
+
+func TestHandler_Context_Empty(t *testing.T) {
+	c := newTestClient(t)
+	c.registerAndLogin(t)
+
+	// Delete the auto-created Getting Started note so we have a clean slate.
+	rootResp := c.do(t, http.MethodGet, "/api/v1/notes/root", nil)
+	var items []map[string]interface{}
+	require.NoError(t, json.NewDecoder(rootResp.Body).Decode(&items))
+	rootResp.Body.Close()
+	for _, item := range items {
+		id := int64(item["id"].(float64))
+		delResp := c.do(t, http.MethodDelete, "/api/v1/notes/"+i64str(id), nil)
+		delResp.Body.Close()
+	}
+
+	resp := c.do(t, http.MethodGet, "/api/v1/notes/context", nil)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var result map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+	assert.Equal(t, "", result["context"])
+	assert.Equal(t, float64(0), result["note_count"])
+	assert.Equal(t, false, result["truncated"])
+	assert.Equal(t, float64(200000), result["char_limit"])
+}
+
+func TestHandler_Context_IncludesNoteContent(t *testing.T) {
+	c := newTestClient(t)
+	c.registerAndLogin(t)
+
+	// Create a note with known content.
+	noteID := createNoteHelper(t, c, "My Context Note")
+
+	// Patch in some content.
+	getResp := c.do(t, http.MethodGet, "/api/v1/notes/"+i64str(noteID), nil)
+	var noteData map[string]interface{}
+	require.NoError(t, json.NewDecoder(getResp.Body).Decode(&noteData))
+	getResp.Body.Close()
+	currentHash := noteData["content_hash"].(string)
+
+	patchResp := c.do(t, http.MethodPatch, "/api/v1/notes/"+i64str(noteID), map[string]interface{}{
+		"content":      "Hello from context test",
+		"content_hash": currentHash,
+	})
+	patchResp.Body.Close()
+
+	resp := c.do(t, http.MethodGet, "/api/v1/notes/context", nil)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var result map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+
+	context := result["context"].(string)
+	assert.Contains(t, context, "# My Context Note")
+	assert.Contains(t, context, "Hello from context test")
+	assert.GreaterOrEqual(t, result["note_count"].(float64), float64(1))
+	assert.Equal(t, false, result["truncated"])
+}
+
+func TestHandler_Context_FolderFilter(t *testing.T) {
+	c := newTestClient(t)
+	c.registerAndLogin(t)
+
+	folderID := createFolderHelper(t, c, "FilterFolder")
+
+	// Create a note in the folder.
+	folderNoteResp := c.do(t, http.MethodPost, "/api/v1/notes", map[string]interface{}{
+		"title":     "In Folder",
+		"folder_id": folderID,
+	})
+	var folderNote map[string]interface{}
+	require.NoError(t, json.NewDecoder(folderNoteResp.Body).Decode(&folderNote))
+	folderNoteResp.Body.Close()
+
+	// Create a root note.
+	createNoteHelper(t, c, "Root Only Note")
+
+	// Context with folder_id filter: should only include the folder note.
+	resp := c.do(t, http.MethodGet, "/api/v1/notes/context?folder_id="+i64str(folderID), nil)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var result map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+
+	context := result["context"].(string)
+	assert.Contains(t, context, "# In Folder")
+	assert.NotContains(t, context, "# Root Only Note")
+	assert.Equal(t, float64(1), result["note_count"])
+}
+
+func TestHandler_Context_AllNotesAcrossFolders(t *testing.T) {
+	c := newTestClient(t)
+	c.registerAndLogin(t)
+
+	folderID := createFolderHelper(t, c, "AFolder")
+
+	folderNoteResp := c.do(t, http.MethodPost, "/api/v1/notes", map[string]interface{}{
+		"title":     "Folder Note",
+		"folder_id": folderID,
+	})
+	folderNoteResp.Body.Close()
+
+	createNoteHelper(t, c, "Root Note")
+
+	// Context without folder_id: should include both.
+	resp := c.do(t, http.MethodGet, "/api/v1/notes/context", nil)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var result map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+
+	context := result["context"].(string)
+	assert.Contains(t, context, "# Folder Note")
+	assert.Contains(t, context, "# Root Note")
+	assert.GreaterOrEqual(t, result["note_count"].(float64), float64(2))
+}
+
+func TestHandler_Context_InvalidFolderID(t *testing.T) {
+	c := newTestClient(t)
+	c.registerAndLogin(t)
+
+	resp := c.do(t, http.MethodGet, "/api/v1/notes/context?folder_id=notanumber", nil)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+
+	var body map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
+	assert.Contains(t, body["error"].(string), "folder_id")
+}
+
+func TestHandler_Context_NoSession(t *testing.T) {
+	c := newTestClient(t)
+	// No login.
+	resp := c.do(t, http.MethodGet, "/api/v1/notes/context", nil)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+}
+
+func TestHandler_Context_DBError(t *testing.T) {
+	c := newTestClient(t)
+	c.registerAndLogin(t)
+	c.pool.ReadDB.Close()
+
+	resp := c.do(t, http.MethodGet, "/api/v1/notes/context", nil)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
+}
+
+func TestHandler_Context_ResponseFormat(t *testing.T) {
+	c := newTestClient(t)
+	c.registerAndLogin(t)
+
+	resp := c.do(t, http.MethodGet, "/api/v1/notes/context", nil)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	// All four fields must be present.
+	var result map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+	_, hasContext := result["context"]
+	_, hasNoteCount := result["note_count"]
+	_, hasTruncated := result["truncated"]
+	_, hasCharLimit := result["char_limit"]
+	assert.True(t, hasContext, "missing context field")
+	assert.True(t, hasNoteCount, "missing note_count field")
+	assert.True(t, hasTruncated, "missing truncated field")
+	assert.True(t, hasCharLimit, "missing char_limit field")
+	assert.Equal(t, float64(200000), result["char_limit"])
+}
+
+func TestHandler_Context_MarkdownFormat(t *testing.T) {
+	c := newTestClient(t)
+	c.registerAndLogin(t)
+
+	// Delete auto-created notes for clean state.
+	allResp := c.do(t, http.MethodGet, "/api/v1/notes/all", nil)
+	var items []map[string]interface{}
+	require.NoError(t, json.NewDecoder(allResp.Body).Decode(&items))
+	allResp.Body.Close()
+	for _, item := range items {
+		id := int64(item["id"].(float64))
+		delResp := c.do(t, http.MethodDelete, "/api/v1/notes/"+i64str(id), nil)
+		delResp.Body.Close()
+	}
+
+	noteID := createNoteHelper(t, c, "Format Test")
+
+	getResp := c.do(t, http.MethodGet, "/api/v1/notes/"+i64str(noteID), nil)
+	var noteData map[string]interface{}
+	require.NoError(t, json.NewDecoder(getResp.Body).Decode(&noteData))
+	getResp.Body.Close()
+
+	patchResp := c.do(t, http.MethodPatch, "/api/v1/notes/"+i64str(noteID), map[string]interface{}{
+		"content":      "Some content here",
+		"content_hash": noteData["content_hash"].(string),
+	})
+	patchResp.Body.Close()
+
+	resp := c.do(t, http.MethodGet, "/api/v1/notes/context", nil)
+	defer resp.Body.Close()
+
+	var result map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+
+	context := result["context"].(string)
+	// Each note should be formatted as: # Title\n\ncontent\n\n---\n\n
+	assert.Contains(t, context, "# Format Test\n\nSome content here\n\n---\n\n")
+}
+

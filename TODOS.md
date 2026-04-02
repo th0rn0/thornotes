@@ -16,17 +16,6 @@ app does this well.
 
 ---
 
-### LLM context endpoint
-**What:** `GET /api/v1/notes/context?folder_id=X` returns concatenated note content
-ready to paste into an LLM prompt.
-
-**Response:** `{ context: string, note_count: int, truncated: bool, char_limit: int }`
-Max 200,000 chars (~50k tokens). Truncates oldest notes first.
-
-**Why:** File-first + LLM context is the product thesis for the hosted-service path.
-
----
-
 ### CodeMirror 6 editor (mobile editor experience)
 **What:** EasyMDE (built on CodeMirror 5) has a poor touch experience. CodeMirror 6 is a complete rewrite with first-class mobile support and a modular architecture.
 
@@ -42,6 +31,9 @@ Max 200,000 chars (~50k tokens). Truncates oldest notes first.
 
 
 ## Completed
+
+### LLM context endpoint
+**Completed:** v0.15.0.0 — `GET /api/v1/notes/context?folder_id=X` returns concatenated note content ready to paste into an LLM prompt. Response: `{ context, note_count, truncated, char_limit }`. Max 200,000 chars, truncates oldest notes first. Both repos (SQLite + MySQL) implement `ListForContext`. Full integration test coverage (9 tests).
 
 ### Startup reconciliation progress + --skip-reconciliation flag
 **Completed:** v0.12.0.0 — Startup reconciliation now wired up in `main.go` (was implemented but never called). `Reconcile` logs starting/progress/complete with note counts. `--skip-reconciliation` / `THORNOTES_SKIP_RECONCILIATION` bypasses the scan on trusted restarts.

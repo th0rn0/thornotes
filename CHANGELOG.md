@@ -2,6 +2,11 @@
 
 All notable changes to thornotes are documented here.
 
+## [0.15.0.0] - 2026-04-02
+
+### Added
+- **LLM context endpoint** — `GET /api/v1/notes/context` returns all of a user's note content concatenated into a single markdown string, ready to paste into an LLM prompt. Optional `folder_id` query parameter restricts output to a single folder. Response: `{ context, note_count, truncated, char_limit }`. Truncates at 200,000 characters (oldest notes first, newest preserved). Also exposed as MCP resource `notes://context`.
+
 ## [0.14.1.0] - 2026-04-01
 
 ### Fixed

@@ -176,6 +176,30 @@ All three endpoints require `Authorization: Bearer <token>`.
 
 **Available resources:** Every note is exposed as a `note://<id>` resource (MIME type `text/markdown`).
 
+## LLM context endpoint
+
+`GET /api/v1/notes/context` returns all of your notes concatenated into a single markdown string — ready to paste into an LLM prompt as context.
+
+```
+GET /api/v1/notes/context
+GET /api/v1/notes/context?folder_id=42
+```
+
+Requires a session cookie (same auth as the browser app).
+
+**Response:**
+
+```json
+{
+  "context":    "# Note Title\n\ncontent...\n\n---\n\n...",
+  "note_count": 12,
+  "truncated":  false,
+  "char_limit": 200000
+}
+```
+
+Notes are ordered newest-first. If the total exceeds 200,000 characters (~50k tokens), the oldest notes are omitted and `truncated` is set to `true`.
+
 ## File format
 
 Notes are stored as plain `.md` files under `THORNOTES_NOTES_ROOT`:
