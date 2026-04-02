@@ -411,3 +411,112 @@ func TestLogin_SessionCreateError(t *testing.T) {
 	require.ErrorAs(t, err, &appErr)
 	assert.Equal(t, 500, appErr.Code)
 }
+
+// ── NewService smoke test ───────────────────────────────────────────────────
+
+func TestNewService_Production(t *testing.T) {
+	svc := NewService(newFakeUserRepo(), newFakeSessionRepo(), true)
+	require.NotNil(t, svc)
+	assert.Equal(t, bcryptCost, svc.bcryptCost)
+	assert.True(t, svc.allowRegistration)
+}
+
+// ── BearerMiddleware tests ──────────────────────────────────────────────────
+
+type fakeAPITokenRepo struct {
+	tokens map[string]*model.APIToken // raw token → APIToken
+}
+
+func newFakeAPITokenRepo() *fakeAPITokenRepo {
+	return &fakeAPITokenRepo{tokens: make(map[string]*model.APIToken)}
+}
+
+func (r *fakeAPITokenRepo) Create(_ context.Context, userID int64, name, token string) (*model.APIToken, error) {
+	t := &model.APIToken{ID: 1, UserID: userID, Name: name, Token: token}
+	r.tokens[token] = t
+	return t, nil
+}
+
+func (r *fakeAPITokenRepo) GetByToken(_ context.Context, token string) (*model.APIToken, error) {
+	if t, ok := r.tokens[token]; ok {
+		return t, nil
+	}
+	return nil, apperror.ErrNotFound
+}
+
+func (r *fakeAPITokenRepo) ListByUser(_ context.Context, _ int64) ([]*model.APIToken, error) {
+	return nil, nil
+}
+
+func (r *fakeAPITokenRepo) Delete(_ context.Context, _, _ int64) error { return nil }
+
+func (r *fakeAPITokenRepo) TouchLastUsed(_ context.Context, _ int64) error { return nil }
+
+func TestBearerMiddleware_Valid(t *testing.T) {
+	userRepo := newFakeUserRepo()
+	tokenRepo := newFakeAPITokenRepo()
+
+	// Create a user.
+	user := &model.User{ID: 1, Username: "alice"}
+	userRepo.users["alice"] = user
+
+	// Create an API token linked to that user.
+	rawToken := "tn_validtoken123"
+	tokenRepo.tokens[rawToken] = &model.APIToken{ID: 1, UserID: 1, Token: rawToken}
+
+	var capturedUser *model.User
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.GET("/", BearerMiddleware(tokenRepo, userRepo), func(c *gin.Context) {
+		capturedUser = UserFromContext(c.Request.Context())
+		c.Status(http.StatusOK)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Authorization", "Bearer "+rawToken)
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+	require.NotNil(t, capturedUser)
+	assert.Equal(t, "alice", capturedUser.Username)
+}
+
+func TestBearerMiddleware_NoHeader(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rr := serveGinHandler(BearerMiddleware(newFakeAPITokenRepo(), newFakeUserRepo()), req)
+	assert.Equal(t, http.StatusUnauthorized, rr.Code)
+}
+
+func TestBearerMiddleware_NotBearer(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Authorization", "Basic dXNlcjpwYXNz")
+	rr := serveGinHandler(BearerMiddleware(newFakeAPITokenRepo(), newFakeUserRepo()), req)
+	assert.Equal(t, http.StatusUnauthorized, rr.Code)
+}
+
+func TestBearerMiddleware_EmptyToken(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Authorization", "Bearer ")
+	rr := serveGinHandler(BearerMiddleware(newFakeAPITokenRepo(), newFakeUserRepo()), req)
+	assert.Equal(t, http.StatusUnauthorized, rr.Code)
+}
+
+func TestBearerMiddleware_InvalidToken(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Authorization", "Bearer nonexistent")
+	rr := serveGinHandler(BearerMiddleware(newFakeAPITokenRepo(), newFakeUserRepo()), req)
+	assert.Equal(t, http.StatusUnauthorized, rr.Code)
+}
+
+func TestBearerMiddleware_UserNotFound(t *testing.T) {
+	tokenRepo := newFakeAPITokenRepo()
+	rawToken := "tn_orphantoken"
+	// Token exists but points to non-existent user.
+	tokenRepo.tokens[rawToken] = &model.APIToken{ID: 2, UserID: 999, Token: rawToken}
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Authorization", "Bearer "+rawToken)
+	rr := serveGinHandler(BearerMiddleware(tokenRepo, newFakeUserRepo()), req)
+	assert.Equal(t, http.StatusUnauthorized, rr.Code)
+}

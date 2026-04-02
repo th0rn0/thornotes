@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -242,4 +243,52 @@ func TestRateLimit_ExtractIP_RemoteNotInTrustedRange(t *testing.T) {
 
 	ip := rl.extractIP(req)
 	assert.Equal(t, "192.168.1.1", ip)
+}
+
+// ── GinMiddleware tests ───────────────────────────────────────────────────────
+
+func TestGinRateLimit_AllowsUnderLimit(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rl := NewAuthRateLimiter(nil)
+	t.Cleanup(rl.Stop)
+
+	r := gin.New()
+	r.POST("/", rl.GinMiddleware(), func(c *gin.Context) {
+		c.Status(http.StatusOK)
+	})
+
+	for i := 0; i < rateLimitRequests; i++ {
+		req := httptest.NewRequest(http.MethodPost, "/", nil)
+		req.RemoteAddr = "10.0.1.1:1234"
+		rr := httptest.NewRecorder()
+		r.ServeHTTP(rr, req)
+		assert.Equal(t, http.StatusOK, rr.Code, "request %d should be allowed", i+1)
+	}
+}
+
+func TestGinRateLimit_BlocksAfterLimit(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rl := NewAuthRateLimiter(nil)
+	t.Cleanup(rl.Stop)
+
+	r := gin.New()
+	r.POST("/", rl.GinMiddleware(), func(c *gin.Context) {
+		c.Status(http.StatusOK)
+	})
+
+	// Exhaust the burst.
+	for i := 0; i < rateLimitRequests; i++ {
+		req := httptest.NewRequest(http.MethodPost, "/", nil)
+		req.RemoteAddr = "10.0.1.2:1234"
+		rr := httptest.NewRecorder()
+		r.ServeHTTP(rr, req)
+	}
+
+	// Next request should be rate-limited.
+	req := httptest.NewRequest(http.MethodPost, "/", nil)
+	req.RemoteAddr = "10.0.1.2:1234"
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusTooManyRequests, rr.Code)
+	assert.Equal(t, "900", rr.Header().Get("Retry-After"))
 }

@@ -840,3 +840,85 @@ func TestService_ListAllNotes_Empty(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, all)
 }
+
+// ─── NoteContext tests ────────────────────────────────────────────────────────
+
+func TestService_NoteContext_Empty(t *testing.T) {
+	svc, userID := newTestStack(t)
+	ctx := context.Background()
+
+	result, err := svc.NoteContext(ctx, userID, nil)
+	require.NoError(t, err)
+	assert.Equal(t, 0, result.NoteCount)
+	assert.Equal(t, "", result.Context)
+	assert.False(t, result.Truncated)
+	assert.Equal(t, 200_000, result.CharLimit)
+}
+
+func TestService_NoteContext_WithNotes(t *testing.T) {
+	svc, userID := newTestStack(t)
+	ctx := context.Background()
+
+	note, err := svc.CreateNote(ctx, userID, nil, "My Note", nil)
+	require.NoError(t, err)
+	_, err = svc.UpdateNoteContent(ctx, userID, note.ID, "hello world", note.ContentHash)
+	require.NoError(t, err)
+
+	result, err := svc.NoteContext(ctx, userID, nil)
+	require.NoError(t, err)
+	assert.Equal(t, 1, result.NoteCount)
+	assert.Contains(t, result.Context, "My Note")
+	assert.Contains(t, result.Context, "hello world")
+	assert.False(t, result.Truncated)
+}
+
+func TestService_NoteContext_Truncated(t *testing.T) {
+	svc, userID := newTestStack(t)
+	ctx := context.Background()
+
+	// Write two notes where combined content exceeds the 200k char limit.
+	// Each block is: "# Title\n\ncontent\n\n---\n\n" + overhead.
+	// Use 150k chars per note — the second note should be truncated.
+	bigContent := strings.Repeat("x", 150_000)
+
+	note1, err := svc.CreateNote(ctx, userID, nil, "Big Note 1", nil)
+	require.NoError(t, err)
+	hash1, err := svc.UpdateNoteContent(ctx, userID, note1.ID, bigContent, note1.ContentHash)
+	require.NoError(t, err)
+	_ = hash1
+
+	note2, err := svc.CreateNote(ctx, userID, nil, "Big Note 2", nil)
+	require.NoError(t, err)
+	hash2, err := svc.UpdateNoteContent(ctx, userID, note2.ID, bigContent, note2.ContentHash)
+	require.NoError(t, err)
+	_ = hash2
+
+	result, err := svc.NoteContext(ctx, userID, nil)
+	require.NoError(t, err)
+	// With 150k per note × 2, total > 200k, so truncation should have occurred.
+	assert.True(t, result.Truncated)
+	assert.Less(t, result.NoteCount, 2)
+}
+
+func TestService_NoteContext_FolderFilter(t *testing.T) {
+	svc, userID := newTestStack(t)
+	ctx := context.Background()
+
+	// Root note.
+	_, err := svc.CreateNote(ctx, userID, nil, "Root Note", nil)
+	require.NoError(t, err)
+
+	// Note in a folder.
+	folder, err := svc.CreateFolder(ctx, userID, nil, "Work")
+	require.NoError(t, err)
+	folderID := folder.ID
+	_, err = svc.CreateNote(ctx, userID, &folderID, "Work Note", nil)
+	require.NoError(t, err)
+
+	// Context scoped to folder only should not include root note.
+	result, err := svc.NoteContext(ctx, userID, &folderID)
+	require.NoError(t, err)
+	assert.Equal(t, 1, result.NoteCount)
+	assert.Contains(t, result.Context, "Work Note")
+	assert.NotContains(t, result.Context, "Root Note")
+}

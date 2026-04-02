@@ -12,6 +12,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/th0rn0/thornotes/internal/apperror"
+	"github.com/th0rn0/thornotes/internal/model"
+	"github.com/th0rn0/thornotes/internal/notes"
 )
 
 func init() {
@@ -123,6 +125,136 @@ func TestWriteJSON_EncodeError(t *testing.T) {
 	assert.NotPanics(t, func() {
 		writeJSON(c, http.StatusOK, map[string]string{"key": "value"})
 	})
+}
+
+// ─── MCP utility function unit tests ─────────────────────────────────────────
+
+func TestItoa_Zero(t *testing.T) {
+	assert.Equal(t, "0", itoa(0))
+}
+
+func TestItoa_Positive(t *testing.T) {
+	assert.Equal(t, "12345", itoa(12345))
+}
+
+func TestIsAppErr_Nil(t *testing.T) {
+	var target *apperror.AppError
+	assert.False(t, isAppErr(nil, &target))
+}
+
+func TestIsAppErr_AppError(t *testing.T) {
+	e := apperror.NotFound("not found")
+	var target *apperror.AppError
+	assert.True(t, isAppErr(e, &target))
+	assert.Equal(t, e, target)
+}
+
+func TestIsAppErr_NonAppError(t *testing.T) {
+	var target *apperror.AppError
+	assert.False(t, isAppErr(errors.New("plain error"), &target))
+}
+
+func TestErrorString_AppError(t *testing.T) {
+	e := apperror.NotFound("resource missing")
+	assert.Equal(t, "resource missing", errorString(e))
+}
+
+func TestErrorString_GenericError(t *testing.T) {
+	assert.Equal(t, "internal error", errorString(errors.New("boom")))
+}
+
+// ─── HistoryHandler validation unit tests ────────────────────────────────────
+
+func newHistoryRouter(user *model.User, svc *notes.Service) *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	h := NewHistoryHandler(svc)
+	r.Use(func(c *gin.Context) {
+		c.Set("user", user)
+		c.Next()
+	})
+	r.GET("/notes/:id/history", h.List)
+	r.GET("/notes/:id/history/:sha", h.At)
+	r.POST("/notes/:id/history/:sha/restore", h.Restore)
+	return r
+}
+
+func TestHistoryList_InvalidID(t *testing.T) {
+	user := &model.User{ID: 1}
+	r := newHistoryRouter(user, nil)
+	req := httptest.NewRequest(http.MethodGet, "/notes/notanid/history", nil)
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+func TestHistoryList_InvalidLimit(t *testing.T) {
+	user := &model.User{ID: 1}
+	r := newHistoryRouter(user, nil)
+	req := httptest.NewRequest(http.MethodGet, "/notes/1/history?limit=bad", nil)
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+func TestHistoryList_NegativeLimit(t *testing.T) {
+	user := &model.User{ID: 1}
+	r := newHistoryRouter(user, nil)
+	req := httptest.NewRequest(http.MethodGet, "/notes/1/history?limit=-1", nil)
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+func TestHistoryAt_InvalidID(t *testing.T) {
+	user := &model.User{ID: 1}
+	r := newHistoryRouter(user, nil)
+	req := httptest.NewRequest(http.MethodGet, "/notes/notanid/history/abc1234", nil)
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+func TestHistoryAt_ShortSHA(t *testing.T) {
+	user := &model.User{ID: 1}
+	r := newHistoryRouter(user, nil)
+	req := httptest.NewRequest(http.MethodGet, "/notes/1/history/abc", nil)
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+func TestHistoryRestore_InvalidID(t *testing.T) {
+	user := &model.User{ID: 1}
+	r := newHistoryRouter(user, nil)
+	req := httptest.NewRequest(http.MethodPost, "/notes/notanid/history/abc1234/restore",
+		strings.NewReader(`{"content_hash":"abc"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+func TestHistoryRestore_ShortSHA(t *testing.T) {
+	user := &model.User{ID: 1}
+	r := newHistoryRouter(user, nil)
+	req := httptest.NewRequest(http.MethodPost, "/notes/1/history/abc/restore",
+		strings.NewReader(`{"content_hash":"abc"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+func TestHistoryRestore_BadJSON(t *testing.T) {
+	user := &model.User{ID: 1}
+	r := newHistoryRouter(user, nil)
+	req := httptest.NewRequest(http.MethodPost, "/notes/1/history/abc1234/restore",
+		strings.NewReader("notjson"))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
 }
 
 // ─── ShareHandler unit tests ──────────────────────────────────────────────────

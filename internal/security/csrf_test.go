@@ -6,9 +6,22 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// serveGinCSRF is a helper that runs the CSRFGinMiddleware with a session cookie
+// injected via gin context.
+func serveGinCSRF(req *http.Request) *httptest.ResponseRecorder {
+	r := gin.New()
+	r.Any("/", CSRFGinMiddleware(), func(c *gin.Context) {
+		c.Status(http.StatusOK)
+	})
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+	return rr
+}
 
 func TestCSRF_ValidToken(t *testing.T) {
 	token, err := GenerateCSRFToken("session-abc")
@@ -152,5 +165,56 @@ func TestCSRF_OptionsRequestBypasses(t *testing.T) {
 	// No cookie, no CSRF header — OPTIONS should pass through.
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusOK, rr.Code)
+}
+
+// ── CSRFGinMiddleware tests ────────────────────────────────────────────────────
+
+func TestCSRFGin_GetBypasses(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rr := serveGinCSRF(req)
+	assert.Equal(t, http.StatusOK, rr.Code)
+}
+
+func TestCSRFGin_PostNoSessionCookie(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("{}"))
+	req.Header.Set("X-CSRF-Token", "sometoken")
+	rr := serveGinCSRF(req)
+	assert.Equal(t, http.StatusForbidden, rr.Code)
+}
+
+func TestCSRFGin_PostMissingHeader(t *testing.T) {
+	_, _ = GenerateCSRFToken("gin-session-missing-hdr")
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("{}"))
+	req.AddCookie(&http.Cookie{Name: "session", Value: "gin-session-missing-hdr"})
+	rr := serveGinCSRF(req)
+	assert.Equal(t, http.StatusForbidden, rr.Code)
+}
+
+func TestCSRFGin_PostTokenNotFound(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("{}"))
+	req.AddCookie(&http.Cookie{Name: "session", Value: "gin-session-no-csrf-stored"})
+	req.Header.Set("X-CSRF-Token", "anytoken")
+	rr := serveGinCSRF(req)
+	assert.Equal(t, http.StatusForbidden, rr.Code)
+}
+
+func TestCSRFGin_PostWrongToken(t *testing.T) {
+	_, _ = GenerateCSRFToken("gin-session-wrong")
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("{}"))
+	req.AddCookie(&http.Cookie{Name: "session", Value: "gin-session-wrong"})
+	req.Header.Set("X-CSRF-Token", "wrongtoken")
+	rr := serveGinCSRF(req)
+	assert.Equal(t, http.StatusForbidden, rr.Code)
+}
+
+func TestCSRFGin_PostValidToken(t *testing.T) {
+	token, err := GenerateCSRFToken("gin-session-valid")
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("{}"))
+	req.AddCookie(&http.Cookie{Name: "session", Value: "gin-session-valid"})
+	req.Header.Set("X-CSRF-Token", token)
+	rr := serveGinCSRF(req)
 	assert.Equal(t, http.StatusOK, rr.Code)
 }

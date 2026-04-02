@@ -94,3 +94,19 @@ func TestErrors_Is_Sentinel(t *testing.T) {
 	assert.True(t, errors.Is(e, ErrNotFound))
 	assert.False(t, errors.Is(e, ErrConflict))
 }
+
+func TestDiskFull(t *testing.T) {
+	e := DiskFull()
+	require.NotNil(t, e)
+	assert.Equal(t, http.StatusInsufficientStorage, e.Code)
+	assert.Equal(t, "disk full", e.Message)
+	assert.True(t, errors.Is(e, ErrDiskFull))
+}
+
+func TestNotImplemented(t *testing.T) {
+	e := NotImplemented("not yet")
+	require.NotNil(t, e)
+	assert.Equal(t, http.StatusNotImplemented, e.Code)
+	assert.Equal(t, "not yet", e.Message)
+	assert.Nil(t, e.Err)
+}

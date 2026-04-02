@@ -5,8 +5,24 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 )
+
+func init() {
+	gin.SetMode(gin.TestMode)
+}
+
+// serveGinMiddleware is a helper that runs a gin.HandlerFunc and returns the recorder.
+func serveGinMiddleware(mw gin.HandlerFunc, req *http.Request) *httptest.ResponseRecorder {
+	r := gin.New()
+	r.Any("/", mw, func(c *gin.Context) {
+		c.Status(http.StatusOK)
+	})
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+	return rr
+}
 
 func TestSecureHeaders_SetsExpectedHeaders(t *testing.T) {
 	handler := SecureHeaders(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -44,4 +60,16 @@ func TestSecureHeaders_CallsNextHandler(t *testing.T) {
 
 	assert.True(t, called, "next handler must be called")
 	assert.Equal(t, http.StatusNoContent, rr.Code)
+}
+
+func TestSecureHeadersMiddleware_SetsHeaders(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rr := serveGinMiddleware(SecureHeadersMiddleware(), req)
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+	assert.Equal(t, "nosniff", rr.Header().Get("X-Content-Type-Options"))
+	assert.Equal(t, "DENY", rr.Header().Get("X-Frame-Options"))
+	assert.Equal(t, "same-origin", rr.Header().Get("Referrer-Policy"))
+	csp := rr.Header().Get("Content-Security-Policy")
+	assert.Contains(t, csp, "default-src 'self'")
 }

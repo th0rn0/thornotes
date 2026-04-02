@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -127,4 +128,28 @@ func TestParse_SkipReconciliation_EnvTrue(t *testing.T) {
 	cfg, err := Parse()
 	require.NoError(t, err)
 	assert.True(t, cfg.SkipReconciliation)
+}
+
+func TestEnvDuration_NotSet_ReturnsDefault(t *testing.T) {
+	os.Unsetenv("TEST_DURATION_UNSET")
+	d := envDuration("TEST_DURATION_UNSET", 30*time.Second)
+	assert.Equal(t, 30*time.Second, d)
+}
+
+func TestEnvDuration_ValidValue(t *testing.T) {
+	t.Setenv("TEST_DURATION", "5m")
+	d := envDuration("TEST_DURATION", 30*time.Second)
+	assert.Equal(t, 5*time.Minute, d)
+}
+
+func TestEnvDuration_InvalidValue_ReturnsDefault(t *testing.T) {
+	t.Setenv("TEST_DURATION_BAD", "notaduration")
+	d := envDuration("TEST_DURATION_BAD", 30*time.Second)
+	assert.Equal(t, 30*time.Second, d)
+}
+
+func TestEnvDuration_Zero(t *testing.T) {
+	t.Setenv("TEST_DURATION_ZERO", "0")
+	d := envDuration("TEST_DURATION_ZERO", 30*time.Second)
+	assert.Equal(t, time.Duration(0), d)
 }

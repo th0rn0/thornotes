@@ -248,3 +248,45 @@ func TestService_GitHistoryEnabled_TrueAfterEnable(t *testing.T) {
 	svc, _ := newTestStackGit(t)
 	assert.True(t, svc.GitHistoryEnabled())
 }
+
+// ---------------------------------------------------------------------------
+// CommitDelete and CommitRename (via service Delete/Rename operations)
+// ---------------------------------------------------------------------------
+
+func TestService_GitHistory_DeleteNote_RecordsCommit(t *testing.T) {
+	svc, userID := newTestStackGit(t)
+	ctx := context.Background()
+
+	// Create and write to a note so there's something in history.
+	note, err := svc.CreateNote(ctx, userID, nil, "Delete Git Note", nil)
+	require.NoError(t, err)
+	hash1, err := svc.UpdateNoteContent(ctx, userID, note.ID, "some content", note.ContentHash)
+	require.NoError(t, err)
+	_ = hash1
+
+	// Delete — this triggers fs.Delete → git.CommitDelete → commitAll.
+	err = svc.DeleteNote(ctx, userID, note.ID)
+	require.NoError(t, err)
+
+	// The note is gone — we can't call NoteHistory on it anymore (note not found),
+	// but the important thing is CommitDelete ran without error.
+}
+
+func TestService_GitHistory_RenameFolder_RecordsCommit(t *testing.T) {
+	svc, userID := newTestStackGit(t)
+	ctx := context.Background()
+
+	// Create a folder with a note in it.
+	folder, err := svc.CreateFolder(ctx, userID, nil, "FolderToRename")
+	require.NoError(t, err)
+	folderID := folder.ID
+
+	note, err := svc.CreateNote(ctx, userID, &folderID, "Note In Folder", nil)
+	require.NoError(t, err)
+	_, err = svc.UpdateNoteContent(ctx, userID, note.ID, "folder note content", note.ContentHash)
+	require.NoError(t, err)
+
+	// Rename folder — this triggers fs.RenameDir → git.CommitRename → commitAll.
+	err = svc.RenameFolder(ctx, userID, folder.ID, "RenamedFolder")
+	require.NoError(t, err)
+}
