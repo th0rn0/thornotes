@@ -26,6 +26,7 @@ func New(
 	staticFS http.FileSystem,
 	h *hub.Hub,
 	secureCookies bool,
+	enableGitHistory bool,
 ) http.Handler {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
@@ -57,6 +58,7 @@ func New(
 	mcpH := handler.NewMCPHandler(notesSvc)
 	eventsH := handler.NewEventsHandler(h)
 	journalsH := handler.NewJournalsHandler(notesSvc)
+	historyH := handler.NewHistoryHandler(notesSvc)
 
 	bearerMW := auth.BearerMiddleware(apiTokenRepo, userRepo)
 	sessionMW := authSvc.SessionMiddleware()
@@ -118,6 +120,16 @@ func New(
 		notesGroup.PATCH("/:id", csrfMW, notesH.Patch)
 		notesGroup.DELETE("/:id", csrfMW, notesH.Delete)
 		notesGroup.POST("/:id/share", csrfMW, notesH.Share)
+	}
+
+	// Note history (git-backed, requires --enable-git-history).
+	// Routes are always registered; service methods return 501 when disabled.
+	_ = enableGitHistory // surfaced via service.GitHistoryEnabled()
+	history := r.Group("/api/v1/notes", sessionMW)
+	{
+		history.GET("/:id/history", historyH.List)
+		history.GET("/:id/history/:sha", historyH.At)
+		history.POST("/:id/history/:sha/restore", csrfMW, historyH.Restore)
 	}
 
 	// Account — API token management.

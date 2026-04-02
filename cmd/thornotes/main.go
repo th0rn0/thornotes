@@ -93,6 +93,15 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Optionally enable git history tracking.
+	if cfg.EnableGitHistory {
+		if err := fs.EnableGitHistory(); err != nil {
+			log.Error().Err(err).Msg("init git history")
+			os.Exit(1)
+		}
+		log.Info().Str("notes_root", cfg.NotesRoot).Msg("git history enabled")
+	}
+
 	// Build services.
 	authSvc := auth.NewService(userRepo, sessionRepo, cfg.AllowRegistration)
 	notesSvc := notes.NewService(noteRepo, folderRepo, searchRepo, journalRepo, fs)
@@ -116,7 +125,7 @@ func main() {
 		log.Error().Err(err).Msg("sub static fs")
 		os.Exit(1)
 	}
-	h := router.New(authSvc, notesSvc, apiTokenRepo, userRepo, rateLimiter, tmpl, http.FS(staticSub), notifyHub, cfg.SecureCookies)
+	h := router.New(authSvc, notesSvc, apiTokenRepo, userRepo, rateLimiter, tmpl, http.FS(staticSub), notifyHub, cfg.SecureCookies, cfg.EnableGitHistory)
 
 	srv := &http.Server{
 		Addr:         cfg.Addr,

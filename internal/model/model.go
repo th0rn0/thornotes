@@ -81,6 +81,20 @@ type Journal struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+// HistoryEntry represents a single commit in a note's git history.
+type HistoryEntry struct {
+	SHA       string    `json:"sha"`
+	Message   string    `json:"message"`
+	Timestamp time.Time `json:"timestamp"`
+}
+
+// HistoryEntryContent is returned by the "note at commit" endpoint.
+type HistoryEntryContent struct {
+	SHA       string    `json:"sha"`
+	Content   string    `json:"content"`
+	Timestamp time.Time `json:"timestamp"`
+}
+
 type APIToken struct {
 	ID          int64      `json:"id"`
 	UserID      int64      `json:"-"`

@@ -1,18 +1,13 @@
 # thornotes — TODOS
 
-## V2 (deferred, design in V1 for easy addition)
+## V2 (deferred)
 
-### Git-backed version history
-**What:** Every save is a `git commit` on disk. Full version history, diffing,
-branching (draft/published). UI shows a timeline of every note's history.
+### Git history UI
+**What:** Timeline view in the UI showing a note's commit history with diff preview.
 
-**Why:** Subagent identified this as the "whoa" feature. No other self-hosted note
-app does this well.
+**Why:** The API exists (v0.18.0.0). The "whoa" moment needs a UI to match.
 
-**How:** Use `go-git` (pure Go git implementation) or shell out to `git`. Toggle with
-`--enable-git-history` flag.
-
-**Where:** `internal/notes/fs.go` (wrap Write/FolderRename with git commit)
+**How:** New panel in the note editor showing the history list; click a commit to preview the diff; restore button.
 
 ---
 
@@ -20,6 +15,9 @@ app does this well.
 
 
 ## Completed
+
+### Git-backed version history (API)
+**Completed:** v0.18.0.0 — Every note save/delete/folder-rename is recorded as a git commit via go-git when `--enable-git-history` is set. History API: `GET /history`, `GET /history/:sha`, `POST /history/:sha/restore`. Pure Go, no git binary needed. UI deferred to V2.
 
 ### Deep linking
 **Completed:** v0.17.0.0 — Note URLs reflect the folder path and note slug (`/My-Folder/my-note`). `history.pushState` on open, `popstate` for back/forward. Server-side `NoRoute` serves the app shell for all non-API/MCP paths so deep links survive a hard refresh. `document.title` updates to the note name.

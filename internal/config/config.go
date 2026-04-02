@@ -21,9 +21,10 @@ type Config struct {
 	AllowRegistration bool
 	SecureCookies     bool       // set true when serving over HTTPS
 	TrustedProxy      *net.IPNet // nil means trust nothing (direct connections only)
-	MaxContentBytes      int64
-	WatchInterval        time.Duration // 0 disables the disk watcher
-	SkipReconciliation   bool          // skip startup hash-check scan
+	MaxContentBytes    int64
+	WatchInterval      time.Duration // 0 disables the disk watcher
+	SkipReconciliation bool          // skip startup hash-check scan
+	EnableGitHistory   bool          // record every note save/delete as a git commit
 }
 
 func Parse() (*Config, error) {
@@ -43,6 +44,7 @@ func Parse() (*Config, error) {
 	flag.StringVar(&trustedProxy, "trusted-proxy", envOr("THORNOTES_TRUSTED_PROXY", ""), "CIDR of trusted reverse proxy (e.g. 10.0.0.0/8)")
 	flag.DurationVar(&cfg.WatchInterval, "watch-interval", envDuration("THORNOTES_WATCH_INTERVAL", 30*time.Second), "disk watch poll interval (0 to disable)")
 	flag.BoolVar(&cfg.SkipReconciliation, "skip-reconciliation", envBool("THORNOTES_SKIP_RECONCILIATION", false), "skip startup reconciliation scan (use on trusted restarts with large note corpora)")
+	flag.BoolVar(&cfg.EnableGitHistory, "enable-git-history", envBool("THORNOTES_ENABLE_GIT_HISTORY", false), "record every note save/delete as a git commit in the notes directory")
 	flag.Parse()
 
 	cfg.MaxContentBytes = 1 << 20 // 1 MB

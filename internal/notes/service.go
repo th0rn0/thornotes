@@ -132,6 +132,12 @@ func slugify(title string) string {
 	return slug
 }
 
+// FileStore returns the underlying FileStore. Used by tests and startup code
+// to enable optional features like git history.
+func (s *Service) FileStore() *FileStore {
+	return s.fs
+}
+
 // FolderTree returns the folder tree for a user.
 func (s *Service) FolderTree(ctx context.Context, userID int64) ([]*model.FolderTreeItem, error) {
 	return s.folders.Tree(ctx, userID)

@@ -64,3 +64,7 @@ func Internal(msg string, err error) *AppError {
 func DiskFull() *AppError {
 	return &AppError{Code: http.StatusInsufficientStorage, Message: "disk full", Err: ErrDiskFull}
 }
+
+func NotImplemented(msg string) *AppError {
+	return &AppError{Code: http.StatusNotImplemented, Message: msg}
+}

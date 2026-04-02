@@ -62,7 +62,7 @@ func newTestClient(t *testing.T) *testClient {
 	staticSub, err := iofs.Sub(thornotes.StaticFS, "web/static")
 	require.NoError(t, err)
 
-	h := router.New(authSvc, notesSvc, apiTokenRepo, userRepo, rateLimiter, tmpl, http.FS(staticSub), hub.New(), false)
+	h := router.New(authSvc, notesSvc, apiTokenRepo, userRepo, rateLimiter, tmpl, http.FS(staticSub), hub.New(), false, false)
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
 
@@ -1422,5 +1422,253 @@ func TestHandler_Context_MarkdownFormat(t *testing.T) {
 	context := result["context"].(string)
 	// Each note should be formatted as: # Title\n\ncontent\n\n---\n\n
 	assert.Contains(t, context, "# Format Test\n\nSome content here\n\n---\n\n")
+}
+
+// ─── Git history handler tests ────────────────────────────────────────────────
+
+// newTestClientGit creates a test client with a notes service that has git
+// history enabled.
+func newTestClientGit(t *testing.T) *testClient {
+	t.Helper()
+	dir := t.TempDir()
+	pool, err := db.Open(filepath.Join(dir, "test.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { pool.Close() })
+
+	notesDir := filepath.Join(dir, "notes")
+	fs, err := notes.NewFileStore(notesDir)
+	require.NoError(t, err)
+	require.NoError(t, fs.EnableGitHistory())
+
+	userRepo := sqlite.NewUserRepo(pool.WriteDB)
+	sessionRepo := sqlite.NewSessionRepo(pool.WriteDB)
+	folderRepo := sqlite.NewFolderRepo(pool.ReadDB, pool.WriteDB)
+	noteRepo := sqlite.NewNoteRepo(pool.ReadDB, pool.WriteDB)
+	searchRepo := sqlite.NewSearchRepo(pool.ReadDB, pool.WriteDB)
+	apiTokenRepo := sqlite.NewAPITokenRepo(pool.ReadDB, pool.WriteDB)
+
+	authSvc := auth.NewService(userRepo, sessionRepo, true)
+	notesSvc := notes.NewService(noteRepo, folderRepo, searchRepo, sqlite.NewJournalRepo(pool.ReadDB, pool.WriteDB), fs)
+	rateLimiter := security.NewAuthRateLimiter(nil)
+
+	tmpl, err := template.ParseFS(thornotes.TemplatesFS, "web/templates/*.html")
+	require.NoError(t, err)
+
+	staticSub, err := iofs.Sub(thornotes.StaticFS, "web/static")
+	require.NoError(t, err)
+
+	h := router.New(authSvc, notesSvc, apiTokenRepo, userRepo, rateLimiter, tmpl, http.FS(staticSub), hub.New(), false, true)
+	srv := httptest.NewServer(h)
+	t.Cleanup(srv.Close)
+
+	jar, _ := cookiejar.New(nil)
+	return &testClient{server: srv, httpClient: &http.Client{Jar: jar}, pool: pool}
+}
+
+func TestHandler_History_DisabledReturns501(t *testing.T) {
+	c := newTestClient(t)
+	c.registerAndLogin(t)
+
+	// Create a note.
+	resp := c.do(t, http.MethodPost, "/api/v1/notes", map[string]interface{}{"title": "hist"})
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusCreated, resp.StatusCode)
+	var note map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&note))
+	noteID := i64str(int64(note["id"].(float64)))
+
+	resp2 := c.do(t, http.MethodGet, "/api/v1/notes/"+noteID+"/history", nil)
+	defer resp2.Body.Close()
+	assert.Equal(t, http.StatusNotImplemented, resp2.StatusCode)
+}
+
+func TestHandler_History_ListReturnsEntries(t *testing.T) {
+	c := newTestClientGit(t)
+	c.registerAndLogin(t)
+
+	// Create a note.
+	resp := c.do(t, http.MethodPost, "/api/v1/notes", map[string]interface{}{"title": "githistory"})
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusCreated, resp.StatusCode)
+	var note map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&note))
+	noteID := i64str(int64(note["id"].(float64)))
+	contentHash := note["content_hash"].(string)
+
+	// Save content.
+	patchResp := c.do(t, http.MethodPatch, "/api/v1/notes/"+noteID, map[string]interface{}{
+		"content":      "# Hello world",
+		"content_hash": contentHash,
+	})
+	defer patchResp.Body.Close()
+	require.Equal(t, http.StatusOK, patchResp.StatusCode)
+
+	// List history.
+	histResp := c.do(t, http.MethodGet, "/api/v1/notes/"+noteID+"/history", nil)
+	defer histResp.Body.Close()
+	assert.Equal(t, http.StatusOK, histResp.StatusCode)
+
+	var entries []map[string]interface{}
+	require.NoError(t, json.NewDecoder(histResp.Body).Decode(&entries))
+	assert.GreaterOrEqual(t, len(entries), 2, "expect at least create + save commit")
+	assert.NotEmpty(t, entries[0]["sha"])
+	assert.NotEmpty(t, entries[0]["timestamp"])
+}
+
+func TestHandler_History_LimitQueryParam(t *testing.T) {
+	c := newTestClientGit(t)
+	c.registerAndLogin(t)
+
+	resp := c.do(t, http.MethodPost, "/api/v1/notes", map[string]interface{}{"title": "limit-test"})
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusCreated, resp.StatusCode)
+	var note map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&note))
+	noteID := i64str(int64(note["id"].(float64)))
+	h := note["content_hash"].(string)
+
+	for i := range 4 {
+		_ = i
+		pR := c.do(t, http.MethodPatch, "/api/v1/notes/"+noteID, map[string]interface{}{"content": "# v", "content_hash": h})
+		var pResult map[string]interface{}
+		require.NoError(t, json.NewDecoder(pR.Body).Decode(&pResult))
+		pR.Body.Close()
+		h = pResult["content_hash"].(string)
+	}
+
+	histResp := c.do(t, http.MethodGet, "/api/v1/notes/"+noteID+"/history?limit=2", nil)
+	defer histResp.Body.Close()
+	assert.Equal(t, http.StatusOK, histResp.StatusCode)
+
+	var entries []map[string]interface{}
+	require.NoError(t, json.NewDecoder(histResp.Body).Decode(&entries))
+	assert.Equal(t, 2, len(entries))
+}
+
+func TestHandler_History_AtReturnsContent(t *testing.T) {
+	c := newTestClientGit(t)
+	c.registerAndLogin(t)
+
+	resp := c.do(t, http.MethodPost, "/api/v1/notes", map[string]interface{}{"title": "at-test"})
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusCreated, resp.StatusCode)
+	var note map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&note))
+	noteID := i64str(int64(note["id"].(float64)))
+	contentHash := note["content_hash"].(string)
+
+	patchResp := c.do(t, http.MethodPatch, "/api/v1/notes/"+noteID, map[string]interface{}{
+		"content":      "# at version",
+		"content_hash": contentHash,
+	})
+	defer patchResp.Body.Close()
+	require.Equal(t, http.StatusOK, patchResp.StatusCode)
+
+	// Get history.
+	histResp := c.do(t, http.MethodGet, "/api/v1/notes/"+noteID+"/history", nil)
+	defer histResp.Body.Close()
+	var entries []map[string]interface{}
+	require.NoError(t, json.NewDecoder(histResp.Body).Decode(&entries))
+	require.NotEmpty(t, entries)
+
+	sha := entries[0]["sha"].(string)
+
+	// Fetch content at that SHA.
+	atResp := c.do(t, http.MethodGet, "/api/v1/notes/"+noteID+"/history/"+sha, nil)
+	defer atResp.Body.Close()
+	assert.Equal(t, http.StatusOK, atResp.StatusCode)
+
+	var result map[string]interface{}
+	require.NoError(t, json.NewDecoder(atResp.Body).Decode(&result))
+	assert.Equal(t, sha, result["sha"])
+	assert.Equal(t, "# at version", result["content"])
+}
+
+func TestHandler_History_AtInvalidSHA(t *testing.T) {
+	c := newTestClientGit(t)
+	c.registerAndLogin(t)
+
+	resp := c.do(t, http.MethodPost, "/api/v1/notes", map[string]interface{}{"title": "bad-sha"})
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusCreated, resp.StatusCode)
+	var note map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&note))
+	noteID := i64str(int64(note["id"].(float64)))
+
+	// SHA shorter than 7 chars → 400 validation error.
+	atResp := c.do(t, http.MethodGet, "/api/v1/notes/"+noteID+"/history/ab", nil)
+	defer atResp.Body.Close()
+	assert.Equal(t, http.StatusBadRequest, atResp.StatusCode)
+}
+
+func TestHandler_History_Restore(t *testing.T) {
+	c := newTestClientGit(t)
+	c.registerAndLogin(t)
+
+	resp := c.do(t, http.MethodPost, "/api/v1/notes", map[string]interface{}{"title": "restore-test"})
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusCreated, resp.StatusCode)
+	var note map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&note))
+	noteID := i64str(int64(note["id"].(float64)))
+	h := note["content_hash"].(string)
+
+	// Save "original".
+	p1 := c.do(t, http.MethodPatch, "/api/v1/notes/"+noteID, map[string]interface{}{
+		"content": "# original", "content_hash": h,
+	})
+	var p1r map[string]interface{}
+	require.NoError(t, json.NewDecoder(p1.Body).Decode(&p1r))
+	p1.Body.Close()
+	h = p1r["content_hash"].(string)
+
+	// Overwrite with "changed".
+	p2 := c.do(t, http.MethodPatch, "/api/v1/notes/"+noteID, map[string]interface{}{
+		"content": "# changed", "content_hash": h,
+	})
+	var p2r map[string]interface{}
+	require.NoError(t, json.NewDecoder(p2.Body).Decode(&p2r))
+	p2.Body.Close()
+	h = p2r["content_hash"].(string)
+
+	// Find SHA of "original" commit.
+	histResp := c.do(t, http.MethodGet, "/api/v1/notes/"+noteID+"/history", nil)
+	defer histResp.Body.Close()
+	var entries []map[string]interface{}
+	require.NoError(t, json.NewDecoder(histResp.Body).Decode(&entries))
+
+	var originalSHA string
+	for _, e := range entries {
+		atResp := c.do(t, http.MethodGet, "/api/v1/notes/"+noteID+"/history/"+e["sha"].(string), nil)
+		var atResult map[string]interface{}
+		require.NoError(t, json.NewDecoder(atResp.Body).Decode(&atResult))
+		atResp.Body.Close()
+		if atResult["content"] == "# original" {
+			originalSHA = e["sha"].(string)
+			break
+		}
+	}
+	require.NotEmpty(t, originalSHA)
+
+	// Restore.
+	restoreResp := c.do(t, http.MethodPost, "/api/v1/notes/"+noteID+"/history/"+originalSHA+"/restore",
+		map[string]string{"content_hash": h})
+	defer restoreResp.Body.Close()
+	assert.Equal(t, http.StatusOK, restoreResp.StatusCode)
+
+	// Verify the note content.
+	noteResp := c.do(t, http.MethodGet, "/api/v1/notes/"+noteID, nil)
+	defer noteResp.Body.Close()
+	var restored map[string]interface{}
+	require.NoError(t, json.NewDecoder(noteResp.Body).Decode(&restored))
+	assert.Equal(t, "# original", restored["content"])
+}
+
+func TestHandler_History_Unauthenticated(t *testing.T) {
+	c := newTestClientGit(t)
+	// No login.
+	resp := c.do(t, http.MethodGet, "/api/v1/notes/1/history", nil)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
 }
 

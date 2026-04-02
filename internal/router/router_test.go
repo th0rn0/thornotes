@@ -50,7 +50,7 @@ func buildHandler(t *testing.T) http.Handler {
 	staticSub, err := iofs.Sub(thornotes.StaticFS, "web/static")
 	require.NoError(t, err)
 
-	return router.New(authSvc, notesSvc, apiTokenRepo, userRepo, rateLimiter, tmpl, http.FS(staticSub), hub.New(), false)
+	return router.New(authSvc, notesSvc, apiTokenRepo, userRepo, rateLimiter, tmpl, http.FS(staticSub), hub.New(), false, false)
 }
 
 func TestRouter_New(t *testing.T) {
