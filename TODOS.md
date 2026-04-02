@@ -16,21 +16,13 @@ app does this well.
 
 ---
 
-### CodeMirror 6 editor (mobile editor experience)
-**What:** EasyMDE (built on CodeMirror 5) has a poor touch experience. CodeMirror 6 is a complete rewrite with first-class mobile support and a modular architecture.
-
-**Why:** The PWA shell and responsive layout shipped in v0.9.0.0. The remaining mobile gap is the editor itself — toolbar overflow, virtual keyboard handling, and cursor interaction are all suboptimal on touch devices.
-
-**How:** Replace EasyMDE with a CodeMirror 6 setup: `@codemirror/view`, `@codemirror/lang-markdown`, `@codemirror/commands`. Requires reimplementing the preview toggle and toolbar. Significant effort — evaluate bundling approach (esbuild/rollup) vs. serving modules directly.
-
-**Where:** `web/static/js/app.js`, `web/static/js/vendor/`, `web/templates/app.html`
-
----
-
 ---
 
 
 ## Completed
+
+### CodeMirror 6 editor
+**Completed:** v0.16.0.0 — EasyMDE (CM5, 320KB) replaced with CM6 bundle (493KB, built with bun from `web/cm6-bundle/index.js`). Custom toolbar (bold, italic, H#, quote, lists, link, preview toggle, undo, redo). Preview pane using existing marked + hljs pipeline. Live dark-mode switching via CM6 `Compartment`. `make build-cm6` rebuilds the vendor file.
 
 ### LLM context endpoint
 **Completed:** v0.15.0.0 — `GET /api/v1/notes/context?folder_id=X` returns concatenated note content ready to paste into an LLM prompt. Response: `{ context, note_count, truncated, char_limit }`. Max 200,000 chars, truncates oldest notes first. Both repos (SQLite + MySQL) implement `ListForContext`. Full integration test coverage (9 tests).

@@ -18,7 +18,9 @@ let csrfToken = '';
 let currentUser = null;
 let currentNote = null;      // { id, title, content_hash, disk_path, folder_id, tags }
 let currentFolderId = null;  // highlighted folder in the tree
-let editor = null;           // EasyMDE instance
+let editor = null;           // CM6 editor instance
+let editorPreviewEl = null;  // CM6 preview pane element
+let editorPreviewOpen = false;
 let saveTimer = null;
 let loadedFolderIds = new Set(); // tracks which folders have had their notes loaded
 let folders = [];            // flat folder list from API
@@ -144,7 +146,7 @@ function connectEventSource() {
           const saveStatus = document.getElementById('save-status');
           if (saveStatus && saveStatus.classList.contains('saved')) {
             currentNote = fresh;
-            editor && editor.value(fresh.content);
+            editor && editor.setValue(fresh.content);
             document.getElementById('note-title').value = fresh.title;
             document.getElementById('note-tags').value = (fresh.tags || []).join(', ');
             document.getElementById('note-stats').textContent = `${fresh.content.length} chars`;
@@ -295,42 +297,104 @@ async function openNote(noteId) {
 
   if (!editor) {
     const editorArea = document.getElementById('editor-area');
-    const ta = document.createElement('textarea');
-    editorArea.appendChild(ta);
-    editor = new EasyMDE({
-      element: ta,
-      autosave: { enabled: false },
-      autoDownloadFontAwesome: false,
-      toolbar: ['bold', 'italic', 'heading', '|', 'quote', 'unordered-list', 'ordered-list', '|',
-        'link', 'image', '|', 'preview', 'side-by-side', 'fullscreen', '|', 'guide'],
-      spellChecker: false,
-      status: false,
-      previewRender(text) {
-        const html = marked.parse(text);
-        const tmp = document.createElement('div');
-        tmp.innerHTML = html;
-        tmp.querySelectorAll('pre code').forEach(el => hljs.highlightElement(el));
-        return tmp.innerHTML;
-      },
+    editorArea.innerHTML = '';
+
+    // Toolbar
+    const toolbar = document.createElement('div');
+    toolbar.className = 'cm6-toolbar';
+    toolbar.innerHTML =
+      '<button data-cmd="bold" title="Bold"><b>B</b></button>' +
+      '<button data-cmd="italic" title="Italic"><i>I</i></button>' +
+      '<button data-cmd="heading" title="Heading">H#</button>' +
+      '<span class="cm6-sep"></span>' +
+      '<button data-cmd="quote" title="Blockquote">&ldquo;&rdquo;</button>' +
+      '<button data-cmd="unorderedList" title="Bullet list">• List</button>' +
+      '<button data-cmd="orderedList" title="Numbered list">1. List</button>' +
+      '<span class="cm6-sep"></span>' +
+      '<button data-cmd="link" title="Insert link">Link</button>' +
+      '<span class="cm6-sep"></span>' +
+      '<button data-cmd="preview" title="Toggle preview" id="cm6-preview-btn">Preview</button>' +
+      '<span class="cm6-sep"></span>' +
+      '<button data-cmd="undo" title="Undo">↩</button>' +
+      '<button data-cmd="redo" title="Redo">↪</button>';
+    editorArea.appendChild(toolbar);
+
+    // Editor + preview wrapper
+    const wrap = document.createElement('div');
+    wrap.className = 'cm6-wrap';
+    editorArea.appendChild(wrap);
+
+    // CM6 mount point
+    const mount = document.createElement('div');
+    mount.className = 'cm6-mount';
+    wrap.appendChild(mount);
+
+    // Preview pane
+    editorPreviewEl = document.createElement('div');
+    editorPreviewEl.className = 'cm6-preview markdown-body';
+    editorPreviewEl.style.display = 'none';
+    wrap.appendChild(editorPreviewEl);
+
+    editor = CM6.createEditor(mount, {
+      onChange: onEditorChange,
+      isDark: document.body.classList.contains('dark'),
     });
-    editor.codemirror.on('change', onEditorChange);
+
+    toolbar.addEventListener('click', function(e) {
+      const btn = e.target.closest('[data-cmd]');
+      if (!btn) return;
+      const cmd = btn.dataset.cmd;
+      if (cmd === 'preview') {
+        toggleEditorPreview();
+      } else if (CM6.commands[cmd]) {
+        CM6.commands[cmd](editor);
+      }
+    });
   }
 
-  editor.value(note.content);
+  editor.setValue(note.content);
   renderTree(); // refresh active state
+}
+
+function renderPreviewContent(content) {
+  const html = marked.parse(content);
+  const tmp = document.createElement('div');
+  tmp.innerHTML = html;
+  tmp.querySelectorAll('pre code').forEach(el => hljs.highlightElement(el));
+  editorPreviewEl.innerHTML = tmp.innerHTML;
+}
+
+function toggleEditorPreview() {
+  editorPreviewOpen = !editorPreviewOpen;
+  const mount = document.querySelector('.cm6-mount');
+  const btn = document.getElementById('cm6-preview-btn');
+  if (editorPreviewOpen) {
+    renderPreviewContent(editor.getValue());
+    editorPreviewEl.style.display = '';
+    mount.style.display = 'none';
+    btn.classList.add('active');
+  } else {
+    editorPreviewEl.style.display = 'none';
+    mount.style.display = '';
+    btn.classList.remove('active');
+    editor.focus();
+  }
 }
 
 function onEditorChange() {
   setSaveStatus('saving');
   clearTimeout(saveTimer);
   saveTimer = setTimeout(autoSave, AUTO_SAVE_DELAY_MS);
-  const content = editor.value();
+  const content = editor.getValue();
   document.getElementById('note-stats').textContent = `${content.length} chars`;
+  if (editorPreviewOpen && editorPreviewEl) {
+    renderPreviewContent(content);
+  }
 }
 
 async function autoSave() {
   if (!currentNote) return;
-  const content = editor.value();
+  const content = editor.getValue();
   try {
     const res = await api('PATCH', `/api/v1/notes/${currentNote.id}`, {
       content,
@@ -543,6 +607,7 @@ function toggleDarkMode(dark) {
       ? '/static/css/highlight-github-dark.min.css'
       : '/static/css/highlight-github.min.css';
   }
+  if (editor) editor.setTheme(dark);
 }
 
 // ── Account / API tokens ───────────────────────────────────────────────────

@@ -2,6 +2,15 @@
 
 All notable changes to thornotes are documented here.
 
+## [0.16.0.0] - 2026-04-02
+
+### Changed
+- **CodeMirror 6 editor** — replaced EasyMDE (CodeMirror 5, 320KB) with a CodeMirror 6 setup (`@codemirror/view`, `@codemirror/state`, `@codemirror/commands`, `@codemirror/lang-markdown`, `@codemirror/language`). Bundled with bun into `vendor/codemirror6.min.js` (493KB). Features: markdown syntax highlighting in the editor, line wrapping, full undo/redo via CM6 history, custom VS Code-dark and light themes with live switching, soft keyboard–friendly touch interaction.
+- **New toolbar** — replaced Font Awesome icon toolbar with a clean text-button toolbar: Bold, Italic, H#, Blockquote, Bullet List, Numbered List, Link, Preview toggle, Undo, Redo. All formatting commands operate on the current selection or insert at cursor.
+- **Preview toggle** — "Preview" toolbar button switches the editor area to a rendered markdown view (using the existing `marked` + `highlight.js` pipeline). Clicking again returns to the raw editor. Preview updates live while typing when open.
+- **Dark mode** — CM6 theme switches immediately when the dark mode toggle is flipped via `EditorView.dispatch` with a `Compartment` reconfigure, matching the existing `#1e1e1e` / `#d4d4d4` VS Code palette.
+- **Build target** — `make build-cm6` rebuilds the vendor bundle from `web/cm6-bundle/index.js` using bun.
+
 ## [0.15.0.0] - 2026-04-02
 
 ### Added

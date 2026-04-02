@@ -4,7 +4,7 @@ MAIN     := ./cmd/thornotes
 VERSION  := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS  := -ldflags "-s -w -X main.Version=$(VERSION)"
 
-.PHONY: build test run clean fmt vet lint release
+.PHONY: build test run clean fmt vet lint release build-cm6
 
 build:
 	go build $(LDFLAGS) -o $(BINARY) $(MAIN)
@@ -31,6 +31,9 @@ release:
 	GOOS=darwin GOARCH=arm64  go build $(LDFLAGS) -o dist/$(BINARY)-darwin-arm64  $(MAIN)
 	GOOS=darwin GOARCH=amd64  go build $(LDFLAGS) -o dist/$(BINARY)-darwin-amd64  $(MAIN)
 	ls -lh dist/
+
+build-cm6:
+	cd web/cm6-bundle && bun install --frozen-lockfile && bun build index.js --bundle --format=iife --target=browser --outfile=../static/js/vendor/codemirror6.min.js --minify
 
 clean:
 	rm -f $(BINARY)
