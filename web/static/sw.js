@@ -1,21 +1,19 @@
 /* thornotes — service worker */
 'use strict';
 
-const CACHE = 'thornotes-v0.13.6.0';
+const CACHE = 'thornotes-v0.19.0.0';
 
 const STATIC_ASSETS = [
   '/',
   '/static/css/font-awesome.min.css',
-  '/static/css/easymde.min.css',
   '/static/css/highlight-github.min.css',
   '/static/css/highlight-github-dark.min.css',
   '/static/fonts/fontawesome-webfont.woff2',
   '/static/js/app.js',
   '/static/js/share.js',
-  '/static/js/vendor/easymde.min.js',
+  '/static/js/vendor/codemirror6.min.js',
   '/static/js/vendor/marked.min.js',
   '/static/js/vendor/highlight.min.js',
-  '/static/js/vendor/purify.min.js',
   '/static/manifest.json',
   '/static/icons/icon-192.svg',
   '/static/icons/icon-512.svg',
