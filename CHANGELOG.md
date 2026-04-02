@@ -2,6 +2,11 @@
 
 All notable changes to thornotes are documented here.
 
+## [0.19.4.0] - 2026-04-02
+
+### Changed
+- **Test coverage** — pushed line coverage from 64.4% → 70.5% (+920 lines of tests across 11 files). New coverage spans `apperror`, `auth` BearerMiddleware, `config` envDuration, handler account/events/history/share unit tests, `notes` git commit-delete/rename paths, `notes` NoteContext, and `security` CSRF gin middleware + rate limiter gin middleware.
+
 ## [0.19.3.0] - 2026-04-02
 
 ### Fixed
