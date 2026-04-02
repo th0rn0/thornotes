@@ -103,7 +103,7 @@ body {
 .save-status.saving { color: #f80; }
 .save-status.saved { color: #080; }
 .save-status.error { color: #c00; }
-.share-btn { font-size: 11px; border: 1px solid #ccc; padding: 5px 10px; background: #fff; cursor: pointer; color: #333; min-height: 30px; }
+.share-btn, .history-btn { font-size: 11px; border: 1px solid #ccc; padding: 5px 10px; background: #fff; cursor: pointer; color: #333; min-height: 30px; }
 .tags-input { font-size: 11px; border: 1px solid #eee; padding: 3px 6px; color: #666; min-width: 80px; }
 .editor-area { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
 .cm6-toolbar { display: flex; align-items: center; gap: 2px; padding: 4px 8px; background: #f8f8f8; border-bottom: 1px solid #e0e0e0; flex-shrink: 0; flex-wrap: wrap; }
@@ -194,7 +194,7 @@ body.dark .tree-unsorted { color: #555; }
 body.dark .editor-pane { background: #1e1e1e; }
 body.dark .editor-titlebar { border-bottom-color: #3e3e42; }
 body.dark .editor-titlebar input { color: #d4d4d4; }
-body.dark .share-btn { border-color: #4a4a4a; background: #2d2d2d; color: #ccc; }
+body.dark .share-btn, body.dark .history-btn { border-color: #4a4a4a; background: #2d2d2d; color: #ccc; }
 body.dark .tags-input { border-color: #4a4a4a; background: #2d2d2d; color: #ababab; }
 body.dark .empty-state { color: #555; }
 body.dark .editor-statusbar-custom { background: #252526; border-top-color: #3e3e42; }
@@ -249,6 +249,48 @@ body.dark .token-copy-btn:hover { background: #4a4a4a; }
 body.dark .mcp-info { background: #2d2d2d; border-color: #3e3e42; color: #ababab; }
 body.dark .mcp-info code { background: #383838; color: #9cdcfe; }
 body.dark .account-section-title { color: #666; }
+
+/* HISTORY MODAL */
+.history-modal { max-width: 720px; padding: 0; overflow: hidden; display: flex; flex-direction: column; max-height: 90vh; }
+.history-modal h2 { padding: 20px 24px 16px; border-bottom: 1px solid #eee; margin: 0; flex-shrink: 0; }
+.history-body { display: flex; flex: 1; overflow: hidden; min-height: 0; }
+.history-commits { width: 230px; flex-shrink: 0; border-right: 1px solid #eee; overflow-y: auto; }
+.history-entry { padding: 10px 12px; cursor: pointer; border-bottom: 1px solid #f0f0f0; }
+.history-entry:hover { background: #f5f5f5; }
+.history-entry.active { background: #e5eeff; border-right: 2px solid #0066cc; }
+.history-entry-time { font-size: 11px; color: #888; margin-bottom: 2px; }
+.history-entry-sha { font-size: 10px; font-family: monospace; color: #bbb; }
+.history-preview-pane { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
+.history-preview { flex: 1; overflow-y: auto; padding: 16px; min-height: 0; }
+.history-preview-empty { display: flex; align-items: center; justify-content: center; height: 100%; color: #aaa; font-size: 12px; text-align: center; }
+.history-preview-content { font-family: monospace; white-space: pre-wrap; font-size: 12px; line-height: 1.6; color: #333; word-break: break-word; }
+.history-footer { padding: 12px 16px; border-top: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; gap: 8px; }
+.history-restore-btn { background: #222; color: #fff; border: none; padding: 8px 16px; font-size: 12px; cursor: pointer; min-height: 34px; }
+.history-restore-btn:disabled { background: #bbb; cursor: not-allowed; }
+.history-restore-btn:not(:disabled):hover { background: #444; }
+.history-not-available { padding: 24px; color: #888; font-size: 12px; line-height: 1.7; }
+.history-not-available code { font-family: monospace; font-size: 11px; background: #f0f0f0; padding: 1px 4px; }
+body.dark .history-modal h2 { border-bottom-color: #3e3e42; }
+body.dark .history-commits { border-right-color: #3e3e42; }
+body.dark .history-entry { border-bottom-color: #2d2d2d; }
+body.dark .history-entry:hover { background: #2d2d2d; }
+body.dark .history-entry.active { background: #04395e; border-right-color: #4ec9b0; }
+body.dark .history-entry-time { color: #666; }
+body.dark .history-entry-sha { color: #555; }
+body.dark .history-preview-empty { color: #555; }
+body.dark .history-preview-content { color: #ababab; }
+body.dark .history-footer { border-top-color: #3e3e42; }
+body.dark .history-restore-btn { background: #0e639c; }
+body.dark .history-restore-btn:disabled { background: #3e3e42; color: #666; }
+body.dark .history-restore-btn:not(:disabled):hover { background: #1177bb; }
+body.dark .history-not-available { color: #666; }
+body.dark .history-not-available code { background: #2d2d2d; color: #9cdcfe; }
+@media (max-width: 640px) {
+  .history-modal { max-height: 80vh; }
+  .history-body { flex-direction: column; }
+  .history-commits { width: 100%; border-right: none; border-bottom: 1px solid #eee; max-height: 160px; }
+  body.dark .history-commits { border-bottom-color: #3e3e42; }
+}
 
 /* JOURNAL SECTION */
 .journal-section { border-bottom: 1px solid #eee; }
@@ -405,6 +447,7 @@ body.dark .journal-delete-btn:hover { background: #3c2020; }
             <input id="note-tags" type="text" class="tags-input" placeholder="tags, comma, separated" title="Tags (comma-separated)" />
             <span class="save-status" id="save-status">Saved</span>
             <button class="share-btn">Share ↗</button>
+            <button class="history-btn" id="history-btn">History</button>
           </div>
         </div>
         <div class="editor-area" id="editor-area"></div>
@@ -500,6 +543,25 @@ body.dark .journal-delete-btn:hover { background: #3c2020; }
     <div class="error" id="journal-error"></div>
     <div class="modal-actions">
       <button id="manage-journals-done-btn" class="primary">Done</button>
+    </div>
+  </div>
+</div>
+
+<!-- HISTORY MODAL -->
+<div class="modal-overlay" id="history-modal">
+  <div class="modal history-modal">
+    <h2 id="history-modal-title">Version History</h2>
+    <div class="history-body">
+      <div class="history-commits" id="history-list"></div>
+      <div class="history-preview-pane">
+        <div class="history-preview" id="history-preview">
+          <div class="history-preview-empty">Select a version to preview</div>
+        </div>
+      </div>
+    </div>
+    <div class="history-footer">
+      <button id="history-cancel-btn">Close</button>
+      <button class="history-restore-btn" id="history-restore-btn" disabled>Restore this version</button>
     </div>
   </div>
 </div>
