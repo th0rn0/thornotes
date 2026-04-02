@@ -2,6 +2,11 @@
 
 All notable changes to thornotes are documented here.
 
+## [1.0.0.0] - 2026-04-02
+
+### Changed
+- **v1.0** — first stable release.
+
 ## [0.19.4.0] - 2026-04-02
 
 ### Changed
