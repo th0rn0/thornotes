@@ -2,6 +2,12 @@
 
 All notable changes to thornotes are documented here.
 
+## [0.19.1.0] - 2026-04-02
+
+### Fixed
+- **Service worker stale cache** — the PWA service worker cache name was stuck at `v0.13.6.0` since the CodeMirror 6 migration (v0.16.0.0). Browsers with the app installed as a PWA received a fresh `app.html` (network-first) that loads `codemirror6.min.js`, but the cached `app.js` still called `new EasyMDE()`, causing the editor to fail silently. Bumped cache to `v0.19.0.0`, swapped EasyMDE assets for `codemirror6.min.js`, and removed `purify.min.js` (no longer referenced).
+- **golangci-lint CI timeout** — added `run: timeout: 5m` to `.golangci.yml`. The go-git transitive dependency tree pushed lint analysis past the default 1-minute limit on cold CI runners (observed: ~78s → timeout).
+
 ## [0.19.0.0] - 2026-04-02
 
 ### Added
