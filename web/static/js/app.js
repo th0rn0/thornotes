@@ -39,6 +39,7 @@ let editor = null;           // CM6 editor instance
 let editorPreviewEl = null;  // CM6 preview pane element
 let editorPreviewOpen = false;
 let saveTimer = null;
+let _loadingNote = false;  // suppresses auto-save during editor.setValue()
 let loadedFolderIds = new Set(); // tracks which folders have had their notes loaded
 let folders = [];            // flat folder list from API
 let notesByFolder = {};      // { folderId: [noteListItem] }
@@ -169,7 +170,7 @@ function connectEventSource() {
           const saveStatus = document.getElementById('save-status');
           if (saveStatus && saveStatus.classList.contains('saved')) {
             currentNote = fresh;
-            editor && editor.setValue(fresh.content);
+            if (editor) { _loadingNote = true; editor.setValue(fresh.content); _loadingNote = false; }
             document.getElementById('note-title').value = fresh.title;
             document.getElementById('note-tags').value = (fresh.tags || []).join(', ');
             document.getElementById('note-stats').textContent = noteStats(fresh.content);
@@ -543,7 +544,9 @@ async function openNote(noteId, { historyMode = 'push' } = {}) {
     applyLineNumbers();
   }
 
+  _loadingNote = true;
   editor.setValue(note.content);
+  _loadingNote = false;
 
   // Update URL to reflect the open note.
   const deepLink = noteDeepLink(note);
@@ -687,6 +690,7 @@ function toggleEditorPreview() {
 }
 
 function onEditorChange() {
+  if (_loadingNote) return;
   setSaveStatus('saving');
   clearTimeout(saveTimer);
   saveTimer = setTimeout(autoSave, AUTO_SAVE_DELAY_MS);
