@@ -1,13 +1,14 @@
 /* thornotes — service worker */
 'use strict';
 
-const CACHE = 'thornotes-v0.19.3.0';
+const CACHE = 'thornotes-v1.2.0.0';
 
 const STATIC_ASSETS = [
   '/',
   '/static/css/font-awesome.min.css',
   '/static/css/highlight-github.min.css',
   '/static/css/highlight-github-dark.min.css',
+  '/static/css/highlight-catppuccin-mocha.min.css',
   '/static/fonts/fontawesome-webfont.woff2',
   '/static/js/app.js',
   '/static/js/share.js',

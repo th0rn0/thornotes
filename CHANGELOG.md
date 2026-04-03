@@ -2,6 +2,11 @@
 
 All notable changes to thornotes are documented here.
 
+## [1.2.0.0] - 2026-04-03
+
+### Added
+- **Multi-theme system** — replaces the dark/light toggle with a 4-option dropdown: Auto, Light, Dark, Catppuccin Mocha. Auto tracks OS preference and live-switches when it changes. All 107 `body.dark` overrides refactored into ~50 CSS custom properties. Catppuccin Mocha includes matching editor colors (CM6) and syntax highlighting (`highlight-catppuccin-mocha.min.css`). No FOUC: theme is resolved and applied in a blocking `<head>` script before first paint, including the hljs CSS href swap.
+
 ## [1.1.1.0] - 2026-04-03
 
 ### Added

@@ -12,6 +12,24 @@ import { syntaxHighlighting, defaultHighlightStyle } from "@codemirror/language"
 
 // ── Themes ──────────────────────────────────────────────────────────────────
 
+const catppuccinTheme = EditorView.theme({
+  '&': { height: '100%', backgroundColor: '#1e1e2e', color: '#cdd6f4' },
+  '.cm-scroller': {
+    fontFamily: '"Cascadia Code", "Fira Code", "Consolas", monospace',
+    fontSize: '13px',
+    lineHeight: '1.6',
+  },
+  '.cm-content': { padding: '12px 16px', caretColor: '#cdd6f4', minHeight: '100%' },
+  '.cm-cursor, .cm-dropCursor': { borderLeftColor: '#cdd6f4' },
+  '&.cm-focused .cm-selectionBackground, .cm-selectionBackground': {
+    backgroundColor: '#45475a',
+  },
+  '&.cm-focused': { outline: 'none' },
+  '.cm-activeLine': { backgroundColor: 'rgba(137,180,250,0.06)' },
+  '.cm-gutters': { display: 'none' },
+  '.cm-lineNumbers': { display: 'none' },
+}, { dark: true });
+
 const darkTheme = EditorView.theme({
   '&': { height: '100%', backgroundColor: '#1e1e1e', color: '#d4d4d4' },
   '.cm-scroller': {
@@ -125,13 +143,15 @@ function insertLink(view) {
 
 // ── Public factory ───────────────────────────────────────────────────────────
 
-function createEditor(parent, { onChange, isDark } = {}) {
+const themes = { light: lightTheme, dark: darkTheme, catppuccin: catppuccinTheme };
+
+function createEditor(parent, { onChange, theme } = {}) {
   const themeComp = new Compartment();
   const state = EditorState.create({
     doc: '',
     extensions: [
       ...baseExtensions(onChange),
-      themeComp.of(isDark ? darkTheme : lightTheme),
+      themeComp.of(themes[theme] ?? lightTheme),
     ],
   });
   const view = new EditorView({ state, parent });
@@ -141,8 +161,8 @@ function createEditor(parent, { onChange, isDark } = {}) {
     setValue(text) {
       view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } });
     },
-    setTheme(dark) {
-      view.dispatch({ effects: themeComp.reconfigure(dark ? darkTheme : lightTheme) });
+    setTheme(name) {
+      view.dispatch({ effects: themeComp.reconfigure(themes[name] ?? lightTheme) });
     },
     focus() { view.focus(); },
     destroy() { view.destroy(); },

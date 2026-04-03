@@ -2,16 +2,33 @@
 'use strict';
 
 // ── Theme ──────────────────────────────────────────────────────────────────
-(function initTheme() {
-  const saved = localStorage.getItem('theme');
-  const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-  const isDark = saved === 'dark' || (!saved && prefersDark);
-  if (isDark) {
-    document.body.classList.add('dark');
-    const hljsTheme = document.getElementById('hljs-theme');
-    if (hljsTheme) hljsTheme.href = '/static/css/highlight-github-dark.min.css';
-  }
-})();
+// FOUC prevention runs in <head> before paint (see app.html).
+// This block handles runtime switching and OS-preference live-updates.
+const VALID_THEMES = ['auto', 'light', 'dark', 'catppuccin'];
+const hljsThemeEl = document.getElementById('hljs-theme');
+const metaThemeColor = document.getElementById('meta-theme-color');
+const hljsHref = (t) => ({
+  light: '/static/css/highlight-github.min.css',
+  dark: '/static/css/highlight-github-dark.min.css',
+  catppuccin: '/static/css/highlight-catppuccin-mocha.min.css',
+})[t] || '/static/css/highlight-github.min.css';
+const themeColors = { light: '#f5f5f5', dark: '#252526', catppuccin: '#1e1e2e' };
+function resolveAuto() {
+  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+}
+function applyTheme(name) {
+  const resolved = name === 'auto' ? resolveAuto() : name;
+  document.documentElement.setAttribute('data-theme', resolved);
+  if (hljsThemeEl) hljsThemeEl.href = hljsHref(resolved);
+  if (metaThemeColor) metaThemeColor.content = themeColors[resolved] || '';
+  if (editor) editor.setTheme(resolved);
+  try { localStorage.setItem('theme', name); } catch(e) {}
+}
+// Live OS-preference switch (only fires when stored theme is 'auto').
+window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function() {
+  let saved; try { saved = localStorage.getItem('theme'); } catch(e) {}
+  if (!saved || saved === 'auto') applyTheme('auto');
+});
 
 // ── State ──────────────────────────────────────────────────────────────────
 let csrfToken = '';
@@ -106,7 +123,10 @@ function showAuth() {
 function showApp() {
   document.getElementById('auth-screen').style.display = 'none';
   document.getElementById('app-screen').style.display = 'flex';
-  document.getElementById('dark-mode-toggle').checked = document.body.classList.contains('dark');
+  let saved; try { saved = localStorage.getItem('theme'); } catch(e) {}
+  const sel = document.getElementById('theme-select');
+  if (sel) sel.value = VALID_THEMES.indexOf(saved) !== -1 ? saved : 'auto';
+  applyTheme(sel ? sel.value : 'auto');
   connectEventSource();
 }
 
@@ -489,7 +509,7 @@ async function openNote(noteId, { historyMode = 'push' } = {}) {
 
     editor = CM6.createEditor(mount, {
       onChange: onEditorChange,
-      isDark: document.body.classList.contains('dark'),
+      theme: document.documentElement.getAttribute('data-theme') || 'light',
     });
 
     toolbar.addEventListener('click', function(e) {
@@ -777,18 +797,6 @@ async function api(method, path, body) {
   return data;
 }
 
-// ── Dark mode ──────────────────────────────────────────────────────────────
-function toggleDarkMode(dark) {
-  document.body.classList.toggle('dark', dark);
-  localStorage.setItem('theme', dark ? 'dark' : 'light');
-  const hljsTheme = document.getElementById('hljs-theme');
-  if (hljsTheme) {
-    hljsTheme.href = dark
-      ? '/static/css/highlight-github-dark.min.css'
-      : '/static/css/highlight-github.min.css';
-  }
-  if (editor) editor.setTheme(dark);
-}
 
 // ── Account / API tokens ───────────────────────────────────────────────────
 let _newTokenValue = '';
@@ -1119,7 +1127,7 @@ document.getElementById('show-login-link').addEventListener('click', showLogin);
 
 // Topbar
 document.querySelector('.topbar-menu-btn').addEventListener('click', toggleSidebar);
-document.getElementById('dark-mode-toggle').addEventListener('change', function() { toggleDarkMode(this.checked); });
+document.getElementById('theme-select').addEventListener('change', function() { applyTheme(this.value); });
 document.getElementById('account-btn').addEventListener('click', showAccountModal);
 document.getElementById('logout-btn').addEventListener('click', logout);
 

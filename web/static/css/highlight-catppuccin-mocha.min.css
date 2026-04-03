@@ -1,0 +1,6 @@
+pre code.hljs{display:block;overflow-x:auto;padding:1em}code.hljs{padding:3px 5px}/*!
+  Theme: Catppuccin Mocha
+  Description: Soothing pastel theme for highlight.js — Mocha variant
+  Palette: https://github.com/catppuccin/catppuccin
+*/
+.hljs{color:#cdd6f4;background:#1e1e2e}.hljs-keyword,.hljs-selector-tag,.hljs-built_in,.hljs-name,.hljs-tag{color:#cba6f7}.hljs-string,.hljs-attr,.hljs-symbol,.hljs-bullet,.hljs-addition{color:#a6e3a1}.hljs-title,.hljs-section{color:#89b4fa}.hljs-variable,.hljs-template-variable,.hljs-selector-id,.hljs-selector-class{color:#f38ba8}.hljs-type,.hljs-class .hljs-title{color:#f9e2af}.hljs-number,.hljs-literal{color:#fab387}.hljs-link{color:#94e2d5;text-decoration:underline}.hljs-meta{color:#74c7ec}.hljs-deletion{color:#f38ba8;background:#2d1c24}.hljs-comment,.hljs-quote{color:#6c7086;font-style:italic}.hljs-emphasis{font-style:italic}.hljs-strong{font-weight:bold}
