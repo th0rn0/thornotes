@@ -43,7 +43,7 @@ type NoteRepository interface {
 	GetByID(ctx context.Context, userID, noteID int64) (*model.Note, error)
 	GetByShareToken(ctx context.Context, token string) (*model.Note, error)
 	// GetByFolderAndSlug returns a note by folder + slug, or ErrNotFound.
-	// Pass nil folderID to look up root (unsorted) notes.
+	// Pass nil folderID to look up root notes.
 	GetByFolderAndSlug(ctx context.Context, userID int64, folderID *int64, slug string) (*model.Note, error)
 	ListByFolder(ctx context.Context, userID int64, folderID *int64) ([]*model.NoteListItem, error)
 	// ListAll returns note metadata for all notes owned by userID, across all folders.

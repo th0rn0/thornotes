@@ -13,13 +13,16 @@ A self-hosted Markdown note-taking app with file-as-canonical storage. Every not
 - Write notes in Markdown with a split-pane editor (CodeMirror 6 — syntax-aware, live preview)
 - Syntax highlighting for fenced code blocks — ` ```go `, ` ```yaml `, ` ```json `, and [180+ languages](https://highlightjs.org/)
 - Folder tree with lazy-loaded notes
+- **Folder overview** — click a folder to see a card grid of all its notes with content snippets
+- **Wiki-style note linking** — use `[[Note Title]]` in any note to link to another note; clicking the link in preview opens it, building a navigable note graph
 - Full-text search with snippet highlighting
 - Tags
 - Shareable read-only note links
 - MCP server — expose your notes as tools and resources to AI assistants (Claude Desktop, Cursor, etc.)
 - API tokens for programmatic access
 - Live sync — edits made directly to `.md` files on disk are detected and pushed to open browser tabs via SSE
-- Dark mode
+- Multi-theme: Auto, Light, Dark, and Catppuccin
+- Daily journal with multi-journal support
 
 ## Quick start with Docker
 
@@ -174,7 +177,7 @@ thornotes implements the [MCP Streamable HTTP transport (2025-03-26)](https://sp
 
 All three endpoints require `Authorization: Bearer <token>`.
 
-**Available tools:** `list_notes`, `get_note`, `search_notes`, `create_note`, `update_note`, `list_folders`
+**Available tools:** `list_notes`, `get_note`, `search_notes`, `create_note`, `update_note`, `list_folders`, `find_folders`, `find_notes_by_tag`, `list_tags`
 
 **Available resources:** Every note is exposed as a `note://<id>` resource (MIME type `text/markdown`).
 

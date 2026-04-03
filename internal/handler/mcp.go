@@ -368,6 +368,25 @@ func (h *MCPHandler) handleToolsList(req rpcRequest) rpcResponse {
 			InputSchema: jsonSchema(nil, nil),
 		},
 		{
+			Name:        "find_folders",
+			Description: "Find folders by name (case-insensitive substring match). Returns matching folders with id, parent_id, name, and note_count. Useful for locating a folder before scoping list_notes or create_note to it.",
+			InputSchema: jsonSchema(map[string]any{
+				"query": prop("string", "Substring to search for in folder names"),
+			}, []string{"query"}),
+		},
+		{
+			Name:        "find_notes_by_tag",
+			Description: "List all notes that have every specified tag (AND semantics). Returns id, title, slug, tags, folder_id, and updated_at. Use get_note for full content. Unlike search_notes, no full-text query is required.",
+			InputSchema: jsonSchema(map[string]any{
+				"tags": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "One or more tags — only notes with ALL of these tags are returned"},
+			}, []string{"tags"}),
+		},
+		{
+			Name:        "list_tags",
+			Description: "Return all unique tags in use across all notes, sorted alphabetically. Useful for discovering available tags before calling find_notes_by_tag.",
+			InputSchema: jsonSchema(nil, nil),
+		},
+		{
 			Name: "create_note",
 			Description: "Create a new markdown note. Returns the created note including its ID.",
 			InputSchema: jsonSchema(map[string]any{
@@ -505,6 +524,42 @@ func (h *MCPHandler) handleToolsCall(r *http.Request, req rpcRequest, userID int
 			return rpcErr(req.ID, rpcInternalError, "list failed")
 		}
 		text, _ := json.Marshal(folders)
+		return rpcOK(req.ID, toolResult(string(text)))
+
+	case "find_folders":
+		var args struct {
+			Query string `json:"query"`
+		}
+		if err := json.Unmarshal(params.Arguments, &args); err != nil || args.Query == "" {
+			return rpcErr(req.ID, rpcInvalidParams, "query is required")
+		}
+		folders, err := h.notes.FindFoldersByName(ctx, userID, args.Query)
+		if err != nil {
+			return rpcErr(req.ID, rpcInternalError, "search failed")
+		}
+		text, _ := json.Marshal(folders)
+		return rpcOK(req.ID, toolResult(string(text)))
+
+	case "find_notes_by_tag":
+		var args struct {
+			Tags []string `json:"tags"`
+		}
+		if err := json.Unmarshal(params.Arguments, &args); err != nil || len(args.Tags) == 0 {
+			return rpcErr(req.ID, rpcInvalidParams, "tags must be a non-empty array")
+		}
+		items, err := h.notes.FindNotesByTag(ctx, userID, args.Tags)
+		if err != nil {
+			return rpcErr(req.ID, rpcInternalError, "search failed")
+		}
+		text, _ := json.Marshal(items)
+		return rpcOK(req.ID, toolResult(string(text)))
+
+	case "list_tags":
+		tags, err := h.notes.ListAllTags(ctx, userID)
+		if err != nil {
+			return rpcErr(req.ID, rpcInternalError, "list failed")
+		}
+		text, _ := json.Marshal(tags)
 		return rpcOK(req.ID, toolResult(string(text)))
 
 	default:

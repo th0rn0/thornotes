@@ -2,6 +2,13 @@
 
 All notable changes to thornotes are documented here.
 
+## [1.3.0.0] - 2026-04-03
+
+### Added
+- **Wiki-style note links** — type `[[Note Title]]` in any note to link to another note. In the preview pane, resolved links are clickable and open the target note immediately. Unresolved links render in a muted style. Links on share pages render as plain text. The link resolver builds a title map from all currently loaded notes (root + expanded folders).
+- **Folder overview** — clicking a folder in the sidebar now opens a card grid in the main pane showing all notes in that folder. Each card displays the note title, tags, and a content snippet (first 200 characters, lazily fetched in parallel for up to 20 notes). Clicking a card opens the note.
+- **Rename "Unsorted" → "Root"** — the catch-all section at the bottom of the sidebar is now labelled "Root" throughout the UI, comments, and documentation. Notes without a folder live in Root; dragging a note to Root clears its folder assignment.
+
 ## [1.2.0.0] - 2026-04-03
 
 ### Added

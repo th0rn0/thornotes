@@ -192,3 +192,47 @@ func (s *Service) DeleteFolder(ctx context.Context, userID, folderID int64) erro
 	_ = s.fs.RemoveDir(diskPath)
 	return nil
 }
+
+// FindFoldersByName returns folders whose name contains query (case-insensitive).
+// An empty query returns all folders.
+func (s *Service) FindFoldersByName(ctx context.Context, userID int64, query string) ([]*model.FolderTreeItem, error) {
+	all, err := s.folders.Tree(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if query == "" {
+		return all, nil
+	}
+	lower := toLower(query)
+	var out []*model.FolderTreeItem
+	for _, f := range all {
+		if containsIgnoreCase(f.Name, lower) {
+			out = append(out, f)
+		}
+	}
+	return out, nil
+}
+
+// toLower returns s lowercased (ASCII only, avoids importing strings).
+func toLower(s string) string {
+	b := []byte(s)
+	for i, c := range b {
+		if c >= 'A' && c <= 'Z' {
+			b[i] = c + 32
+		}
+	}
+	return string(b)
+}
+
+func containsIgnoreCase(name, lowerQuery string) bool {
+	lowerName := toLower(name)
+	if len(lowerQuery) > len(lowerName) {
+		return false
+	}
+	for i := 0; i <= len(lowerName)-len(lowerQuery); i++ {
+		if lowerName[i:i+len(lowerQuery)] == lowerQuery {
+			return true
+		}
+	}
+	return false
+}

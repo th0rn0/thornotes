@@ -196,6 +196,23 @@ body {
 .editor-statusbar-custom { padding: 0 16px; height: 26px; border-top: 1px solid var(--border-light); background: var(--bg-statusbar); display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
 .editor-statusbar-custom span { font-size: 11px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
+/* WIKILINKS */
+.cm6-preview a.wikilink { color: var(--preview-link); border-bottom: 1px dashed var(--preview-link); text-decoration: none; }
+.cm6-preview a.wikilink-missing { color: var(--text-dim); border-bottom: 1px dashed var(--text-dim); }
+
+/* FOLDER VIEW */
+#folder-view { display: none; flex: 1; flex-direction: column; overflow: hidden; background: var(--bg-editor); }
+.fv-header { padding: 16px 20px 12px; border-bottom: 1px solid var(--border-light); flex-shrink: 0; }
+.fv-header h2 { font-size: 16px; font-weight: 600; color: var(--text); }
+.fv-grid { flex: 1; overflow-y: auto; padding: 16px; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; align-content: start; }
+.fv-card { background: var(--bg-modal); border: 1px solid var(--border); padding: 14px 16px; cursor: pointer; border-radius: 3px; }
+.fv-card:hover { background: var(--bg-hover); border-color: var(--accent); }
+.fv-card-title { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fv-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; }
+.fv-tag { font-size: 10px; background: var(--bg-active-folder); color: var(--text-mute); padding: 1px 6px; border-radius: 10px; }
+.fv-snippet { font-size: 11px; color: var(--text-mute); line-height: 1.5; max-height: 66px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
+.folder-view-empty { grid-column: 1/-1; color: var(--text-dim); font-size: 13px; padding: 24px 0; }
+
 /* EMPTY STATE */
 .empty-state { display: flex; align-items: center; justify-content: center; flex: 1; color: var(--text-dim); font-size: 13px; }
 
@@ -413,6 +430,10 @@ body {
     </div>
     <div class="editor-pane" id="editor-pane">
       <div class="empty-state" id="empty-state">Select or create a note</div>
+      <div id="folder-view">
+        <div class="fv-header"><h2 id="folder-view-title"></h2></div>
+        <div class="fv-grid" id="folder-view-grid"></div>
+      </div>
       <div id="editor-container" style="display:none; flex:1; flex-direction:column; overflow:hidden;">
         <div class="editor-titlebar">
           <input id="note-title" type="text" placeholder="Note title" />

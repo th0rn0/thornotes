@@ -827,3 +827,204 @@ func TestMCP_Batch_InvalidSessionPerItem(t *testing.T) {
 	errObj := results[0]["error"].(map[string]interface{})
 	assert.Equal(t, float64(-32001), errObj["code"])
 }
+
+// ─── find_folders ─────────────────────────────────────────────────────────────
+
+func TestMCP_ToolsCall_FindFolders_ReturnsMatch(t *testing.T) {
+	m := newMCPClient(t)
+	sessionID := m.initialize(t)
+
+	// Create a folder via the REST API.
+	resp := m.post(t, rpc(40, "tools/call", map[string]interface{}{
+		"name":      "create_note",
+		"arguments": map[string]interface{}{"title": "Note in Work"},
+	}), sessionID)
+	resp.Body.Close()
+
+	// Create folder via REST (MCP has no create_folder tool).
+	folderResp := m.do(t, http.MethodPost, "/api/v1/folders", map[string]string{"name": "WorkFolder"})
+	folderResp.Body.Close()
+
+	resp = m.post(t, rpc(41, "tools/call", map[string]interface{}{
+		"name":      "find_folders",
+		"arguments": map[string]interface{}{"query": "work"},
+	}), sessionID)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var result map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+	text := result["result"].(map[string]interface{})["content"].([]interface{})[0].(map[string]interface{})["text"].(string)
+	var folders []map[string]interface{}
+	require.NoError(t, json.Unmarshal([]byte(text), &folders))
+	require.Len(t, folders, 1)
+	assert.Equal(t, "WorkFolder", folders[0]["name"])
+}
+
+func TestMCP_ToolsCall_FindFolders_MissingQuery(t *testing.T) {
+	m := newMCPClient(t)
+	sessionID := m.initialize(t)
+
+	resp := m.post(t, rpc(42, "tools/call", map[string]interface{}{
+		"name":      "find_folders",
+		"arguments": map[string]interface{}{},
+	}), sessionID)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var result map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+	errObj := result["error"].(map[string]interface{})
+	assert.Equal(t, float64(-32602), errObj["code"])
+}
+
+func TestMCP_ToolsCall_FindFolders_NoMatch(t *testing.T) {
+	m := newMCPClient(t)
+	sessionID := m.initialize(t)
+
+	resp := m.post(t, rpc(43, "tools/call", map[string]interface{}{
+		"name":      "find_folders",
+		"arguments": map[string]interface{}{"query": "zzznomatch"},
+	}), sessionID)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var result map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+	text := result["result"].(map[string]interface{})["content"].([]interface{})[0].(map[string]interface{})["text"].(string)
+	assert.Equal(t, "null", text)
+}
+
+// ─── find_notes_by_tag ────────────────────────────────────────────────────────
+
+func TestMCP_ToolsCall_FindNotesByTag_ReturnsMatch(t *testing.T) {
+	m := newMCPClient(t)
+	sessionID := m.initialize(t)
+
+	// Create a tagged note.
+	cResp := m.post(t, rpc(44, "tools/call", map[string]interface{}{
+		"name":      "create_note",
+		"arguments": map[string]interface{}{"title": "Tagged Note", "tags": []string{"go", "testing"}},
+	}), sessionID)
+	cResp.Body.Close()
+	// Create an untagged note.
+	cResp2 := m.post(t, rpc(45, "tools/call", map[string]interface{}{
+		"name":      "create_note",
+		"arguments": map[string]interface{}{"title": "Untagged Note"},
+	}), sessionID)
+	cResp2.Body.Close()
+
+	resp := m.post(t, rpc(46, "tools/call", map[string]interface{}{
+		"name":      "find_notes_by_tag",
+		"arguments": map[string]interface{}{"tags": []string{"go"}},
+	}), sessionID)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var result map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+	text := result["result"].(map[string]interface{})["content"].([]interface{})[0].(map[string]interface{})["text"].(string)
+	var notes []map[string]interface{}
+	require.NoError(t, json.Unmarshal([]byte(text), &notes))
+	require.Len(t, notes, 1)
+	assert.Equal(t, "Tagged Note", notes[0]["title"])
+}
+
+func TestMCP_ToolsCall_FindNotesByTag_ANDSemantics(t *testing.T) {
+	m := newMCPClient(t)
+	sessionID := m.initialize(t)
+
+	cResp := m.post(t, rpc(47, "tools/call", map[string]interface{}{
+		"name":      "create_note",
+		"arguments": map[string]interface{}{"title": "Both Tags", "tags": []string{"alpha", "beta"}},
+	}), sessionID)
+	cResp.Body.Close()
+	cResp2 := m.post(t, rpc(48, "tools/call", map[string]interface{}{
+		"name":      "create_note",
+		"arguments": map[string]interface{}{"title": "Only Alpha", "tags": []string{"alpha"}},
+	}), sessionID)
+	cResp2.Body.Close()
+
+	// Asking for both tags should return only "Both Tags".
+	resp := m.post(t, rpc(49, "tools/call", map[string]interface{}{
+		"name":      "find_notes_by_tag",
+		"arguments": map[string]interface{}{"tags": []string{"alpha", "beta"}},
+	}), sessionID)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var result map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+	text := result["result"].(map[string]interface{})["content"].([]interface{})[0].(map[string]interface{})["text"].(string)
+	var notes []map[string]interface{}
+	require.NoError(t, json.Unmarshal([]byte(text), &notes))
+	require.Len(t, notes, 1)
+	assert.Equal(t, "Both Tags", notes[0]["title"])
+}
+
+func TestMCP_ToolsCall_FindNotesByTag_EmptyTagsReturnsError(t *testing.T) {
+	m := newMCPClient(t)
+	sessionID := m.initialize(t)
+
+	resp := m.post(t, rpc(50, "tools/call", map[string]interface{}{
+		"name":      "find_notes_by_tag",
+		"arguments": map[string]interface{}{"tags": []string{}},
+	}), sessionID)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var result map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+	errObj := result["error"].(map[string]interface{})
+	assert.Equal(t, float64(-32602), errObj["code"])
+}
+
+// ─── list_tags ────────────────────────────────────────────────────────────────
+
+func TestMCP_ToolsCall_ListTags_ReturnsAllTags(t *testing.T) {
+	m := newMCPClient(t)
+	sessionID := m.initialize(t)
+
+	cResp := m.post(t, rpc(51, "tools/call", map[string]interface{}{
+		"name":      "create_note",
+		"arguments": map[string]interface{}{"title": "Note A", "tags": []string{"zeta", "alpha"}},
+	}), sessionID)
+	cResp.Body.Close()
+	cResp2 := m.post(t, rpc(52, "tools/call", map[string]interface{}{
+		"name":      "create_note",
+		"arguments": map[string]interface{}{"title": "Note B", "tags": []string{"beta", "alpha"}},
+	}), sessionID)
+	cResp2.Body.Close()
+
+	resp := m.post(t, rpc(53, "tools/call", map[string]interface{}{
+		"name":      "list_tags",
+		"arguments": map[string]interface{}{},
+	}), sessionID)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var result map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+	text := result["result"].(map[string]interface{})["content"].([]interface{})[0].(map[string]interface{})["text"].(string)
+	var tags []string
+	require.NoError(t, json.Unmarshal([]byte(text), &tags))
+	assert.Equal(t, []string{"alpha", "beta", "zeta"}, tags) // sorted, deduplicated
+}
+
+func TestMCP_ToolsCall_ListTags_EmptyWhenNoNotes(t *testing.T) {
+	m := newMCPClient(t)
+	sessionID := m.initialize(t)
+
+	resp := m.post(t, rpc(54, "tools/call", map[string]interface{}{
+		"name":      "list_tags",
+		"arguments": map[string]interface{}{},
+	}), sessionID)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var result map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+	text := result["result"].(map[string]interface{})["content"].([]interface{})[0].(map[string]interface{})["text"].(string)
+	// No notes → empty array or null.
+	assert.True(t, text == "[]" || text == "null", "expected empty list, got: %s", text)
+}

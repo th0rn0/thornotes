@@ -40,7 +40,7 @@ Supported: ` + "`go`" + `, ` + "`yaml`" + `, ` + "`json`" + `, ` + "`python`" + 
 
 Use **folders** to organise your notes into a tree. Create a folder with the **+ Folder** button in the sidebar.
 
-Notes without a folder appear in **Unsorted** at the bottom of the sidebar.
+Notes without a folder appear in **Root** at the bottom of the sidebar.
 
 ## Tags
 
@@ -64,15 +64,27 @@ Click the **Share** button in the editor to generate a public read-only link for
 
 Edit ` + "`.md`" + ` files directly in any external editor (vim, VS Code, etc.) — thornotes detects changes on disk and updates open browser tabs automatically.
 
-## Dark mode
+## Themes
 
-Toggle dark mode with the **☾** button in the top bar.
+Switch between **Auto**, **Light**, **Dark**, and **Catppuccin** themes using the theme selector in the top bar.
+
+## Note links
+
+Link between notes using wiki-style syntax: ` + "`" + `[[Note Title]]` + "`" + `. Clicking a note link in the preview pane opens the target note. Notes that link to each other form a **note graph** you can navigate.
+
+## Folder overview
+
+Click a folder in the sidebar to open a card view of all notes in that folder — title, tags, and a content snippet for each.
+
+## Available MCP tools
+
+` + "`list_notes`" + `, ` + "`get_note`" + `, ` + "`search_notes`" + `, ` + "`create_note`" + `, ` + "`update_note`" + `, ` + "`list_folders`" + `, ` + "`find_folders`" + `, ` + "`find_notes_by_tag`" + `, ` + "`list_tags`" + `.
 
 ## MCP integration
 
 Connect AI assistants (Claude Desktop, Cursor) to your notes via the **Account** modal. Create an API token and paste the connection snippet into your assistant's MCP config.
 
-Available tools: ` + "`list_notes`" + `, ` + "`get_note`" + `, ` + "`search_notes`" + `, ` + "`create_note`" + `, ` + "`update_note`" + `, ` + "`list_folders`" + `.
+Available tools: ` + "`list_notes`" + `, ` + "`get_note`" + `, ` + "`search_notes`" + `, ` + "`create_note`" + `, ` + "`update_note`" + `, ` + "`list_folders`" + `, ` + "`find_folders`" + `, ` + "`find_notes_by_tag`" + `, ` + "`list_tags`" + `.
 `
 
 // CreateGettingStartedNote creates the welcome note for a new user.

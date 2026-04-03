@@ -45,6 +45,7 @@ let notesByFolder = {};      // { folderId: [noteListItem] }
 let rootNotes = [];          // notes with no folder
 let searchResults = null;    // null = not in search mode
 let journals = [];           // all journals for current user
+let currentFolderViewId = null; // folder ID currently shown in folder view (null = not shown)
 
 const AUTO_SAVE_DELAY_MS = 1500;
 
@@ -244,16 +245,16 @@ function renderTree() {
 
   for (const f of roots) renderFolder(f);
 
-  // Root (unsorted) notes.
+  // Root notes.
   if (rootNotes.length > 0) {
-    html += `<div class="tree-unsorted drop-root">Unsorted</div>`;
+    html += `<div class="tree-unsorted drop-root">Root</div>`;
     for (const n of rootNotes) {
       const active = currentNote && currentNote.id === n.id ? ' active' : '';
       html += `<div class="tree-note${active}" style="padding-left:12px" data-action="open-note" data-note-id="${n.id}" title="${esc(n.title)}" draggable="true">${esc(n.title)}</div>`;
     }
   } else {
-    // No unsorted notes yet — invisible until a drag starts.
-    html += `<div class="tree-root-drop drop-root">Unsorted</div>`;
+    // No root notes yet — invisible until a drag starts.
+    html += `<div class="tree-root-drop drop-root">Root</div>`;
   }
 
   tree.innerHTML = html;
@@ -267,6 +268,7 @@ async function selectFolder(folderId) {
   } else {
     await loadFolderNotes(folderId);
   }
+  showFolderView(folderId);
 }
 
 // ── Drag-and-drop tree ─────────────────────────────────────────────────────
@@ -458,6 +460,8 @@ async function openNote(noteId, { historyMode = 'push' } = {}) {
   if (isMobile()) closeSidebar();
 
   document.getElementById('empty-state').style.display = 'none';
+  document.getElementById('folder-view').style.display = 'none';
+  currentFolderViewId = null;
   const container = document.getElementById('editor-container');
   container.style.display = 'flex';
 
@@ -507,6 +511,15 @@ async function openNote(noteId, { historyMode = 'push' } = {}) {
     editorPreviewEl.style.display = 'none';
     wrap.appendChild(editorPreviewEl);
 
+    // Intercept wikilink clicks in the preview pane.
+    editorPreviewEl.addEventListener('click', function(e) {
+      const a = e.target.closest('a.wikilink[data-note-id]');
+      if (!a) return;
+      e.preventDefault();
+      const id = parseInt(a.dataset.noteId);
+      if (id) openNote(id);
+    });
+
     editor = CM6.createEditor(mount, {
       onChange: onEditorChange,
       theme: document.documentElement.getAttribute('data-theme') || 'light',
@@ -538,12 +551,96 @@ async function openNote(noteId, { historyMode = 'push' } = {}) {
   renderTree(); // refresh active state
 }
 
+// ── Wiki-links ─────────────────────────────────────────────────────────────
+// Build a map of lowercased note title → note ID from all loaded notes.
+function buildNoteTitleMap() {
+  const map = {};
+  for (const n of rootNotes) map[n.title.toLowerCase()] = n.id;
+  for (const fid of Object.keys(notesByFolder)) {
+    for (const n of notesByFolder[fid]) map[n.title.toLowerCase()] = n.id;
+  }
+  return map;
+}
+
+// Replace [[Note Title]] wikilinks with markdown links before parsing.
+// Known titles resolve to #tn-<id> fragments (intercepted by click handler).
+// Unknown titles render as a styled dead link.
+function processWikilinks(content) {
+  const titleMap = buildNoteTitleMap();
+  return content.replace(/\[\[([^\]\n]+)\]\]/g, function(_, title) {
+    const id = titleMap[title.toLowerCase()];
+    if (id != null) return `[${title}](#tn-${id})`;
+    return `[${title}](#tn-)`;
+  });
+}
+
 function renderPreviewContent(content) {
-  const html = marked.parse(content);
+  const processed = processWikilinks(content);
+  const html = marked.parse(processed);
   const tmp = document.createElement('div');
   tmp.innerHTML = html;
+  // Mark resolved vs unresolved wikilinks.
+  tmp.querySelectorAll('a[href^="#tn-"]').forEach(a => {
+    const id = a.getAttribute('href').slice(4);
+    if (id) {
+      a.className = 'wikilink';
+      a.dataset.noteId = id;
+    } else {
+      a.className = 'wikilink wikilink-missing';
+    }
+  });
   tmp.querySelectorAll('pre code').forEach(el => hljs.highlightElement(el));
   editorPreviewEl.innerHTML = tmp.innerHTML;
+}
+
+// ── Folder view ────────────────────────────────────────────────────────────
+function showFolderView(folderId) {
+  const folder = folders.find(f => f.id === folderId);
+  const notes = notesByFolder[folderId] || [];
+  const folderView = document.getElementById('folder-view');
+  const emptyState = document.getElementById('empty-state');
+  const editorContainer = document.getElementById('editor-container');
+
+  currentFolderViewId = folderId;
+  emptyState.style.display = 'none';
+  editorContainer.style.display = 'none';
+  folderView.style.display = 'flex';
+
+  const titleEl = document.getElementById('folder-view-title');
+  titleEl.textContent = folder ? folder.name : 'Folder';
+
+  const grid = document.getElementById('folder-view-grid');
+  if (notes.length === 0) {
+    grid.innerHTML = '<div class="folder-view-empty">No notes in this folder yet.</div>';
+    return;
+  }
+
+  grid.innerHTML = notes.map(n => {
+    const tags = (n.tags || []).map(t => `<span class="fv-tag">${esc(t)}</span>`).join('');
+    return `<div class="fv-card" data-action="open-note" data-note-id="${n.id}">
+      <div class="fv-card-title">${esc(n.title)}</div>
+      ${tags ? `<div class="fv-tags">${tags}</div>` : ''}
+      <div class="fv-snippet" data-note-id="${n.id}"></div>
+    </div>`;
+  }).join('');
+
+  // Lazily load content snippets for each note (up to 20).
+  const toLoad = notes.slice(0, 20);
+  toLoad.forEach(n => {
+    api('GET', `/api/v1/notes/${n.id}`).then(note => {
+      if (currentFolderViewId !== folderId) return; // stale
+      const snipEl = grid.querySelector(`.fv-snippet[data-note-id="${note.id}"]`);
+      if (snipEl && note.content) {
+        const plain = note.content.replace(/^#+\s+.*$/mg, '').replace(/[*_`~[\]]/g, '').trim();
+        snipEl.textContent = plain.slice(0, 200) + (plain.length > 200 ? '…' : '');
+      }
+    }).catch(() => {});
+  });
+}
+
+function closeFolderView() {
+  currentFolderViewId = null;
+  document.getElementById('folder-view').style.display = 'none';
 }
 
 function toggleEditorPreview() {
@@ -620,7 +717,7 @@ async function onTagsChange() {
 
 function promptCreateNote() {
   const sel = document.getElementById('new-note-folder');
-  sel.innerHTML = '<option value="">Unsorted</option>';
+  sel.innerHTML = '<option value="">Root</option>';
   for (const f of folders) {
     const opt = document.createElement('option');
     opt.value = f.id;
@@ -1200,6 +1297,13 @@ document.getElementById('tree').addEventListener('click', function(e) {
   if (!el) return;
   if (el.dataset.action === 'open-note') openNote(Number(el.dataset.noteId));
   if (el.dataset.action === 'select-folder') selectFolder(Number(el.dataset.folderId));
+});
+
+// Folder view — event delegation for note cards
+document.getElementById('folder-view-grid').addEventListener('click', function(e) {
+  const el = e.target.closest('[data-action="open-note"]');
+  if (!el) return;
+  openNote(Number(el.dataset.noteId));
 });
 
 // Right-click context menu on note items in the tree

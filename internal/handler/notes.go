@@ -107,7 +107,7 @@ func (h *NotesHandler) Patch(c *gin.Context) {
 }
 
 type moveNoteRequest struct {
-	FolderID *int64 `json:"folder_id"` // null = move to root/unsorted
+	FolderID *int64 `json:"folder_id"` // null = move to root
 }
 
 func (h *NotesHandler) Move(c *gin.Context) {

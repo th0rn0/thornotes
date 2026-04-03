@@ -74,7 +74,7 @@ func (s *Service) GetNoteByShareToken(ctx context.Context, token string) (*model
 	return s.notes.GetByShareToken(ctx, token)
 }
 
-// ListNotes returns note metadata for a given folder (nil = root/unsorted).
+// ListNotes returns note metadata for a given folder (nil = root).
 func (s *Service) ListNotes(ctx context.Context, userID int64, folderID *int64) ([]*model.NoteListItem, error) {
 	return s.notes.ListByFolder(ctx, userID, folderID)
 }
@@ -126,7 +126,7 @@ func (s *Service) UpdateNoteMetadata(ctx context.Context, userID, noteID int64, 
 	return s.notes.Update(ctx, note)
 }
 
-// MoveNote moves a note to newFolderID (nil = root/unsorted). It:
+// MoveNote moves a note to newFolderID (nil = root). It:
 // 1. Moves the file on disk.
 // 2. Updates the note's folder_id and disk_path in DB.
 func (s *Service) MoveNote(ctx context.Context, userID, noteID int64, newFolderID *int64) error {
@@ -197,4 +197,66 @@ func (s *Service) SetShareToken(ctx context.Context, userID, noteID int64, clear
 		return nil, fmt.Errorf("set share token: %w", err)
 	}
 	return &token, nil
+}
+
+// FindNotesByTag returns all notes that have every tag in the given list (AND semantics).
+// An empty tags slice returns all notes.
+func (s *Service) FindNotesByTag(ctx context.Context, userID int64, tags []string) ([]*model.NoteListItem, error) {
+	all, err := s.notes.ListAll(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if len(tags) == 0 {
+		return all, nil
+	}
+	var out []*model.NoteListItem
+	for _, note := range all {
+		if hasAllTags(note.Tags, tags) {
+			out = append(out, note)
+		}
+	}
+	return out, nil
+}
+
+// ListAllTags returns the sorted unique set of tags in use across all notes.
+func (s *Service) ListAllTags(ctx context.Context, userID int64) ([]string, error) {
+	all, err := s.notes.ListAll(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]struct{}{}
+	for _, note := range all {
+		for _, t := range note.Tags {
+			seen[t] = struct{}{}
+		}
+	}
+	tags := make([]string, 0, len(seen))
+	for t := range seen {
+		tags = append(tags, t)
+	}
+	sortStrings(tags)
+	return tags, nil
+}
+
+// hasAllTags reports whether item contains every tag in want (case-sensitive).
+func hasAllTags(have, want []string) bool {
+	m := make(map[string]struct{}, len(have))
+	for _, t := range have {
+		m[t] = struct{}{}
+	}
+	for _, t := range want {
+		if _, ok := m[t]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+// sortStrings sorts a string slice in place.
+func sortStrings(s []string) {
+	for i := 1; i < len(s); i++ {
+		for j := i; j > 0 && s[j] < s[j-1]; j-- {
+			s[j], s[j-1] = s[j-1], s[j]
+		}
+	}
 }
