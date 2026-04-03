@@ -18,11 +18,13 @@ A self-hosted Markdown note-taking app with file-as-canonical storage. Every not
 - Full-text search with snippet highlighting
 - Tags
 - Shareable read-only note links
-- MCP server — expose your notes as tools and resources to AI assistants (Claude Desktop, Cursor, etc.)
-- API tokens for programmatic access
+- MCP server — expose your notes as tools and resources to AI assistants (Claude Desktop, Open WebUI, Cursor, etc.) with read-only or read-write token scopes
+- API tokens for programmatic access with scope control
 - Live sync — edits made directly to `.md` files on disk are detected and pushed to open browser tabs via SSE
 - Multi-theme: Auto, Light, Dark, and Catppuccin
+- Line numbers toggle in the editor toolbar; character and line count in the status bar
 - Daily journal with multi-journal support
+- Import `.md` files or `.zip` archives (folder structure preserved)
 
 ## Quick start with Docker
 

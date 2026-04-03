@@ -2,6 +2,13 @@
 
 All notable changes to thornotes are documented here.
 
+## [1.4.1.0] - 2026-04-03
+
+### Added
+- **Line count in status bar** — the editor footer now shows character count and line count (e.g. `1 234 chars · 42 lines`).
+- **Line numbers toggle** — a `#` button in the editor toolbar shows or hides line numbers. Preference is persisted in `localStorage`.
+- **MCP client setup in Account modal** — the Account modal now includes collapsible setup guides for Claude Desktop (dynamic JSON config with a Copy button) and Open WebUI (step-by-step with Docker host note).
+
 ## [1.4.0.0] - 2026-04-03
 
 ### Added
