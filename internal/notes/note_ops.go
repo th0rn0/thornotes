@@ -111,13 +111,33 @@ func (s *Service) UpdateNoteContent(ctx context.Context, userID, noteID int64, c
 	return newHash, nil
 }
 
-// UpdateNoteMetadata updates the title and tags of a note.
-func (s *Service) UpdateNoteMetadata(ctx context.Context, userID, noteID int64, title string, tags []string) error {
+// UpdateNoteMetadata updates the title and/or tags of a note.
+// When the title changes the slug is recomputed; if the slug differs the note
+// file is renamed on disk and disk_path is updated in the DB.
+func (s *Service) UpdateNoteMetadata(ctx context.Context, userID int64, userUUID string, noteID int64, title string, tags []string) error {
 	note, err := s.notes.GetByID(ctx, userID, noteID)
 	if err != nil {
 		return err
 	}
-	if title != "" {
+	if title != "" && title != note.Title {
+		newSlug := slugify(title)
+		if newSlug != note.Slug {
+			// Determine the containing folder's disk path (empty string = root).
+			var folderPath string
+			if note.FolderID != nil {
+				folder, err := s.folders.GetByID(ctx, userID, *note.FolderID)
+				if err != nil {
+					return err
+				}
+				folderPath = folder.DiskPath
+			}
+			newDiskPath := notesDiskPath(userUUID, folderPath, newSlug)
+			if err := s.fs.RenameFile(note.DiskPath, newDiskPath); err != nil {
+				return apperror.Internal("rename note file", err)
+			}
+			note.Slug = newSlug
+			note.DiskPath = newDiskPath
+		}
 		note.Title = title
 	}
 	if tags != nil {

@@ -721,7 +721,7 @@ func (h *MCPHandler) handleToolsCall(r *http.Request, req rpcRequest, user *mode
 		if args.Tags != nil {
 			newTags = args.Tags
 		}
-		if err := h.notes.UpdateNoteMetadata(ctx, userID, args.ID, newTitle, newTags); err != nil {
+		if err := h.notes.UpdateNoteMetadata(ctx, userID, userUUID, args.ID, newTitle, newTags); err != nil {
 			return rpcErr(req.ID, rpcInternalError, errorString(err))
 		}
 		return rpcOK(req.ID, toolResult(fmt.Sprintf(`{"id":%d,"title":%q,"tags":%s}`, args.ID, newTitle, mustJSON(newTags))))

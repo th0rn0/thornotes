@@ -98,7 +98,7 @@ func (h *NotesHandler) Patch(c *gin.Context) {
 	if req.Title != nil {
 		title = *req.Title
 	}
-	if err := h.svc.UpdateNoteMetadata(c.Request.Context(), user.ID, noteID, title, req.Tags); err != nil {
+	if err := h.svc.UpdateNoteMetadata(c.Request.Context(), user.ID, user.UUID, noteID, title, req.Tags); err != nil {
 		writeError(c, err)
 		return
 	}

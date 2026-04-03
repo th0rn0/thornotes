@@ -193,12 +193,13 @@ func TestService_UpdateNoteMetadata(t *testing.T) {
 	note, err := svc.CreateNote(ctx, userID, "test-uuid", nil, "Old Title", nil)
 	require.NoError(t, err)
 
-	err = svc.UpdateNoteMetadata(ctx, userID, note.ID, "New Title", []string{"tag1", "tag2"})
+	err = svc.UpdateNoteMetadata(ctx, userID, "test-uuid", note.ID, "New Title", []string{"tag1", "tag2"})
 	require.NoError(t, err)
 
 	updated, err := svc.GetNote(ctx, userID, note.ID)
 	require.NoError(t, err)
 	assert.Equal(t, "New Title", updated.Title)
+	assert.Equal(t, "new-title", updated.Slug)
 	assert.Equal(t, []string{"tag1", "tag2"}, updated.Tags)
 }
 
@@ -344,7 +345,7 @@ func TestService_UpdateNoteMetadata_NoteNotFound(t *testing.T) {
 	svc, userID := newTestStack(t)
 	ctx := context.Background()
 
-	err := svc.UpdateNoteMetadata(ctx, userID, 99999, "title", nil)
+	err := svc.UpdateNoteMetadata(ctx, userID, "test-uuid", 99999, "title", nil)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, apperror.ErrNotFound)
 }

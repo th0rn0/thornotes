@@ -151,9 +151,9 @@ func (r *NoteRepo) Update(ctx context.Context, n *model.Note) error {
 	}
 
 	res, err := r.db.ExecContext(ctx, `
-		UPDATE notes SET title = ?, slug = ?, tags = ?, updated_at = UTC_TIMESTAMP()
+		UPDATE notes SET title = ?, slug = ?, disk_path = ?, tags = ?, updated_at = UTC_TIMESTAMP()
 		WHERE id = ? AND user_id = ?`,
-		n.Title, n.Slug, string(tagsJSON), n.ID, n.UserID,
+		n.Title, n.Slug, n.DiskPath, string(tagsJSON), n.ID, n.UserID,
 	)
 	if err != nil {
 		return fmt.Errorf("update note: %w", err)
