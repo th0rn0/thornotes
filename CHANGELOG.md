@@ -2,6 +2,12 @@
 
 All notable changes to thornotes are documented here.
 
+## [1.5.1.0] - 2026-04-03
+
+### Added
+- **Rename note from context menu** — right-clicking a note in the sidebar now shows a Rename option (alongside Open and Delete). Prompts for a new title, PATCHes the note, and updates the titlebar and tree immediately.
+- **Delete key shortcut** — pressing Delete when a note is open (and no text field or the editor has focus) confirms and deletes the current note. Safe: the shortcut is suppressed when the cursor is inside the CM6 editor, the title input, the tags field, or any other text input.
+
 ## [1.5.0.0] - 2026-04-03
 
 ### Added

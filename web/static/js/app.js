@@ -1364,16 +1364,51 @@ document.getElementById('tree').addEventListener('contextmenu', function(e) {
   menu.style.top = Math.min(e.clientY, window.innerHeight - mh) + 'px';
 });
 
-document.getElementById('note-ctx-menu').addEventListener('click', function(e) {
+document.getElementById('note-ctx-menu').addEventListener('click', async function(e) {
   const btn = e.target.closest('[data-ctx-action]');
   if (!btn) return;
   hideNoteCtxMenu();
   if (btn.dataset.ctxAction === 'open') openNote(ctxNoteId);
+  if (btn.dataset.ctxAction === 'rename') {
+    const newTitle = prompt(`Rename note "${ctxNoteTitle}":`, ctxNoteTitle);
+    if (!newTitle || newTitle.trim() === ctxNoteTitle) return;
+    try {
+      await api('PATCH', `/api/v1/notes/${ctxNoteId}`, { title: newTitle.trim() });
+      if (currentNote && currentNote.id === ctxNoteId) {
+        currentNote.title = newTitle.trim();
+        document.getElementById('note-title').value = newTitle.trim();
+        document.title = 'thornotes \u2014 ' + newTitle.trim();
+      }
+      await loadFolderTree();
+    } catch (err) {
+      showNotification(err.message || 'Failed to rename note', true);
+    }
+  }
   if (btn.dataset.ctxAction === 'delete') deleteNote(ctxNoteId, ctxNoteTitle);
 });
 
 document.addEventListener('click', hideNoteCtxMenu);
-document.addEventListener('keydown', function(e) { if (e.key === 'Escape') { hideNoteCtxMenu(); hideFolderCtxMenu(); } });
+
+// Returns true when the focused element is a text input, select, or contenteditable
+// (i.e. the CM6 editor, the title field, the tags field, or any modal input).
+function isTextInputFocused() {
+  const el = document.activeElement;
+  if (!el || el === document.body) return false;
+  const tag = el.tagName.toLowerCase();
+  return tag === 'input' || tag === 'textarea' || tag === 'select' || el.isContentEditable;
+}
+
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') { hideNoteCtxMenu(); hideFolderCtxMenu(); return; }
+  // Delete key: delete the currently open note, but never while typing.
+  if (e.key === 'Delete' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+    if (isTextInputFocused()) return;
+    if (currentNote) {
+      e.preventDefault();
+      deleteNote(currentNote.id, currentNote.title);
+    }
+  }
+});
 
 // Right-click context menu on folder labels in the tree
 let ctxFolderId = null, ctxFolderName = null;
