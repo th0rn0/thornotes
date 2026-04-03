@@ -2,6 +2,15 @@
 
 All notable changes to thornotes are documented here.
 
+## [1.5.3.0] - 2026-04-03
+
+### Fixed
+- **No spurious auto-save on note open** — opening a note no longer immediately triggers an auto-save. A `_loadingNote` flag suppresses the CodeMirror `updateListener` while content is loaded programmatically, so the save timer only fires on genuine user edits.
+
+### Tests
+- Added 29 integration tests covering: move note, move folder, import handler, PATCH-returns-slug, and account token CRUD.
+- `UpdateNoteMetadata` service tests verify slug recomputation and disk path rename on title change.
+
 ## [1.5.2.0] - 2026-04-03
 
 ### Changed
