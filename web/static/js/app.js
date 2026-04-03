@@ -172,7 +172,7 @@ function connectEventSource() {
             editor && editor.setValue(fresh.content);
             document.getElementById('note-title').value = fresh.title;
             document.getElementById('note-tags').value = (fresh.tags || []).join(', ');
-            document.getElementById('note-stats').textContent = `${fresh.content.length} chars`;
+            document.getElementById('note-stats').textContent = noteStats(fresh.content);
           }
         }
       } catch { /* note may have been deleted */ }
@@ -468,7 +468,7 @@ async function openNote(noteId, { historyMode = 'push' } = {}) {
   document.getElementById('note-title').value = note.title;
   document.getElementById('note-tags').value = (note.tags || []).join(', ');
   document.getElementById('note-path').textContent = note.disk_path;
-  document.getElementById('note-stats').textContent = `${note.content.length} chars`;
+  document.getElementById('note-stats').textContent = noteStats(note.content);
   setSaveStatus('saved');
 
   if (!editor) {
@@ -490,6 +490,7 @@ async function openNote(noteId, { historyMode = 'push' } = {}) {
       '<button data-cmd="link" title="Insert link">Link</button>' +
       '<span class="cm6-sep"></span>' +
       '<button data-cmd="preview" title="Toggle preview" id="cm6-preview-btn">Preview</button>' +
+      '<button data-cmd="lineNumbers" title="Toggle line numbers" id="cm6-linenumbers-btn">&#x23;</button>' +
       '<span class="cm6-sep"></span>' +
       '<button data-cmd="undo" title="Undo">↩</button>' +
       '<button data-cmd="redo" title="Redo">↪</button>';
@@ -531,10 +532,15 @@ async function openNote(noteId, { historyMode = 'push' } = {}) {
       const cmd = btn.dataset.cmd;
       if (cmd === 'preview') {
         toggleEditorPreview();
+      } else if (cmd === 'lineNumbers') {
+        toggleLineNumbers();
       } else if (CM6.commands[cmd]) {
         CM6.commands[cmd](editor);
       }
     });
+
+    // Restore line numbers preference on first editor init.
+    applyLineNumbers();
   }
 
   editor.setValue(note.content);
@@ -643,6 +649,26 @@ function closeFolderView() {
   document.getElementById('folder-view').style.display = 'none';
 }
 
+function noteStats(content) {
+  const chars = content.length;
+  const lines = content === '' ? 0 : content.split('\n').length;
+  return `${chars} chars · ${lines} line${lines !== 1 ? 's' : ''}`;
+}
+
+function applyLineNumbers() {
+  const on = localStorage.getItem('lineNumbers') === 'true';
+  const mount = document.querySelector('.cm6-mount');
+  const btn = document.getElementById('cm6-linenumbers-btn');
+  if (mount) mount.classList.toggle('show-line-numbers', on);
+  if (btn) btn.classList.toggle('active', on);
+}
+
+function toggleLineNumbers() {
+  const on = localStorage.getItem('lineNumbers') !== 'true';
+  localStorage.setItem('lineNumbers', on);
+  applyLineNumbers();
+}
+
 function toggleEditorPreview() {
   editorPreviewOpen = !editorPreviewOpen;
   const mount = document.querySelector('.cm6-mount');
@@ -665,7 +691,7 @@ function onEditorChange() {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(autoSave, AUTO_SAVE_DELAY_MS);
   const content = editor.getValue();
-  document.getElementById('note-stats').textContent = `${content.length} chars`;
+  document.getElementById('note-stats').textContent = noteStats(content);
   if (editorPreviewOpen && editorPreviewEl) {
     renderPreviewContent(content);
   }
