@@ -183,6 +183,37 @@ All three endpoints require `Authorization: Bearer <token>`.
 
 **Available resources:** Every note is exposed as a `note://<id>` resource (MIME type `text/markdown`).
 
+### Claude Desktop
+
+Edit `claude_desktop_config.json` (Mac: `~/Library/Application Support/Claude/claude_desktop_config.json`, Windows: `%APPDATA%\Claude\claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "thornotes": {
+      "url": "http://localhost:8080/mcp",
+      "headers": {
+        "Authorization": "Bearer <your-token>"
+      }
+    }
+  }
+}
+```
+
+Restart Claude Desktop after saving.
+
+### Open WebUI
+
+Open WebUI supports MCP servers via its built-in tools pipeline.
+
+1. Go to **Admin Panel → Tools → Add Tool**
+2. Set **Type** to `MCP`
+3. Set **Server URL** to `http://localhost:8080/mcp`
+4. Add a custom header: `Authorization: Bearer <your-token>`
+5. Save — the thornotes tools appear in the tool selector for any model
+
+If your Open WebUI instance runs in Docker, use the Docker host address instead of `localhost` (e.g. `http://host.docker.internal:8080/mcp` on Mac/Windows, or the Docker bridge IP on Linux).
+
 ## Importing notes
 
 thornotes can import existing Markdown files via the **↑ Import** button in the sidebar, or directly via the API.
