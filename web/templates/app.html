@@ -252,8 +252,20 @@ body {
 .token-copy-btn { font-size: 11px; border: 1px solid var(--border); background: var(--bg-btn); color: var(--text-btn); padding: 5px 10px; cursor: pointer; min-height: 30px; }
 .token-copy-btn:hover { background: var(--bg-hover); }
 .account-section-title { font-size: 11px; color: var(--text-mute); text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 8px; }
-.mcp-info { font-size: 11px; color: var(--text-mute); background: var(--bg-hover); border: 1px solid var(--border-light); padding: 8px 10px; margin-bottom: 12px; line-height: 1.6; }
+.mcp-info { font-size: 11px; color: var(--text-mute); background: var(--bg-hover); border: 1px solid var(--border-light); padding: 8px 10px; margin-bottom: 8px; line-height: 1.6; }
 .mcp-info code { font-family: monospace; font-size: 10px; background: var(--bg-active-folder); color: var(--text); padding: 1px 4px; word-break: break-all; }
+.mcp-client { border: 1px solid var(--border-light); margin-bottom: 6px; }
+.mcp-client summary { font-size: 11px; font-weight: 600; padding: 7px 10px; cursor: pointer; list-style: none; display: flex; align-items: center; gap: 6px; user-select: none; }
+.mcp-client summary::before { content: '▶'; font-size: 9px; color: var(--text-dim); transition: transform 0.15s; }
+.mcp-client[open] summary::before { transform: rotate(90deg); }
+.mcp-client summary:hover { background: var(--bg-hover); }
+.mcp-client-body { padding: 8px 10px; border-top: 1px solid var(--border-light); }
+.mcp-snippet { font-family: monospace; font-size: 10px; background: var(--bg-active-folder); border: 1px solid var(--border-light); padding: 8px; margin: 0 0 6px; white-space: pre; overflow-x: auto; line-height: 1.5; color: var(--text); }
+.mcp-copy-btn { font-size: 10px; border: 1px solid var(--border); background: var(--bg-btn); color: var(--text-btn); padding: 4px 10px; cursor: pointer; min-height: 26px; }
+.mcp-copy-btn:hover { background: var(--bg-hover); }
+.mcp-steps { margin: 0; padding-left: 18px; font-size: 11px; color: var(--text-mute); line-height: 1.8; }
+.mcp-steps code { font-family: monospace; font-size: 10px; background: var(--bg-active-folder); color: var(--text); padding: 1px 4px; word-break: break-all; }
+.mcp-docker-note { font-size: 10px; color: var(--text-dim); margin-top: 6px; line-height: 1.5; }
 
 /* HISTORY MODAL */
 .history-modal { max-width: 720px; padding: 0; overflow: hidden; display: flex; flex-direction: column; max-height: 90vh; }
@@ -515,10 +527,29 @@ body {
     <h2>Account</h2>
     <p class="account-section-title">MCP Server</p>
     <div class="mcp-info">
-      Connect AI assistants (Claude, Cursor, etc.) to your notes via the Model Context Protocol.<br>
-      Endpoint: <code id="mcp-endpoint"></code><br>
-      Add to your MCP client config with <code>Authorization: Bearer &lt;token&gt;</code>.
+      Connect AI assistants to your notes via the Model Context Protocol.<br>
+      Endpoint: <code id="mcp-endpoint"></code>
     </div>
+    <details class="mcp-client" id="mcp-client-claude">
+      <summary>Claude Desktop</summary>
+      <div class="mcp-client-body">
+        <pre class="mcp-snippet" id="mcp-snippet-claude"></pre>
+        <button class="mcp-copy-btn" id="mcp-copy-claude">Copy config</button>
+      </div>
+    </details>
+    <details class="mcp-client" style="margin-bottom:12px">
+      <summary>Open WebUI</summary>
+      <div class="mcp-client-body">
+        <ol class="mcp-steps">
+          <li>Go to <strong>Admin Panel → Tools → Add Tool</strong></li>
+          <li>Set <strong>Type</strong> to <code>MCP</code></li>
+          <li>Set <strong>Server URL</strong> to <code id="mcp-endpoint-owui"></code></li>
+          <li>Add header: <code>Authorization: Bearer &lt;your-token&gt;</code></li>
+          <li>Save — thornotes tools appear in the model tool selector</li>
+        </ol>
+        <p class="mcp-docker-note">Running in Docker? Use <code>host.docker.internal</code> instead of <code>localhost</code> on Mac/Windows, or the bridge IP on Linux.</p>
+      </div>
+    </details>
     <p class="account-section-title">API Tokens</p>
     <div class="token-list" id="token-list"></div>
     <div id="token-reveal-area" style="display:none" class="token-new-reveal">

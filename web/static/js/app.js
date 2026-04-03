@@ -899,7 +899,11 @@ async function api(method, path, body) {
 let _newTokenValue = '';
 
 async function showAccountModal() {
-  document.getElementById('mcp-endpoint').textContent = location.origin + '/mcp';
+  const endpoint = location.origin + '/mcp';
+  document.getElementById('mcp-endpoint').textContent = endpoint;
+  document.getElementById('mcp-endpoint-owui').textContent = endpoint;
+  document.getElementById('mcp-snippet-claude').textContent =
+    JSON.stringify({ mcpServers: { thornotes: { url: endpoint, headers: { Authorization: 'Bearer <your-token>' } } } }, null, 2);
   document.getElementById('token-reveal-area').style.display = 'none';
   document.getElementById('new-token-name').value = '';
   _newTokenValue = '';
@@ -1271,6 +1275,10 @@ document.getElementById('new-folder-submit-btn').addEventListener('click', submi
 // Account modal
 document.getElementById('account-modal').addEventListener('click', function(e) { if (e.target === this) closeAccountModal(); });
 document.querySelector('.token-copy-btn').addEventListener('click', copyNewToken);
+document.getElementById('mcp-copy-claude').addEventListener('click', function() {
+  const text = document.getElementById('mcp-snippet-claude').textContent;
+  copyToClipboard(text).then(() => showNotification('Config copied to clipboard')).catch(() => {});
+});
 document.getElementById('create-token-btn').addEventListener('click', createToken);
 document.getElementById('account-done-btn').addEventListener('click', closeAccountModal);
 
