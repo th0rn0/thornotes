@@ -2,6 +2,20 @@
 
 All notable changes to thornotes are documented here.
 
+## [1.5.0.0] - 2026-04-03
+
+### Added
+- **Full CRUD MCP tools** — 7 new write tools expand the MCP server from read-heavy to fully operational:
+  - `rename_note` — update a note's title and/or tags without touching content
+  - `move_note` — move a note to a different folder or to root
+  - `delete_note` — permanently delete a note and its `.md` file
+  - `create_folder` — create a folder (optionally nested)
+  - `rename_folder` — rename a folder; all descendant disk paths updated atomically
+  - `move_folder` — reparent a folder; circular moves are rejected
+  - `delete_folder` — delete a folder and all its contents
+- **Detailed tool descriptions** — every MCP tool now carries a rich description: what it returns, field names and types, common workflows, constraints, and tips. Makes the tools self-documenting for any LLM.
+- All new write tools respect the API token read/write scope introduced in v1.4.0.0.
+
 ## [1.4.1.0] - 2026-04-03
 
 ### Added

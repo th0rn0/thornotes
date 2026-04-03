@@ -335,74 +335,189 @@ func (h *MCPHandler) handleInitialize(req rpcRequest) rpcResponse {
 
 func (h *MCPHandler) handleToolsList(req rpcRequest) rpcResponse {
 	tools := []mcpTool{
+		// ── Read tools ────────────────────────────────────────────────────────────
 		{
 			Name: "list_notes",
-			Description: "List note metadata (id, title, slug, tags, folder_id, updated_at) across all folders. " +
-				"Omit folder_id to get all notes. Use get_note to fetch the full markdown content of a specific note.",
+			Description: "List note metadata for all notes or notes in a specific folder. " +
+				"Returns an array of objects with fields: id (integer), title (string), slug (string), " +
+				"tags (array of strings), folder_id (integer or null for root notes), updated_at (ISO 8601 timestamp). " +
+				"Does NOT return note content — call get_note with the id to fetch the full markdown. " +
+				"Typical workflow: call list_notes to discover what exists, then get_note for the ones you need.",
 			InputSchema: jsonSchema(map[string]any{
-				"folder_id": prop("integer", "Filter to a specific folder. Omit to list all notes across all folders."),
+				"folder_id": prop("integer", "Only return notes inside this folder. Omit or pass null to return all notes across every folder including root."),
 			}, nil),
 		},
 		{
 			Name: "get_note",
-			Description: "Fetch the complete markdown content of a note by ID. " +
-				"Returns title, content, tags, folder_id, and metadata. " +
-				"Use list_notes or search_notes to find note IDs.",
+			Description: "Fetch the complete content and metadata of a single note. " +
+				"Returns: id, title, slug, content (full markdown text), tags, folder_id (null = root), " +
+				"content_hash (used internally for concurrency), created_at, updated_at. " +
+				"Use search_notes or list_notes first to find the note id. " +
+				"Example: get_note({id: 42}) returns the entire markdown document stored in the note.",
 			InputSchema: jsonSchema(map[string]any{
-				"id": prop("integer", "Note ID (from list_notes or search_notes results)"),
+				"id": prop("integer", "The note ID. Obtain this from list_notes, search_notes, or find_notes_by_tag."),
 			}, []string{"id"}),
 		},
 		{
 			Name: "search_notes",
-			Description: "Full-text search across all notes. Returns id, title, snippet, and tags. " +
-				"Use get_note to read full content. Optionally filter by one or more tags.",
+			Description: "Full-text search across the title and content of all notes. " +
+				"Returns an array with fields: id, title, snippet (a short excerpt around the match), tags, folder_id, updated_at. " +
+				"Optionally narrow results to notes that carry ALL of the specified tags. " +
+				"Call get_note with the returned id to read the full document. " +
+				"Tip: use search_notes when you know keywords; use find_notes_by_tag when you know the tags.",
 			InputSchema: jsonSchema(map[string]any{
-				"query": prop("string", "Full-text search query"),
-				"tags":  map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Filter results to notes with all of these tags"},
+				"query": prop("string", "The text to search for. Searches both note titles and body content."),
+				"tags":  strArrayProp("Optionally restrict results to notes that have ALL of these tags (AND logic). Omit to search all notes."),
 			}, []string{"query"}),
 		},
 		{
 			Name: "list_folders",
-			Description: "Get the full folder hierarchy (id, parent_id, name, note_count). " +
-				"Use folder IDs with list_notes or create_note to scope to a specific folder.",
+			Description: "Return the complete folder tree. " +
+				"Each folder has: id, parent_id (null for top-level folders), name, note_count (direct child notes only), disk_path (internal). " +
+				"Use the id field when calling create_note, move_note, create_folder, or move_folder. " +
+				"Use parent_id to reconstruct the hierarchy: folders with parent_id=null are top-level.",
 			InputSchema: jsonSchema(nil, nil),
 		},
 		{
-			Name:        "find_folders",
-			Description: "Find folders by name (case-insensitive substring match). Returns matching folders with id, parent_id, name, and note_count. Useful for locating a folder before scoping list_notes or create_note to it.",
+			Name: "find_folders",
+			Description: "Case-insensitive substring search across folder names. " +
+				"Returns matching folders with id, parent_id, name, and note_count. " +
+				"Use this to locate a folder ID when you know part of its name but not the exact ID. " +
+				"Example: find_folders({query: \"work\"}) returns 'Work', 'Work/Projects', 'Homework', etc.",
 			InputSchema: jsonSchema(map[string]any{
-				"query": prop("string", "Substring to search for in folder names"),
+				"query": prop("string", "Substring to search for in folder names. Case-insensitive."),
 			}, []string{"query"}),
 		},
 		{
-			Name:        "find_notes_by_tag",
-			Description: "List all notes that have every specified tag (AND semantics). Returns id, title, slug, tags, folder_id, and updated_at. Use get_note for full content. Unlike search_notes, no full-text query is required.",
+			Name: "find_notes_by_tag",
+			Description: "Return all notes that carry every one of the specified tags (AND semantics). " +
+				"Returns id, title, slug, tags, folder_id, updated_at — call get_note for full content. " +
+				"Unlike search_notes, no text query is needed; this is a pure tag filter. " +
+				"Use list_tags first to see what tags exist. " +
+				"Example: find_notes_by_tag({tags: [\"recipe\", \"vegetarian\"]}) returns only notes tagged with both.",
 			InputSchema: jsonSchema(map[string]any{
-				"tags": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "One or more tags — only notes with ALL of these tags are returned"},
+				"tags": strArrayProp("One or more tag strings. Only notes that have ALL of these tags are returned."),
 			}, []string{"tags"}),
 		},
 		{
-			Name:        "list_tags",
-			Description: "Return all unique tags in use across all notes, sorted alphabetically. Useful for discovering available tags before calling find_notes_by_tag.",
+			Name: "list_tags",
+			Description: "Return every unique tag in use across all of your notes, sorted alphabetically. " +
+				"Use this to discover available tags before calling find_notes_by_tag or search_notes with a tag filter. " +
+				"Returns a plain array of strings: [\"cooking\", \"ideas\", \"project\", ...].",
 			InputSchema: jsonSchema(nil, nil),
 		},
+		// ── Note write tools ──────────────────────────────────────────────────────
 		{
 			Name: "create_note",
-			Description: "Create a new markdown note. Returns the created note including its ID.",
+			Description: "Create a new markdown note and optionally set its content, folder, and tags in one call. " +
+				"Returns the full note object including the newly assigned id. " +
+				"Requires a readwrite API token. " +
+				"The note file is written to disk immediately as a .md file in the notes directory. " +
+				"If folder_id is omitted the note is created in the root (unfiled) area. " +
+				"Titles must be unique within the same folder; duplicate titles return a 409 conflict error.",
 			InputSchema: jsonSchema(map[string]any{
-				"title":     prop("string", "Note title (1–500 characters)"),
-				"content":   prop("string", "Initial markdown content (optional)"),
-				"folder_id": prop("integer", "Folder to create the note in (optional, defaults to root)"),
-				"tags":      map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Tags to apply to the note"},
+				"title":     prop("string", "Note title. Required. Must be unique within the target folder. 1–500 characters."),
+				"content":   prop("string", "Initial markdown body. Optional — the note is created empty if omitted."),
+				"folder_id": prop("integer", "ID of the folder to create the note in. Omit or pass null to create at root."),
+				"tags":      strArrayProp("Tags to attach to the note. Optional."),
 			}, []string{"title"}),
 		},
 		{
 			Name: "update_note",
-			Description: "Replace the markdown content of an existing note. Handles optimistic concurrency automatically.",
+			Description: "Replace the full markdown content of an existing note. " +
+				"Fetches the current content hash automatically to handle optimistic concurrency — no need to pass a hash. " +
+				"Returns the updated note object with the new content_hash. " +
+				"Requires a readwrite API token. " +
+				"This replaces the entire content; it does not append or patch. To append, call get_note first, modify the text, then call update_note with the combined result. " +
+				"Title and tags are not changed by this tool — use rename_note to update those.",
 			InputSchema: jsonSchema(map[string]any{
-				"id":      prop("integer", "Note ID"),
-				"content": prop("string", "New full markdown content (replaces existing content)"),
+				"id":      prop("integer", "ID of the note to update."),
+				"content": prop("string", "New markdown content. This replaces the entire existing content."),
 			}, []string{"id", "content"}),
+		},
+		{
+			Name: "rename_note",
+			Description: "Update the title and/or tags of a note without touching its content. " +
+				"Returns the updated note metadata (does not include full content — call get_note if you need it). " +
+				"Requires a readwrite API token. " +
+				"Supply at least one of title or tags. Passing an empty tags array clears all tags.",
+			InputSchema: jsonSchema(map[string]any{
+				"id":    prop("integer", "ID of the note to update."),
+				"title": prop("string", "New title. Must be unique within the note's current folder. Omit to leave unchanged."),
+				"tags":  strArrayProp("New tag list. Replaces all existing tags. Pass [] to clear tags. Omit to leave unchanged."),
+			}, []string{"id"}),
+		},
+		{
+			Name: "move_note",
+			Description: "Move a note to a different folder, or to the root (unfiled) area. " +
+				"Renames the underlying .md file on disk to reflect the new location. " +
+				"Returns a confirmation message with the note id and new folder id. " +
+				"Requires a readwrite API token. " +
+				"Use list_folders or find_folders to find the target folder id.",
+			InputSchema: jsonSchema(map[string]any{
+				"id":        prop("integer", "ID of the note to move."),
+				"folder_id": prop("integer", "ID of the destination folder. Pass null or omit to move the note to root."),
+			}, []string{"id"}),
+		},
+		{
+			Name: "delete_note",
+			Description: "Permanently delete a note and remove its .md file from disk. This cannot be undone. " +
+				"Returns a confirmation message. " +
+				"Requires a readwrite API token. " +
+				"If git history is enabled on this server, the deletion is recorded as a git commit.",
+			InputSchema: jsonSchema(map[string]any{
+				"id": prop("integer", "ID of the note to delete."),
+			}, []string{"id"}),
+		},
+		// ── Folder write tools ────────────────────────────────────────────────────
+		{
+			Name: "create_folder",
+			Description: "Create a new folder, optionally nested inside an existing folder. " +
+				"Returns the created folder object with id, parent_id, name, and disk_path. " +
+				"Requires a readwrite API token. " +
+				"Folder names must be unique within the same parent. " +
+				"To build a nested path like 'Work/Projects/Q3', create each level in order: " +
+				"first create 'Work', then create 'Projects' with parent_id set to Work's id, and so on. " +
+				"Or use find_folders to check whether the intermediate folders already exist.",
+			InputSchema: jsonSchema(map[string]any{
+				"name":      prop("string", "Folder name. Must be unique within the parent (or root). Cannot contain / or .."),
+				"parent_id": prop("integer", "ID of the parent folder. Omit or pass null to create a top-level folder."),
+			}, []string{"name"}),
+		},
+		{
+			Name: "rename_folder",
+			Description: "Rename an existing folder. " +
+				"Renames the directory on disk and updates all affected note disk paths in the database atomically. " +
+				"Returns a confirmation message. " +
+				"Requires a readwrite API token. " +
+				"The new name must be unique among siblings (folders with the same parent).",
+			InputSchema: jsonSchema(map[string]any{
+				"id":   prop("integer", "ID of the folder to rename."),
+				"name": prop("string", "New name for the folder. Cannot contain / or .."),
+			}, []string{"id", "name"}),
+		},
+		{
+			Name: "move_folder",
+			Description: "Move a folder to a different parent folder, or to the top level. " +
+				"All descendant folders and notes move with it; disk paths are updated atomically. " +
+				"Returns a confirmation message. " +
+				"Requires a readwrite API token. " +
+				"Circular moves are rejected (e.g. moving a folder into one of its own descendants). " +
+				"Use list_folders to inspect the current hierarchy before moving.",
+			InputSchema: jsonSchema(map[string]any{
+				"id":        prop("integer", "ID of the folder to move."),
+				"parent_id": prop("integer", "ID of the new parent folder. Pass null or omit to move the folder to the top level."),
+			}, []string{"id"}),
+		},
+		{
+			Name: "delete_folder",
+			Description: "Delete a folder and everything inside it — all notes and subfolders are permanently removed. This cannot be undone. " +
+				"Returns a confirmation message. " +
+				"Requires a readwrite API token. " +
+				"The corresponding directory and all .md files inside it are deleted from disk.",
+			InputSchema: jsonSchema(map[string]any{
+				"id": prop("integer", "ID of the folder to delete."),
+			}, []string{"id"}),
 		},
 	}
 	return rpcOK(req.ID, map[string]any{"tools": tools})
@@ -410,8 +525,15 @@ func (h *MCPHandler) handleToolsList(req rpcRequest) rpcResponse {
 
 // writeTools is the set of tool names that require readwrite scope.
 var writeTools = map[string]bool{
-	"create_note": true,
-	"update_note": true,
+	"create_note":   true,
+	"update_note":   true,
+	"rename_note":   true,
+	"move_note":     true,
+	"delete_note":   true,
+	"create_folder": true,
+	"rename_folder": true,
+	"move_folder":   true,
+	"delete_folder": true,
 }
 
 func (h *MCPHandler) handleToolsCall(r *http.Request, req rpcRequest, user *model.User) rpcResponse {
@@ -575,6 +697,121 @@ func (h *MCPHandler) handleToolsCall(r *http.Request, req rpcRequest, user *mode
 		text, _ := json.Marshal(tags)
 		return rpcOK(req.ID, toolResult(string(text)))
 
+	case "rename_note":
+		var args struct {
+			ID    int64    `json:"id"`
+			Title *string  `json:"title"`
+			Tags  []string `json:"tags"`
+		}
+		if err := json.Unmarshal(params.Arguments, &args); err != nil || args.ID == 0 {
+			return rpcErr(req.ID, rpcInvalidParams, "id is required")
+		}
+		if args.Title == nil && args.Tags == nil {
+			return rpcErr(req.ID, rpcInvalidParams, "at least one of title or tags must be provided")
+		}
+		note, err := h.notes.GetNote(ctx, userID, args.ID)
+		if err != nil {
+			return rpcErr(req.ID, rpcInternalError, errorString(err))
+		}
+		newTitle := note.Title
+		if args.Title != nil {
+			newTitle = *args.Title
+		}
+		newTags := note.Tags
+		if args.Tags != nil {
+			newTags = args.Tags
+		}
+		if err := h.notes.UpdateNoteMetadata(ctx, userID, args.ID, newTitle, newTags); err != nil {
+			return rpcErr(req.ID, rpcInternalError, errorString(err))
+		}
+		return rpcOK(req.ID, toolResult(fmt.Sprintf(`{"id":%d,"title":%q,"tags":%s}`, args.ID, newTitle, mustJSON(newTags))))
+
+	case "move_note":
+		var args struct {
+			ID       int64  `json:"id"`
+			FolderID *int64 `json:"folder_id"`
+		}
+		if err := json.Unmarshal(params.Arguments, &args); err != nil || args.ID == 0 {
+			return rpcErr(req.ID, rpcInvalidParams, "id is required")
+		}
+		if err := h.notes.MoveNote(ctx, userID, userUUID, args.ID, args.FolderID); err != nil {
+			return rpcErr(req.ID, rpcInternalError, errorString(err))
+		}
+		folderMsg := "root"
+		if args.FolderID != nil {
+			folderMsg = fmt.Sprintf("folder %d", *args.FolderID)
+		}
+		return rpcOK(req.ID, toolResult(fmt.Sprintf("note %d moved to %s", args.ID, folderMsg)))
+
+	case "delete_note":
+		var args struct {
+			ID int64 `json:"id"`
+		}
+		if err := json.Unmarshal(params.Arguments, &args); err != nil || args.ID == 0 {
+			return rpcErr(req.ID, rpcInvalidParams, "id is required")
+		}
+		if err := h.notes.DeleteNote(ctx, userID, args.ID); err != nil {
+			return rpcErr(req.ID, rpcInternalError, errorString(err))
+		}
+		return rpcOK(req.ID, toolResult(fmt.Sprintf("note %d deleted", args.ID)))
+
+	case "create_folder":
+		var args struct {
+			Name     string `json:"name"`
+			ParentID *int64 `json:"parent_id"`
+		}
+		if err := json.Unmarshal(params.Arguments, &args); err != nil || args.Name == "" {
+			return rpcErr(req.ID, rpcInvalidParams, "name is required")
+		}
+		folder, err := h.notes.CreateFolder(ctx, userID, userUUID, args.ParentID, args.Name)
+		if err != nil {
+			return rpcErr(req.ID, rpcInternalError, errorString(err))
+		}
+		text, _ := json.Marshal(folder)
+		return rpcOK(req.ID, toolResult(string(text)))
+
+	case "rename_folder":
+		var args struct {
+			ID   int64  `json:"id"`
+			Name string `json:"name"`
+		}
+		if err := json.Unmarshal(params.Arguments, &args); err != nil || args.ID == 0 || args.Name == "" {
+			return rpcErr(req.ID, rpcInvalidParams, "id and name are required")
+		}
+		if err := h.notes.RenameFolder(ctx, userID, userUUID, args.ID, args.Name); err != nil {
+			return rpcErr(req.ID, rpcInternalError, errorString(err))
+		}
+		return rpcOK(req.ID, toolResult(fmt.Sprintf("folder %d renamed to %q", args.ID, args.Name)))
+
+	case "move_folder":
+		var args struct {
+			ID       int64  `json:"id"`
+			ParentID *int64 `json:"parent_id"`
+		}
+		if err := json.Unmarshal(params.Arguments, &args); err != nil || args.ID == 0 {
+			return rpcErr(req.ID, rpcInvalidParams, "id is required")
+		}
+		if err := h.notes.MoveFolder(ctx, userID, userUUID, args.ID, args.ParentID); err != nil {
+			return rpcErr(req.ID, rpcInternalError, errorString(err))
+		}
+		parentMsg := "top level"
+		if args.ParentID != nil {
+			parentMsg = fmt.Sprintf("folder %d", *args.ParentID)
+		}
+		return rpcOK(req.ID, toolResult(fmt.Sprintf("folder %d moved to %s", args.ID, parentMsg)))
+
+	case "delete_folder":
+		var args struct {
+			ID int64 `json:"id"`
+		}
+		if err := json.Unmarshal(params.Arguments, &args); err != nil || args.ID == 0 {
+			return rpcErr(req.ID, rpcInvalidParams, "id is required")
+		}
+		if err := h.notes.DeleteFolder(ctx, userID, args.ID); err != nil {
+			return rpcErr(req.ID, rpcInternalError, errorString(err))
+		}
+		return rpcOK(req.ID, toolResult(fmt.Sprintf("folder %d and all its contents deleted", args.ID)))
+
 	default:
 		return rpcErr(req.ID, rpcMethodNotFound, "unknown tool: "+params.Name)
 	}
@@ -662,6 +899,19 @@ func jsonSchema(properties map[string]any, required []string) map[string]any {
 
 func prop(typ, description string) map[string]any {
 	return map[string]any{"type": typ, "description": description}
+}
+
+func strArrayProp(description string) map[string]any {
+	return map[string]any{
+		"type":        "array",
+		"items":       map[string]any{"type": "string"},
+		"description": description,
+	}
+}
+
+func mustJSON(v any) string {
+	b, _ := json.Marshal(v)
+	return string(b)
 }
 
 func itoa(n int64) string {

@@ -18,7 +18,7 @@ A self-hosted Markdown note-taking app with file-as-canonical storage. Every not
 - Full-text search with snippet highlighting
 - Tags
 - Shareable read-only note links
-- MCP server — expose your notes as tools and resources to AI assistants (Claude Desktop, Open WebUI, Cursor, etc.) with read-only or read-write token scopes
+- MCP server — full CRUD over notes and folders via 14 tools; read-only or read-write token scopes; works with Claude Desktop, Open WebUI, Cursor, and any MCP-compatible client
 - API tokens for programmatic access with scope control
 - Live sync — edits made directly to `.md` files on disk are detected and pushed to open browser tabs via SSE
 - Multi-theme: Auto, Light, Dark, and Catppuccin
@@ -179,11 +179,37 @@ thornotes implements the [MCP Streamable HTTP transport (2025-03-26)](https://sp
 
 All three endpoints require `Authorization: Bearer <token>`.
 
-**Token scopes:** When creating an API token you can choose **Read + Write** (default) or **Read only**. Read-only tokens can call all read tools (`list_notes`, `get_note`, etc.) but `create_note` and `update_note` return `403 Forbidden`.
+**Token scopes:** When creating an API token you can choose **Read + Write** (default) or **Read only**. Read-only tokens can call all read tools but write tools return `403 Forbidden`.
 
-**Available tools:** `list_notes`, `get_note`, `search_notes`, `create_note`, `update_note`, `list_folders`, `find_folders`, `find_notes_by_tag`, `list_tags`
+### Available tools
 
-**Available resources:** Every note is exposed as a `note://<id>` resource (MIME type `text/markdown`).
+#### Read tools (all token scopes)
+
+| Tool | Description |
+|------|-------------|
+| `list_notes` | List note metadata (id, title, tags, folder_id, updated_at). Pass `folder_id` to scope to one folder, or omit for all notes. |
+| `get_note` | Fetch the full markdown content and metadata of a note by ID. |
+| `search_notes` | Full-text search across titles and bodies. Optional `tags` filter (AND logic). Returns id, title, snippet. |
+| `list_folders` | Return the complete folder hierarchy (id, parent_id, name, note_count). |
+| `find_folders` | Case-insensitive substring search over folder names. |
+| `find_notes_by_tag` | Return notes that carry ALL of the specified tags. No text query needed. |
+| `list_tags` | Return all tags in use, sorted alphabetically. |
+
+#### Write tools (readwrite tokens only)
+
+| Tool | Description |
+|------|-------------|
+| `create_note` | Create a note with title, optional content, optional folder_id, optional tags. Returns the new note with its id. |
+| `update_note` | Replace the full markdown content of a note. Optimistic concurrency handled automatically. |
+| `rename_note` | Update a note's title and/or tags without touching content. |
+| `move_note` | Move a note to a different folder (or to root). |
+| `delete_note` | Permanently delete a note and its .md file. |
+| `create_folder` | Create a folder, optionally nested inside an existing folder. |
+| `rename_folder` | Rename a folder (updates all descendant disk paths atomically). |
+| `move_folder` | Move a folder to a different parent (circular moves are rejected). |
+| `delete_folder` | Delete a folder and all its contents permanently. |
+
+**Available resources:** Every note is also exposed as a `note://<id>` resource (MIME type `text/markdown`) for clients that use resource reads instead of tool calls.
 
 ### Claude Desktop
 
