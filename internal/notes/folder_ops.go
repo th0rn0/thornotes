@@ -9,7 +9,7 @@ import (
 )
 
 // CreateFolder creates a folder on disk and in the DB.
-func (s *Service) CreateFolder(ctx context.Context, userID int64, parentID *int64, name string) (*model.Folder, error) {
+func (s *Service) CreateFolder(ctx context.Context, userID int64, userUUID string, parentID *int64, name string) (*model.Folder, error) {
 	if len(name) == 0 || len(name) > 255 {
 		return nil, apperror.BadRequest("folder name must be 1–255 characters")
 	}
@@ -26,7 +26,7 @@ func (s *Service) CreateFolder(ctx context.Context, userID int64, parentID *int6
 		parentPath = parent.DiskPath
 	}
 
-	diskPath := folderDiskPath(userID, parentPath, name)
+	diskPath := folderDiskPath(userUUID, parentPath, name)
 
 	if err := s.fs.EnsureDir(diskPath); err != nil {
 		return nil, apperror.Internal("create folder on disk", err)
@@ -45,7 +45,7 @@ func (s *Service) CreateFolder(ctx context.Context, userID int64, parentID *int6
 // 1. Renames the OS directory.
 // 2. Updates the folder's own disk_path in DB.
 // 3. Updates all descendant folder and note disk_paths in DB.
-func (s *Service) RenameFolder(ctx context.Context, userID, folderID int64, newName string) error {
+func (s *Service) RenameFolder(ctx context.Context, userID int64, userUUID string, folderID int64, newName string) error {
 	if len(newName) == 0 || len(newName) > 255 {
 		return apperror.BadRequest("folder name must be 1–255 characters")
 	}
@@ -69,7 +69,7 @@ func (s *Service) RenameFolder(ctx context.Context, userID, folderID int64, newN
 	}
 
 	oldDiskPath := folder.DiskPath
-	newDiskPath := folderDiskPath(userID, parentPath, newName)
+	newDiskPath := folderDiskPath(userUUID, parentPath, newName)
 
 	// Rename on disk first.
 	if err := s.fs.RenameDir(oldDiskPath, newDiskPath); err != nil {
@@ -98,7 +98,7 @@ func (s *Service) RenameFolder(ctx context.Context, userID, folderID int64, newN
 // 2. Renames the OS directory.
 // 3. Updates the folder's parent_id and disk_path in DB.
 // 4. Cascades disk_path updates to all descendants.
-func (s *Service) MoveFolder(ctx context.Context, userID, folderID int64, newParentID *int64) error {
+func (s *Service) MoveFolder(ctx context.Context, userID int64, userUUID string, folderID int64, newParentID *int64) error {
 	folder, err := s.folders.GetByID(ctx, userID, folderID)
 	if err != nil {
 		return err
@@ -132,7 +132,7 @@ func (s *Service) MoveFolder(ctx context.Context, userID, folderID int64, newPar
 	}
 
 	oldDiskPath := folder.DiskPath
-	newDiskPath := folderDiskPath(userID, newParentPath, folder.Name)
+	newDiskPath := folderDiskPath(userUUID, newParentPath, folder.Name)
 
 	if err := s.fs.RenameDir(oldDiskPath, newDiskPath); err != nil {
 		return apperror.Internal("move folder on disk", err)

@@ -31,7 +31,7 @@ func newFakeAPITokenRepo() *fakeAPITokenRepo {
 	return &fakeAPITokenRepo{byRaw: make(map[string]*model.APIToken)}
 }
 
-func (r *fakeAPITokenRepo) Create(_ context.Context, userID int64, name, token string) (*model.APIToken, error) {
+func (r *fakeAPITokenRepo) Create(_ context.Context, userID int64, name, token, scope string) (*model.APIToken, error) {
 	if r.err != nil {
 		return nil, r.err
 	}
@@ -46,6 +46,7 @@ func (r *fakeAPITokenRepo) Create(_ context.Context, userID int64, name, token s
 		Name:      name,
 		Token:     token,
 		Prefix:    prefix,
+		Scope:     scope,
 		CreatedAt: time.Now(),
 	}
 	r.tokens = append(r.tokens, t)
@@ -127,7 +128,7 @@ func TestListTokens_Empty(t *testing.T) {
 func TestListTokens_WithTokens(t *testing.T) {
 	user := &model.User{ID: 1, Username: "alice"}
 	repo := newFakeAPITokenRepo()
-	_, err := repo.Create(context.Background(), 1, "CI", "tn_tokenvalue123")
+	_, err := repo.Create(context.Background(), 1, "CI", "tn_tokenvalue123", "readwrite")
 	require.NoError(t, err)
 
 	r := newAccountRouter(user, repo)
@@ -225,7 +226,7 @@ func TestCreateToken_RepoError(t *testing.T) {
 func TestDeleteToken_Success(t *testing.T) {
 	user := &model.User{ID: 1, Username: "alice"}
 	repo := newFakeAPITokenRepo()
-	tok, err := repo.Create(context.Background(), 1, "CI", "tn_deletetest123")
+	tok, err := repo.Create(context.Background(), 1, "CI", "tn_deletetest123", "readwrite")
 	require.NoError(t, err)
 
 	r := newAccountRouter(user, repo)
@@ -261,7 +262,7 @@ func TestDeleteToken_NotFound(t *testing.T) {
 func TestDeleteToken_RepoError(t *testing.T) {
 	user := &model.User{ID: 1, Username: "alice"}
 	repo := newFakeAPITokenRepo()
-	tok, err := repo.Create(context.Background(), 1, "CI", "tn_deleteerr")
+	tok, err := repo.Create(context.Background(), 1, "CI", "tn_deleteerr", "readwrite")
 	require.NoError(t, err)
 	repo.err = apperror.Internal("db error", fmt.Errorf("write failed"))
 

@@ -56,22 +56,22 @@ func TestSlugify_LongStringTruncated(t *testing.T) {
 }
 
 func TestNotesDiskPath_WithFolder(t *testing.T) {
-	path := notesDiskPath(42, "42/Work", "my-note")
-	assert.Equal(t, "42/Work/my-note.md", path)
+	path := notesDiskPath("abc-uuid", "abc-uuid/Work", "my-note")
+	assert.Equal(t, "abc-uuid/Work/my-note.md", path)
 }
 
 func TestNotesDiskPath_NoFolder(t *testing.T) {
-	path := notesDiskPath(42, "", "my-note")
-	assert.Equal(t, fmt.Sprintf("42%cmy-note.md", '/'), path)
-	assert.Equal(t, "42/my-note.md", path)
+	path := notesDiskPath("abc-uuid", "", "my-note")
+	assert.Equal(t, fmt.Sprintf("abc-uuid%cmy-note.md", '/'), path)
+	assert.Equal(t, "abc-uuid/my-note.md", path)
 }
 
 func TestFolderDiskPath_WithParent(t *testing.T) {
-	path := folderDiskPath(42, "42/Projects", "Sub")
-	assert.Equal(t, "42/Projects/Sub", path)
+	path := folderDiskPath("abc-uuid", "abc-uuid/Projects", "Sub")
+	assert.Equal(t, "abc-uuid/Projects/Sub", path)
 }
 
 func TestFolderDiskPath_NoParent(t *testing.T) {
-	path := folderDiskPath(42, "", "Work")
-	assert.Equal(t, "42/Work", path)
+	path := folderDiskPath("abc-uuid", "", "Work")
+	assert.Equal(t, "abc-uuid/Work", path)
 }

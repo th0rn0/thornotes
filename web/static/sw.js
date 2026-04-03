@@ -1,7 +1,7 @@
 /* thornotes — service worker */
 'use strict';
 
-const CACHE = 'thornotes-v1.3.0.0';
+const CACHE = 'thornotes-v1.4.0.0';
 
 const STATIC_ASSETS = [
   '/',

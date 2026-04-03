@@ -46,7 +46,8 @@ func (h *AccountHandler) CreateToken(c *gin.Context) {
 	user := ginUser(c)
 
 	var body struct {
-		Name string `json:"name"`
+		Name  string `json:"name"`
+		Scope string `json:"scope"`
 	}
 	if err := readJSON(c, &body); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
@@ -55,6 +56,13 @@ func (h *AccountHandler) CreateToken(c *gin.Context) {
 	if body.Name == "" {
 		body.Name = "Default"
 	}
+	if body.Scope == "" {
+		body.Scope = "readwrite"
+	}
+	if body.Scope != "read" && body.Scope != "readwrite" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "scope must be \"read\" or \"readwrite\""})
+		return
+	}
 
 	raw, err := generateAPIToken()
 	if err != nil {
@@ -62,7 +70,7 @@ func (h *AccountHandler) CreateToken(c *gin.Context) {
 		return
 	}
 
-	token, err := h.tokens.Create(c.Request.Context(), user.ID, body.Name, raw)
+	token, err := h.tokens.Create(c.Request.Context(), user.ID, body.Name, raw, body.Scope)
 	if err != nil {
 		writeError(c, err)
 		return

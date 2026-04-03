@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"fmt"
 	"net/http"
 	"time"
 
@@ -37,7 +38,7 @@ func (h *JournalsHandler) Create(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	journal, err := h.svc.CreateJournal(c.Request.Context(), user.ID, req.Name)
+	journal, err := h.svc.CreateJournal(c.Request.Context(), user.ID, user.UUID, req.Name)
 	if err != nil {
 		writeError(c, err)
 		return
@@ -71,13 +72,13 @@ func (h *JournalsHandler) Today(c *gin.Context) {
 	if tz := c.Query("tz"); tz != "" {
 		parsed, err := time.LoadLocation(tz)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid timezone"})
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("unrecognised timezone %q — use an IANA timezone name, e.g. \"America/New_York\", \"Europe/London\", or \"Asia/Tokyo\"", tz)})
 			return
 		}
 		loc = parsed
 	}
 
-	note, err := h.svc.TodayEntry(c.Request.Context(), user.ID, id, loc)
+	note, err := h.svc.TodayEntry(c.Request.Context(), user.ID, user.UUID, id, loc)
 	if err != nil {
 		writeError(c, err)
 		return

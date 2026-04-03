@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/th0rn0/thornotes/internal/apperror"
@@ -62,7 +63,8 @@ func (s *Service) Register(ctx context.Context, username, password string) (*mod
 		return nil, apperror.Internal("hash password", err)
 	}
 
-	user, err := s.users.Create(ctx, username, string(hash))
+	userUUID := uuid.New().String()
+	user, err := s.users.Create(ctx, username, string(hash), userUUID)
 	if err != nil {
 		return nil, err // already an AppError from repo
 	}

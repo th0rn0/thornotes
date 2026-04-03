@@ -86,18 +86,18 @@ func (s *Service) Reconcile(ctx context.Context, userID int64) error {
 }
 
 // notesDiskPath returns the relative disk path for a note.
-// e.g. "{userID}/Work/my-note.md"
-func notesDiskPath(userID int64, folderDiskPath, slug string) string {
+// e.g. "{userUUID}/Work/my-note.md"
+func notesDiskPath(userUUID string, folderDiskPath, slug string) string {
 	if folderDiskPath == "" {
-		return filepath.Join(fmt.Sprintf("%d", userID), slug+".md")
+		return filepath.Join(userUUID, slug+".md")
 	}
 	return filepath.Join(folderDiskPath, slug+".md")
 }
 
 // folderDiskPath returns the relative disk path for a folder.
-func folderDiskPath(userID int64, parentDiskPath, name string) string {
+func folderDiskPath(userUUID string, parentDiskPath, name string) string {
 	if parentDiskPath == "" {
-		return filepath.Join(fmt.Sprintf("%d", userID), name)
+		return filepath.Join(userUUID, name)
 	}
 	return filepath.Join(parentDiskPath, name)
 }

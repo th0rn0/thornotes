@@ -86,6 +86,12 @@ func main() {
 		journalRepo = sqlite.NewJournalRepo(pool.ReadDB, pool.WriteDB)
 	}
 
+	// Backfill UUIDs for any users created before v1.4.0.0.
+	if err := db.EnsureUserUUIDs(context.Background(), pool.WriteDB, cfg.NotesRoot); err != nil {
+		log.Error().Err(err).Msg("uuid migration")
+		os.Exit(1)
+	}
+
 	// Build file store.
 	fs, err := notes.NewFileStore(cfg.NotesRoot)
 	if err != nil {

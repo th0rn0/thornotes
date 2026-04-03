@@ -1,0 +1,1 @@
+ALTER TABLE api_tokens ADD COLUMN scope VARCHAR(20) NOT NULL DEFAULT 'readwrite';

@@ -18,13 +18,13 @@ func TestService_MoveNote_ToFolder(t *testing.T) {
 	svc, userID := newTestStack(t)
 	ctx := context.Background()
 
-	folder, err := svc.CreateFolder(ctx, userID, nil, "Dest")
+	folder, err := svc.CreateFolder(ctx, userID, "test-uuid", nil, "Dest")
 	require.NoError(t, err)
 
-	note, err := svc.CreateNote(ctx, userID, nil, "Root Note", nil)
+	note, err := svc.CreateNote(ctx, userID, "test-uuid", nil, "Root Note", nil)
 	require.NoError(t, err)
 
-	require.NoError(t, svc.MoveNote(ctx, userID, note.ID, &folder.ID))
+	require.NoError(t, svc.MoveNote(ctx, userID, "test-uuid", note.ID, &folder.ID))
 
 	moved, err := svc.GetNote(ctx, userID, note.ID)
 	require.NoError(t, err)
@@ -36,13 +36,13 @@ func TestService_MoveNote_ToRoot(t *testing.T) {
 	svc, userID := newTestStack(t)
 	ctx := context.Background()
 
-	folder, err := svc.CreateFolder(ctx, userID, nil, "SomeFolder")
+	folder, err := svc.CreateFolder(ctx, userID, "test-uuid", nil, "SomeFolder")
 	require.NoError(t, err)
 
-	note, err := svc.CreateNote(ctx, userID, &folder.ID, "Folder Note", nil)
+	note, err := svc.CreateNote(ctx, userID, "test-uuid", &folder.ID, "Folder Note", nil)
 	require.NoError(t, err)
 
-	require.NoError(t, svc.MoveNote(ctx, userID, note.ID, nil))
+	require.NoError(t, svc.MoveNote(ctx, userID, "test-uuid", note.ID, nil))
 
 	moved, err := svc.GetNote(ctx, userID, note.ID)
 	require.NoError(t, err)
@@ -54,14 +54,14 @@ func TestService_MoveNote_NoOp_SameFolder(t *testing.T) {
 	svc, userID := newTestStack(t)
 	ctx := context.Background()
 
-	folder, err := svc.CreateFolder(ctx, userID, nil, "Folder")
+	folder, err := svc.CreateFolder(ctx, userID, "test-uuid", nil, "Folder")
 	require.NoError(t, err)
 
-	note, err := svc.CreateNote(ctx, userID, &folder.ID, "Note", nil)
+	note, err := svc.CreateNote(ctx, userID, "test-uuid", &folder.ID, "Note", nil)
 	require.NoError(t, err)
 
 	// Move to same folder — should not error.
-	require.NoError(t, svc.MoveNote(ctx, userID, note.ID, &folder.ID))
+	require.NoError(t, svc.MoveNote(ctx, userID, "test-uuid", note.ID, &folder.ID))
 
 	moved, err := svc.GetNote(ctx, userID, note.ID)
 	require.NoError(t, err)
@@ -73,15 +73,15 @@ func TestService_MoveNote_FileOnDiskMoved(t *testing.T) {
 	svc, userID := stack.svc, stack.userID
 	ctx := context.Background()
 
-	folder, err := svc.CreateFolder(ctx, userID, nil, "Target")
+	folder, err := svc.CreateFolder(ctx, userID, "test-uuid", nil, "Target")
 	require.NoError(t, err)
 
-	note, err := svc.CreateNote(ctx, userID, nil, "File Note", nil)
+	note, err := svc.CreateNote(ctx, userID, "test-uuid", nil, "File Note", nil)
 	require.NoError(t, err)
 	_, err = svc.UpdateNoteContent(ctx, userID, note.ID, "content", note.ContentHash)
 	require.NoError(t, err)
 
-	require.NoError(t, svc.MoveNote(ctx, userID, note.ID, &folder.ID))
+	require.NoError(t, svc.MoveNote(ctx, userID, "test-uuid", note.ID, &folder.ID))
 
 	moved, err := svc.GetNote(ctx, userID, note.ID)
 	require.NoError(t, err)
@@ -100,12 +100,12 @@ func TestService_MoveFolder_ToAnotherFolder(t *testing.T) {
 	svc, userID := newTestStack(t)
 	ctx := context.Background()
 
-	parent, err := svc.CreateFolder(ctx, userID, nil, "Parent")
+	parent, err := svc.CreateFolder(ctx, userID, "test-uuid", nil, "Parent")
 	require.NoError(t, err)
-	child, err := svc.CreateFolder(ctx, userID, nil, "Child")
+	child, err := svc.CreateFolder(ctx, userID, "test-uuid", nil, "Child")
 	require.NoError(t, err)
 
-	require.NoError(t, svc.MoveFolder(ctx, userID, child.ID, &parent.ID))
+	require.NoError(t, svc.MoveFolder(ctx, userID, "test-uuid", child.ID, &parent.ID))
 
 	// Verify child now has parent as its parent.
 	stack := newTestStackFull(t) // separate stack for read-back via DB
@@ -128,12 +128,12 @@ func TestService_MoveFolder_ToRoot(t *testing.T) {
 	svc, userID := newTestStack(t)
 	ctx := context.Background()
 
-	parent, err := svc.CreateFolder(ctx, userID, nil, "Parent")
+	parent, err := svc.CreateFolder(ctx, userID, "test-uuid", nil, "Parent")
 	require.NoError(t, err)
-	child, err := svc.CreateFolder(ctx, userID, &parent.ID, "Child")
+	child, err := svc.CreateFolder(ctx, userID, "test-uuid", &parent.ID, "Child")
 	require.NoError(t, err)
 
-	require.NoError(t, svc.MoveFolder(ctx, userID, child.ID, nil))
+	require.NoError(t, svc.MoveFolder(ctx, userID, "test-uuid", child.ID, nil))
 
 	tree, err := svc.FolderTree(ctx, userID)
 	require.NoError(t, err)
@@ -150,22 +150,22 @@ func TestService_MoveFolder_NoOp_SameParent(t *testing.T) {
 	svc, userID := newTestStack(t)
 	ctx := context.Background()
 
-	parent, err := svc.CreateFolder(ctx, userID, nil, "Parent")
+	parent, err := svc.CreateFolder(ctx, userID, "test-uuid", nil, "Parent")
 	require.NoError(t, err)
-	child, err := svc.CreateFolder(ctx, userID, &parent.ID, "Child")
+	child, err := svc.CreateFolder(ctx, userID, "test-uuid", &parent.ID, "Child")
 	require.NoError(t, err)
 
-	require.NoError(t, svc.MoveFolder(ctx, userID, child.ID, &parent.ID))
+	require.NoError(t, svc.MoveFolder(ctx, userID, "test-uuid", child.ID, &parent.ID))
 }
 
 func TestService_MoveFolder_IntoItself_ReturnsError(t *testing.T) {
 	svc, userID := newTestStack(t)
 	ctx := context.Background()
 
-	folder, err := svc.CreateFolder(ctx, userID, nil, "Folder")
+	folder, err := svc.CreateFolder(ctx, userID, "test-uuid", nil, "Folder")
 	require.NoError(t, err)
 
-	err = svc.MoveFolder(ctx, userID, folder.ID, &folder.ID)
+	err = svc.MoveFolder(ctx, userID, "test-uuid", folder.ID, &folder.ID)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "itself")
 }
@@ -174,13 +174,13 @@ func TestService_MoveFolder_IntoDescendant_ReturnsError(t *testing.T) {
 	svc, userID := newTestStack(t)
 	ctx := context.Background()
 
-	parent, err := svc.CreateFolder(ctx, userID, nil, "Parent")
+	parent, err := svc.CreateFolder(ctx, userID, "test-uuid", nil, "Parent")
 	require.NoError(t, err)
-	child, err := svc.CreateFolder(ctx, userID, &parent.ID, "Child")
+	child, err := svc.CreateFolder(ctx, userID, "test-uuid", &parent.ID, "Child")
 	require.NoError(t, err)
 
 	// Try to move parent into its own child.
-	err = svc.MoveFolder(ctx, userID, parent.ID, &child.ID)
+	err = svc.MoveFolder(ctx, userID, "test-uuid", parent.ID, &child.ID)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "descendant")
 }
@@ -190,14 +190,14 @@ func TestService_MoveFolder_CascadesDiskPath(t *testing.T) {
 	svc, userID := stack.svc, stack.userID
 	ctx := context.Background()
 
-	parent, err := svc.CreateFolder(ctx, userID, nil, "NewParent")
+	parent, err := svc.CreateFolder(ctx, userID, "test-uuid", nil, "NewParent")
 	require.NoError(t, err)
-	folder, err := svc.CreateFolder(ctx, userID, nil, "Folder")
+	folder, err := svc.CreateFolder(ctx, userID, "test-uuid", nil, "Folder")
 	require.NoError(t, err)
-	note, err := svc.CreateNote(ctx, userID, &folder.ID, "Note", nil)
+	note, err := svc.CreateNote(ctx, userID, "test-uuid", &folder.ID, "Note", nil)
 	require.NoError(t, err)
 
-	require.NoError(t, svc.MoveFolder(ctx, userID, folder.ID, &parent.ID))
+	require.NoError(t, svc.MoveFolder(ctx, userID, "test-uuid", folder.ID, &parent.ID))
 
 	moved, err := svc.GetNote(ctx, userID, note.ID)
 	require.NoError(t, err)

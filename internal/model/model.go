@@ -4,9 +4,13 @@ import "time"
 
 type User struct {
 	ID           int64     `json:"id"`
+	UUID         string    `json:"uuid"`
 	Username     string    `json:"username"`
 	PasswordHash string    `json:"-"`
 	CreatedAt    time.Time `json:"created_at"`
+	// TokenScope is set by BearerMiddleware when a request is authenticated via
+	// an API token. Empty string means session auth (full access).
+	TokenScope string `json:"-"`
 }
 
 type Session struct {
@@ -101,6 +105,7 @@ type APIToken struct {
 	Name        string     `json:"name"`
 	Token       string     `json:"token,omitempty"` // only set on creation
 	Prefix      string     `json:"prefix"`          // first 8 chars for display
+	Scope       string     `json:"scope"`           // "readwrite" or "read"
 	CreatedAt   time.Time  `json:"created_at"`
 	LastUsedAt  *time.Time `json:"last_used_at"`
 }

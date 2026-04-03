@@ -1,0 +1,2 @@
+ALTER TABLE users ADD COLUMN uuid TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_uuid ON users (uuid) WHERE uuid IS NOT NULL;

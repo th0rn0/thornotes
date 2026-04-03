@@ -2,6 +2,15 @@
 
 All notable changes to thornotes are documented here.
 
+## [1.4.0.0] - 2026-04-03
+
+### Added
+- **Import** — new `POST /api/v1/import` endpoint and sidebar "↑ Import" button. Accepts a single `.md` file (imported as a root-level note) or a `.zip` archive of Markdown files (folders in the ZIP become folders in thornotes, up to 10 MB). Duplicate note titles in the same folder are silently skipped.
+- **Folder right-click context menu** — right-clicking a folder in the sidebar now shows a context menu with Rename and Delete actions, mirroring the existing note context menu.
+- **UUID-based disk paths** — user data directories are now stored under a UUID (`notes/<uuid>/`) rather than the integer database ID. A startup migration backfills UUIDs for existing users and renames their directories atomically.
+- **API token scopes** — API tokens used for MCP can now be created with "Read + Write" (default) or "Read only" scope. The scope badge is shown in the token list. Read-only tokens reject write tools (`create_note`, `update_note`) with a `403` response.
+- **Descriptive error messages** — timezone errors now include an example IANA timezone name; invalid ID parameters report the expected format; all service layer errors carry human-readable messages.
+
 ## [1.3.0.0] - 2026-04-03
 
 ### Added

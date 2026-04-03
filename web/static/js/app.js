@@ -922,8 +922,10 @@ async function refreshTokenList() {
   for (const t of tokens) {
     const created = new Date(t.created_at).toLocaleDateString();
     const used = t.last_used_at ? new Date(t.last_used_at).toLocaleDateString() : 'never';
+    const scope = t.scope || 'readwrite';
+    const scopeLabel = scope === 'read' ? 'Read only' : 'Read+Write';
     html += `<div class="token-item">
-      <span class="token-name">${esc(t.name)}</span>
+      <span class="token-name">${esc(t.name)}<span class="token-scope-badge ${esc(scope)}">${scopeLabel}</span></span>
       <span class="token-prefix" title="Token prefix">${esc(t.prefix)}…</span>
       <span class="token-date">created ${created} · used ${used}</span>
       <button class="token-revoke" data-action="revoke-token" data-token-id="${t.id}">Revoke</button>
@@ -934,8 +936,9 @@ async function refreshTokenList() {
 
 async function createToken() {
   const name = document.getElementById('new-token-name').value.trim() || 'Default';
+  const scope = document.getElementById('new-token-scope').value || 'readwrite';
   try {
-    const token = await api('POST', '/api/v1/account/tokens', { name });
+    const token = await api('POST', '/api/v1/account/tokens', { name, scope });
     _newTokenValue = token.token;
     document.getElementById('token-reveal-value').textContent = token.token;
     document.getElementById('token-reveal-area').style.display = '';
@@ -1336,7 +1339,58 @@ document.getElementById('note-ctx-menu').addEventListener('click', function(e) {
 });
 
 document.addEventListener('click', hideNoteCtxMenu);
-document.addEventListener('keydown', function(e) { if (e.key === 'Escape') hideNoteCtxMenu(); });
+document.addEventListener('keydown', function(e) { if (e.key === 'Escape') { hideNoteCtxMenu(); hideFolderCtxMenu(); } });
+
+// Right-click context menu on folder labels in the tree
+let ctxFolderId = null, ctxFolderName = null;
+
+function hideFolderCtxMenu() {
+  document.getElementById('folder-ctx-menu').style.display = 'none';
+}
+
+document.getElementById('tree').addEventListener('contextmenu', function(e) {
+  const el = e.target.closest('[data-action="select-folder"]');
+  if (!el) return;
+  e.preventDefault();
+  ctxFolderId = Number(el.dataset.folderId);
+  ctxFolderName = el.title || el.textContent.trim();
+  const menu = document.getElementById('folder-ctx-menu');
+  menu.style.display = 'block';
+  const mw = 140, mh = 80;
+  menu.style.left = Math.min(e.clientX, window.innerWidth - mw) + 'px';
+  menu.style.top = Math.min(e.clientY, window.innerHeight - mh) + 'px';
+});
+
+document.getElementById('folder-ctx-menu').addEventListener('click', async function(e) {
+  const btn = e.target.closest('[data-folder-ctx-action]');
+  if (!btn) return;
+  hideFolderCtxMenu();
+  if (btn.dataset.folderCtxAction === 'rename') {
+    const newName = prompt(`Rename folder "${ctxFolderName}":`, ctxFolderName);
+    if (!newName || newName.trim() === ctxFolderName) return;
+    try {
+      await api('PATCH', `/api/v1/folders/${ctxFolderId}`, { name: newName.trim() });
+      await loadFolderTree();
+    } catch (err) {
+      showNotification(err.message || 'Failed to rename folder', true);
+    }
+  }
+  if (btn.dataset.folderCtxAction === 'delete') {
+    if (!confirm(`Delete folder "${ctxFolderName}" and all its contents?\n\nThis cannot be undone.`)) return;
+    try {
+      await api('DELETE', `/api/v1/folders/${ctxFolderId}`);
+      if (currentFolderId === ctxFolderId) {
+        currentFolderId = null;
+        closeFolderView();
+      }
+      await loadFolderTree();
+    } catch (err) {
+      showNotification(err.message || 'Failed to delete folder', true);
+    }
+  }
+});
+
+document.addEventListener('click', hideFolderCtxMenu);
 
 // Token list — event delegation for dynamically rendered revoke buttons
 document.getElementById('token-list').addEventListener('click', function(e) {
@@ -1352,6 +1406,54 @@ document.getElementById('history-restore-btn').addEventListener('click', restore
 document.getElementById('history-list').addEventListener('click', function(e) {
   const entry = e.target.closest('.history-entry');
   if (entry) selectHistoryEntry(entry.dataset.sha);
+});
+
+// Import modal
+document.getElementById('import-btn').addEventListener('click', function() {
+  document.getElementById('import-file-input').value = '';
+  document.getElementById('import-status').textContent = '';
+  document.getElementById('import-modal').style.display = 'flex';
+});
+
+document.getElementById('import-modal').addEventListener('click', function(e) { if (e.target === this) closeImportModal(); });
+document.getElementById('import-cancel-btn').addEventListener('click', closeImportModal);
+
+function closeImportModal() {
+  document.getElementById('import-modal').style.display = 'none';
+}
+
+document.getElementById('import-confirm-btn').addEventListener('click', async function() {
+  const fileInput = document.getElementById('import-file-input');
+  const statusEl = document.getElementById('import-status');
+  if (!fileInput.files || fileInput.files.length === 0) {
+    statusEl.style.color = '#c00';
+    statusEl.textContent = 'Please select a file.';
+    return;
+  }
+  const file = fileInput.files[0];
+  const formData = new FormData();
+  formData.append('file', file);
+  statusEl.style.color = 'var(--text-muted)';
+  statusEl.textContent = 'Importing…';
+  this.disabled = true;
+  try {
+    const res = await fetch('/api/v1/import', {
+      method: 'POST',
+      headers: { 'X-CSRF-Token': csrfToken },
+      body: formData,
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || 'Import failed');
+    statusEl.style.color = '#2e7d32';
+    statusEl.textContent = `Imported ${body.notes_created} note${body.notes_created !== 1 ? 's' : ''}` +
+      (body.folders_created ? ` and ${body.folders_created} folder${body.folders_created !== 1 ? 's' : ''}` : '') + '.';
+    await loadFolderTree();
+  } catch (err) {
+    statusEl.style.color = '#c00';
+    statusEl.textContent = err.message || 'Import failed.';
+  } finally {
+    this.disabled = false;
+  }
 });
 
 // Disk full banner

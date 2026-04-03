@@ -37,7 +37,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		return
 	}
 
-	h.notesSvc.CreateGettingStartedNote(c.Request.Context(), user.ID)
+	h.notesSvc.CreateGettingStartedNote(c.Request.Context(), user.ID, user.UUID)
 
 	c.JSON(http.StatusCreated, gin.H{
 		"id":         user.ID,

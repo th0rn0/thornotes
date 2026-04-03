@@ -177,9 +177,35 @@ thornotes implements the [MCP Streamable HTTP transport (2025-03-26)](https://sp
 
 All three endpoints require `Authorization: Bearer <token>`.
 
+**Token scopes:** When creating an API token you can choose **Read + Write** (default) or **Read only**. Read-only tokens can call all read tools (`list_notes`, `get_note`, etc.) but `create_note` and `update_note` return `403 Forbidden`.
+
 **Available tools:** `list_notes`, `get_note`, `search_notes`, `create_note`, `update_note`, `list_folders`, `find_folders`, `find_notes_by_tag`, `list_tags`
 
 **Available resources:** Every note is exposed as a `note://<id>` resource (MIME type `text/markdown`).
+
+## Importing notes
+
+thornotes can import existing Markdown files via the **↑ Import** button in the sidebar, or directly via the API.
+
+```
+POST /api/v1/import
+Content-Type: multipart/form-data
+```
+
+| File type | Behaviour |
+|-----------|-----------|
+| `.md` | Imported as a single root-level note. The filename (minus `.md`) becomes the title. |
+| `.zip` | Each `.md` file inside is imported as a note. Directories in the ZIP become folders. Non-`.md` files are silently skipped. Duplicate titles within the same folder are skipped. |
+
+Maximum upload size: **10 MB**.
+
+**Response:**
+
+```json
+{ "notes_created": 5, "folders_created": 2 }
+```
+
+Requires an active session (same auth as the browser app) and a valid CSRF token (`X-CSRF-Token` header, obtained from `GET /api/v1/csrf`).
 
 ## LLM context endpoint
 

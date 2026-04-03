@@ -89,8 +89,8 @@ Available tools: ` + "`list_notes`" + `, ` + "`get_note`" + `, ` + "`search_note
 
 // CreateGettingStartedNote creates the welcome note for a new user.
 // It is idempotent — if the note already exists the call is a no-op.
-func (s *Service) CreateGettingStartedNote(ctx context.Context, userID int64) {
-	_, err := s.CreateNote(ctx, userID, nil, "Getting Started", nil)
+func (s *Service) CreateGettingStartedNote(ctx context.Context, userID int64, userUUID string) {
+	_, err := s.CreateNote(ctx, userID, userUUID, nil, "Getting Started", nil)
 	if err != nil {
 		if errors.Is(err, apperror.ErrConflict) {
 			return // already exists, that's fine

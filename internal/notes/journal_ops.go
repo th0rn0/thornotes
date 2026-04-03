@@ -12,13 +12,13 @@ import (
 
 // CreateJournal creates a new journal and its root folder on disk.
 // Journal names must be valid folder names (1–255 chars, no path separators).
-func (s *Service) CreateJournal(ctx context.Context, userID int64, name string) (*model.Journal, error) {
+func (s *Service) CreateJournal(ctx context.Context, userID int64, userUUID string, name string) (*model.Journal, error) {
 	if len(name) == 0 || len(name) > 255 {
 		return nil, apperror.BadRequest("journal name must be 1–255 characters")
 	}
 
-	// Create the root folder for this journal (e.g. "1/Personal Journal").
-	_, err := s.CreateFolder(ctx, userID, nil, name)
+	// Create the root folder for this journal (e.g. "{uuid}/Personal Journal").
+	_, err := s.CreateFolder(ctx, userID, userUUID, nil, name)
 	if err != nil {
 		// Conflict on folder means a folder already exists with this name —
 		// still try to create the journal record so users can re-attach.
@@ -51,11 +51,11 @@ func (s *Service) DeleteJournal(ctx context.Context, userID, journalID int64) er
 //
 //	{journalName}/{year}/{month}/YYYY-MM-DD.md
 //
-// e.g. "Personal Journal/2026/04/2026-04-01.md" for user 1.
+// e.g. "Personal Journal/2026/04/2026-04-01.md".
 //
 // The note is auto-tagged with "journal entry" and the journal name.
 // loc determines which calendar day counts as "today"; pass time.UTC if unknown.
-func (s *Service) TodayEntry(ctx context.Context, userID, journalID int64, loc *time.Location) (*model.Note, error) {
+func (s *Service) TodayEntry(ctx context.Context, userID int64, userUUID string, journalID int64, loc *time.Location) (*model.Note, error) {
 	j, err := s.journals.GetByID(ctx, userID, journalID)
 	if err != nil {
 		return nil, err
@@ -67,21 +67,21 @@ func (s *Service) TodayEntry(ctx context.Context, userID, journalID int64, loc *
 	dateSlug := today.Format("2006-01-02")
 
 	// Ensure root journal folder exists.
-	rootFolder, err := s.ensureFolder(ctx, userID, nil, j.Name)
+	rootFolder, err := s.ensureFolder(ctx, userID, userUUID, nil, j.Name)
 	if err != nil {
 		return nil, fmt.Errorf("ensure journal root folder: %w", err)
 	}
 
 	// Ensure year subfolder.
 	rootID := rootFolder.ID
-	yearFolder, err := s.ensureFolder(ctx, userID, &rootID, year)
+	yearFolder, err := s.ensureFolder(ctx, userID, userUUID, &rootID, year)
 	if err != nil {
 		return nil, fmt.Errorf("ensure journal year folder: %w", err)
 	}
 
 	// Ensure month subfolder.
 	yearID := yearFolder.ID
-	monthFolder, err := s.ensureFolder(ctx, userID, &yearID, month)
+	monthFolder, err := s.ensureFolder(ctx, userID, userUUID, &yearID, month)
 	if err != nil {
 		return nil, fmt.Errorf("ensure journal month folder: %w", err)
 	}
@@ -98,12 +98,12 @@ func (s *Service) TodayEntry(ctx context.Context, userID, journalID int64, loc *
 
 	// Create today's entry.
 	tags := []string{"journal entry", j.Name}
-	return s.CreateNote(ctx, userID, &monthID, dateSlug, tags)
+	return s.CreateNote(ctx, userID, userUUID, &monthID, dateSlug, tags)
 }
 
 // ensureFolder finds or creates a folder. It first looks up the expected disk_path;
 // if not found it creates the folder.
-func (s *Service) ensureFolder(ctx context.Context, userID int64, parentID *int64, name string) (*model.Folder, error) {
+func (s *Service) ensureFolder(ctx context.Context, userID int64, userUUID string, parentID *int64, name string) (*model.Folder, error) {
 	var parentPath string
 	if parentID != nil {
 		parent, err := s.folders.GetByID(ctx, userID, *parentID)
@@ -112,7 +112,7 @@ func (s *Service) ensureFolder(ctx context.Context, userID int64, parentID *int6
 		}
 		parentPath = parent.DiskPath
 	}
-	diskPath := folderDiskPath(userID, parentPath, name)
+	diskPath := folderDiskPath(userUUID, parentPath, name)
 
 	existing, err := s.folders.GetByDiskPath(ctx, diskPath)
 	if err == nil {
@@ -122,5 +122,5 @@ func (s *Service) ensureFolder(ctx context.Context, userID int64, parentID *int6
 		return nil, err
 	}
 
-	return s.CreateFolder(ctx, userID, parentID, name)
+	return s.CreateFolder(ctx, userID, userUUID, parentID, name)
 }

@@ -31,7 +31,7 @@ func (h *NotesHandler) Create(c *gin.Context) {
 		return
 	}
 
-	note, err := h.svc.CreateNote(c.Request.Context(), user.ID, req.FolderID, req.Title, req.Tags)
+	note, err := h.svc.CreateNote(c.Request.Context(), user.ID, user.UUID, req.FolderID, req.Title, req.Tags)
 	if err != nil {
 		writeError(c, err)
 		return
@@ -44,7 +44,7 @@ func (h *NotesHandler) Get(c *gin.Context) {
 	user := ginUser(c)
 	noteID, err := ginParamInt64(c, "id")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid note id"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "note id must be a positive integer"})
 		return
 	}
 
@@ -68,7 +68,7 @@ func (h *NotesHandler) Patch(c *gin.Context) {
 	user := ginUser(c)
 	noteID, err := ginParamInt64(c, "id")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid note id"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "note id must be a positive integer"})
 		return
 	}
 
@@ -114,7 +114,7 @@ func (h *NotesHandler) Move(c *gin.Context) {
 	user := ginUser(c)
 	noteID, err := ginParamInt64(c, "id")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid note id"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "note id must be a positive integer"})
 		return
 	}
 
@@ -124,7 +124,7 @@ func (h *NotesHandler) Move(c *gin.Context) {
 		return
 	}
 
-	if err := h.svc.MoveNote(c.Request.Context(), user.ID, noteID, req.FolderID); err != nil {
+	if err := h.svc.MoveNote(c.Request.Context(), user.ID, user.UUID, noteID, req.FolderID); err != nil {
 		writeError(c, err)
 		return
 	}
@@ -136,7 +136,7 @@ func (h *NotesHandler) Delete(c *gin.Context) {
 	user := ginUser(c)
 	noteID, err := ginParamInt64(c, "id")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid note id"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "note id must be a positive integer"})
 		return
 	}
 
@@ -156,7 +156,7 @@ func (h *NotesHandler) Share(c *gin.Context) {
 	user := ginUser(c)
 	noteID, err := ginParamInt64(c, "id")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid note id"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "note id must be a positive integer"})
 		return
 	}
 

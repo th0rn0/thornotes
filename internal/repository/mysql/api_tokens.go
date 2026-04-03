@@ -19,7 +19,7 @@ func NewAPITokenRepo(db *sql.DB) *APITokenRepo {
 	return &APITokenRepo{db: db}
 }
 
-func (r *APITokenRepo) Create(ctx context.Context, userID int64, name, token string) (*model.APIToken, error) {
+func (r *APITokenRepo) Create(ctx context.Context, userID int64, name, token, scope string) (*model.APIToken, error) {
 	prefix := token
 	if len(token) >= 8 {
 		prefix = token[:8]
@@ -27,8 +27,8 @@ func (r *APITokenRepo) Create(ctx context.Context, userID int64, name, token str
 	hash := hashToken(token)
 
 	res, err := r.db.ExecContext(ctx,
-		`INSERT INTO api_tokens (user_id, name, token_hash, prefix) VALUES (?, ?, ?, ?)`,
-		userID, name, hash, prefix,
+		`INSERT INTO api_tokens (user_id, name, token_hash, prefix, scope) VALUES (?, ?, ?, ?, ?)`,
+		userID, name, hash, prefix, scope,
 	)
 	if err != nil {
 		return nil, apperror.Internal("create api token", err)
@@ -41,8 +41,8 @@ func (r *APITokenRepo) Create(ctx context.Context, userID int64, name, token str
 
 	t := &model.APIToken{}
 	err = r.db.QueryRowContext(ctx,
-		`SELECT id, user_id, name, prefix, created_at, last_used_at FROM api_tokens WHERE id = ?`, id,
-	).Scan(&t.ID, &t.UserID, &t.Name, &t.Prefix, &t.CreatedAt, &t.LastUsedAt)
+		`SELECT id, user_id, name, prefix, scope, created_at, last_used_at FROM api_tokens WHERE id = ?`, id,
+	).Scan(&t.ID, &t.UserID, &t.Name, &t.Prefix, &t.Scope, &t.CreatedAt, &t.LastUsedAt)
 	if err != nil {
 		return nil, apperror.Internal("scan created api token", err)
 	}
@@ -53,9 +53,9 @@ func (r *APITokenRepo) Create(ctx context.Context, userID int64, name, token str
 func (r *APITokenRepo) GetByToken(ctx context.Context, token string) (*model.APIToken, error) {
 	t := &model.APIToken{}
 	err := r.db.QueryRowContext(ctx,
-		`SELECT id, user_id, name, prefix, created_at, last_used_at
+		`SELECT id, user_id, name, prefix, scope, created_at, last_used_at
 		 FROM api_tokens WHERE token_hash = ?`, hashToken(token),
-	).Scan(&t.ID, &t.UserID, &t.Name, &t.Prefix, &t.CreatedAt, &t.LastUsedAt)
+	).Scan(&t.ID, &t.UserID, &t.Name, &t.Prefix, &t.Scope, &t.CreatedAt, &t.LastUsedAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, apperror.ErrNotFound
@@ -67,7 +67,7 @@ func (r *APITokenRepo) GetByToken(ctx context.Context, token string) (*model.API
 
 func (r *APITokenRepo) ListByUser(ctx context.Context, userID int64) ([]*model.APIToken, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, user_id, name, prefix, created_at, last_used_at
+		`SELECT id, user_id, name, prefix, scope, created_at, last_used_at
 		 FROM api_tokens WHERE user_id = ? ORDER BY created_at ASC`, userID,
 	)
 	if err != nil {
@@ -78,7 +78,7 @@ func (r *APITokenRepo) ListByUser(ctx context.Context, userID int64) ([]*model.A
 	var out []*model.APIToken
 	for rows.Next() {
 		t := &model.APIToken{}
-		if err := rows.Scan(&t.ID, &t.UserID, &t.Name, &t.Prefix, &t.CreatedAt, &t.LastUsedAt); err != nil {
+		if err := rows.Scan(&t.ID, &t.UserID, &t.Name, &t.Prefix, &t.Scope, &t.CreatedAt, &t.LastUsedAt); err != nil {
 			return nil, apperror.Internal("scan api token", err)
 		}
 		out = append(out, t)

@@ -33,10 +33,10 @@ func TestWatch_DetectsFileChange(t *testing.T) {
 	svc := notes.NewService(noteRepo, folderRepo, searchRepo, sqlite.NewJournalRepo(pool.ReadDB, pool.WriteDB), fs)
 
 	// Create a user and a note.
-	user, err := userRepo.Create(context.Background(), "alice", "hash")
+	user, err := userRepo.Create(context.Background(), "alice", "hash", "test-uuid-fixed")
 	require.NoError(t, err)
 
-	note, err := svc.CreateNote(context.Background(), user.ID, nil, "Watch Test", nil)
+	note, err := svc.CreateNote(context.Background(), user.ID, "test-uuid", nil, "Watch Test", nil)
 	require.NoError(t, err)
 
 	h := hub.New()
@@ -83,10 +83,10 @@ func TestWatch_NoNotifyWhenUnchanged(t *testing.T) {
 
 	svc := notes.NewService(noteRepo, folderRepo, searchRepo, sqlite.NewJournalRepo(pool.ReadDB, pool.WriteDB), fs)
 
-	user, err := userRepo.Create(context.Background(), "bob", "hash")
+	user, err := userRepo.Create(context.Background(), "bob", "hash", "test-uuid-fixed")
 	require.NoError(t, err)
 
-	_, err = svc.CreateNote(context.Background(), user.ID, nil, "Unchanged Note", nil)
+	_, err = svc.CreateNote(context.Background(), user.ID, "test-uuid", nil, "Unchanged Note", nil)
 	require.NoError(t, err)
 
 	h := hub.New()

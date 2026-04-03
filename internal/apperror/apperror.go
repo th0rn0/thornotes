@@ -68,3 +68,9 @@ func DiskFull() *AppError {
 func NotImplemented(msg string) *AppError {
 	return &AppError{Code: http.StatusNotImplemented, Message: msg}
 }
+
+// IsConflict reports whether err is a 409 Conflict AppError.
+func IsConflict(err error) bool {
+	var appErr *AppError
+	return errors.As(err, &appErr) && appErr.Code == http.StatusConflict
+}

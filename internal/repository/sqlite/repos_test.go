@@ -26,7 +26,7 @@ func openTestDB(t *testing.T) *db.Pool {
 func createUser(t *testing.T, pool *db.Pool) *model.User {
 	t.Helper()
 	repo := NewUserRepo(pool.WriteDB)
-	user, err := repo.Create(context.Background(), "user1", "hash")
+	user, err := repo.Create(context.Background(), "user1", "hash", "test-uuid-1")
 	require.NoError(t, err)
 	return user
 }
@@ -37,7 +37,7 @@ func TestUserRepo_Create(t *testing.T) {
 	pool := openTestDB(t)
 	repo := NewUserRepo(pool.WriteDB)
 
-	user, err := repo.Create(context.Background(), "alice", "hash123")
+	user, err := repo.Create(context.Background(), "alice", "hash123", "uuid-alice")
 	require.NoError(t, err)
 	assert.NotZero(t, user.ID)
 	assert.Equal(t, "alice", user.Username)
@@ -47,10 +47,10 @@ func TestUserRepo_Create_Duplicate(t *testing.T) {
 	pool := openTestDB(t)
 	repo := NewUserRepo(pool.WriteDB)
 
-	_, err := repo.Create(context.Background(), "alice", "hash123")
+	_, err := repo.Create(context.Background(), "alice", "hash123", "uuid-alice")
 	require.NoError(t, err)
 
-	_, err = repo.Create(context.Background(), "alice", "hash456")
+	_, err = repo.Create(context.Background(), "alice", "hash456", "uuid-alice2")
 	require.Error(t, err)
 	var appErr *apperror.AppError
 	require.ErrorAs(t, err, &appErr)
@@ -61,7 +61,7 @@ func TestUserRepo_GetByUsername(t *testing.T) {
 	pool := openTestDB(t)
 	repo := NewUserRepo(pool.WriteDB)
 
-	_, err := repo.Create(context.Background(), "bob", "hash")
+	_, err := repo.Create(context.Background(), "bob", "hash", "uuid-bob")
 	require.NoError(t, err)
 
 	user, err := repo.GetByUsername(context.Background(), "bob")
@@ -82,7 +82,7 @@ func TestUserRepo_GetByID(t *testing.T) {
 	pool := openTestDB(t)
 	repo := NewUserRepo(pool.WriteDB)
 
-	created, err := repo.Create(context.Background(), "carol", "hash")
+	created, err := repo.Create(context.Background(), "carol", "hash", "uuid-carol")
 	require.NoError(t, err)
 
 	user, err := repo.GetByID(context.Background(), created.ID)
@@ -108,7 +108,7 @@ func TestUserRepo_Count(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 0, count)
 
-	_, err = repo.Create(context.Background(), "dave", "hash")
+	_, err = repo.Create(context.Background(), "dave", "hash", "uuid-dave")
 	require.NoError(t, err)
 
 	count, err = repo.Count(context.Background())
@@ -1098,9 +1098,9 @@ func TestUserRepo_IDs(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, ids)
 
-	u1, err := userRepo.Create(context.Background(), "alice", "hash")
+	u1, err := userRepo.Create(context.Background(), "alice", "hash", "uuid-alice-ids")
 	require.NoError(t, err)
-	u2, err := userRepo.Create(context.Background(), "bob", "hash")
+	u2, err := userRepo.Create(context.Background(), "bob", "hash", "uuid-bob-ids")
 	require.NoError(t, err)
 
 	ids, err = userRepo.IDs(context.Background())
@@ -1116,7 +1116,7 @@ func TestAPITokenRepo_CreateAndGetByToken(t *testing.T) {
 	repo := NewAPITokenRepo(pool.ReadDB, pool.WriteDB)
 
 	rawToken := "tn_testtoken12345678"
-	created, err := repo.Create(context.Background(), user.ID, "my token", rawToken)
+	created, err := repo.Create(context.Background(), user.ID, "my token", rawToken, "readwrite")
 	require.NoError(t, err)
 	assert.NotZero(t, created.ID)
 	assert.Equal(t, rawToken, created.Token) // raw returned once
@@ -1144,9 +1144,9 @@ func TestAPITokenRepo_ListByUser(t *testing.T) {
 	user := createUser(t, pool)
 	repo := NewAPITokenRepo(pool.ReadDB, pool.WriteDB)
 
-	_, err := repo.Create(context.Background(), user.ID, "token-a", "tn_aaaaaaaa12345678")
+	_, err := repo.Create(context.Background(), user.ID, "token-a", "tn_aaaaaaaa12345678", "readwrite")
 	require.NoError(t, err)
-	_, err = repo.Create(context.Background(), user.ID, "token-b", "tn_bbbbbbbb12345678")
+	_, err = repo.Create(context.Background(), user.ID, "token-b", "tn_bbbbbbbb12345678", "readwrite")
 	require.NoError(t, err)
 
 	tokens, err := repo.ListByUser(context.Background(), user.ID)
@@ -1164,7 +1164,7 @@ func TestAPITokenRepo_Delete(t *testing.T) {
 	user := createUser(t, pool)
 	repo := NewAPITokenRepo(pool.ReadDB, pool.WriteDB)
 
-	token, err := repo.Create(context.Background(), user.ID, "to-delete", "tn_deletetoken12345")
+	token, err := repo.Create(context.Background(), user.ID, "to-delete", "tn_deletetoken12345", "readwrite")
 	require.NoError(t, err)
 
 	err = repo.Delete(context.Background(), user.ID, token.ID)
@@ -1188,11 +1188,11 @@ func TestAPITokenRepo_Delete_WrongUser(t *testing.T) {
 	pool := openTestDB(t)
 	user1 := createUser(t, pool)
 	userRepo := NewUserRepo(pool.WriteDB)
-	user2, err := userRepo.Create(context.Background(), "user2", "hash")
+	user2, err := userRepo.Create(context.Background(), "user2", "hash", "uuid-user2-fixed")
 	require.NoError(t, err)
 
 	repo := NewAPITokenRepo(pool.ReadDB, pool.WriteDB)
-	token, err := repo.Create(context.Background(), user1.ID, "tok", "tn_crossusertoken123")
+	token, err := repo.Create(context.Background(), user1.ID, "tok", "tn_crossusertoken123", "readwrite")
 	require.NoError(t, err)
 
 	// user2 cannot delete user1's token.
@@ -1205,7 +1205,7 @@ func TestAPITokenRepo_TouchLastUsed(t *testing.T) {
 	user := createUser(t, pool)
 	repo := NewAPITokenRepo(pool.ReadDB, pool.WriteDB)
 
-	token, err := repo.Create(context.Background(), user.ID, "touch-tok", "tn_touchtokenabcdef")
+	token, err := repo.Create(context.Background(), user.ID, "touch-tok", "tn_touchtokenabcdef", "readwrite")
 	require.NoError(t, err)
 
 	err = repo.TouchLastUsed(context.Background(), token.ID)

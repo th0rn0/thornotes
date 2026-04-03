@@ -28,12 +28,12 @@ func newFakeUserRepo() *fakeUserRepo {
 	return &fakeUserRepo{users: make(map[string]*model.User)}
 }
 
-func (r *fakeUserRepo) Create(_ context.Context, username, hash string) (*model.User, error) {
+func (r *fakeUserRepo) Create(_ context.Context, username, hash, uuid string) (*model.User, error) {
 	if _, ok := r.users[username]; ok {
 		return nil, apperror.Conflict("duplicate")
 	}
 	r.next++
-	u := &model.User{ID: r.next, Username: username, PasswordHash: hash, CreatedAt: time.Now()}
+	u := &model.User{ID: r.next, UUID: uuid, Username: username, PasswordHash: hash, CreatedAt: time.Now()}
 	r.users[username] = u
 	return u, nil
 }
@@ -62,6 +62,26 @@ func (r *fakeUserRepo) IDs(_ context.Context) ([]int64, error) {
 	ids := make([]int64, 0, len(r.users))
 	for _, u := range r.users {
 		ids = append(ids, u.ID)
+	}
+	return ids, nil
+}
+
+func (r *fakeUserRepo) SetUUID(_ context.Context, id int64, uuid string) error {
+	for _, u := range r.users {
+		if u.ID == id {
+			u.UUID = uuid
+			return nil
+		}
+	}
+	return apperror.ErrNotFound
+}
+
+func (r *fakeUserRepo) ListWithoutUUID(_ context.Context) ([]int64, error) {
+	var ids []int64
+	for _, u := range r.users {
+		if u.UUID == "" {
+			ids = append(ids, u.ID)
+		}
 	}
 	return ids, nil
 }
@@ -431,8 +451,8 @@ func newFakeAPITokenRepo() *fakeAPITokenRepo {
 	return &fakeAPITokenRepo{tokens: make(map[string]*model.APIToken)}
 }
 
-func (r *fakeAPITokenRepo) Create(_ context.Context, userID int64, name, token string) (*model.APIToken, error) {
-	t := &model.APIToken{ID: 1, UserID: userID, Name: name, Token: token}
+func (r *fakeAPITokenRepo) Create(_ context.Context, userID int64, name, token, scope string) (*model.APIToken, error) {
+	t := &model.APIToken{ID: 1, UserID: userID, Name: name, Token: token, Scope: scope}
 	r.tokens[token] = t
 	return t, nil
 }

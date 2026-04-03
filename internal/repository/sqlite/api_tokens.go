@@ -20,7 +20,7 @@ func NewAPITokenRepo(readDB, writeDB *sql.DB) *APITokenRepo {
 	return &APITokenRepo{readDB: readDB, writeDB: writeDB}
 }
 
-func (r *APITokenRepo) Create(ctx context.Context, userID int64, name, token string) (*model.APIToken, error) {
+func (r *APITokenRepo) Create(ctx context.Context, userID int64, name, token, scope string) (*model.APIToken, error) {
 	prefix := token
 	if len(token) >= 8 {
 		prefix = token[:8]
@@ -28,11 +28,11 @@ func (r *APITokenRepo) Create(ctx context.Context, userID int64, name, token str
 	hash := hashToken(token)
 
 	const q = `
-		INSERT INTO api_tokens (user_id, name, token_hash, prefix)
-		VALUES (?, ?, ?, ?)
-		RETURNING id, user_id, name, prefix, created_at, last_used_at`
+		INSERT INTO api_tokens (user_id, name, token_hash, prefix, scope)
+		VALUES (?, ?, ?, ?, ?)
+		RETURNING id, user_id, name, prefix, scope, created_at, last_used_at`
 
-	row := r.writeDB.QueryRowContext(ctx, q, userID, name, hash, prefix)
+	row := r.writeDB.QueryRowContext(ctx, q, userID, name, hash, prefix, scope)
 	t, err := scanAPIToken(row)
 	if err != nil {
 		return nil, apperror.Internal("create api token", err)
@@ -43,7 +43,7 @@ func (r *APITokenRepo) Create(ctx context.Context, userID int64, name, token str
 
 func (r *APITokenRepo) GetByToken(ctx context.Context, token string) (*model.APIToken, error) {
 	const q = `
-		SELECT id, user_id, name, prefix, created_at, last_used_at
+		SELECT id, user_id, name, prefix, scope, created_at, last_used_at
 		FROM api_tokens WHERE token_hash = ?`
 
 	row := r.readDB.QueryRowContext(ctx, q, hashToken(token))
@@ -59,7 +59,7 @@ func (r *APITokenRepo) GetByToken(ctx context.Context, token string) (*model.API
 
 func (r *APITokenRepo) ListByUser(ctx context.Context, userID int64) ([]*model.APIToken, error) {
 	const q = `
-		SELECT id, user_id, name, prefix, created_at, last_used_at
+		SELECT id, user_id, name, prefix, scope, created_at, last_used_at
 		FROM api_tokens WHERE user_id = ? ORDER BY created_at ASC`
 
 	rows, err := r.readDB.QueryContext(ctx, q, userID)
@@ -120,7 +120,7 @@ type scanner interface {
 
 func scanAPIToken(s scanner) (*model.APIToken, error) {
 	var t model.APIToken
-	if err := s.Scan(&t.ID, &t.UserID, &t.Name, &t.Prefix, &t.CreatedAt, &t.LastUsedAt); err != nil {
+	if err := s.Scan(&t.ID, &t.UserID, &t.Name, &t.Prefix, &t.Scope, &t.CreatedAt, &t.LastUsedAt); err != nil {
 		return nil, err
 	}
 	return &t, nil

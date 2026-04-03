@@ -12,7 +12,7 @@ import (
 )
 
 // CreateNote creates a new note, writes the file, then saves to DB.
-func (s *Service) CreateNote(ctx context.Context, userID int64, folderID *int64, title string, tags []string) (*model.Note, error) {
+func (s *Service) CreateNote(ctx context.Context, userID int64, userUUID string, folderID *int64, title string, tags []string) (*model.Note, error) {
 	if len(title) == 0 || len(title) > 500 {
 		return nil, apperror.BadRequest("title must be 1–500 characters")
 	}
@@ -31,7 +31,7 @@ func (s *Service) CreateNote(ctx context.Context, userID int64, folderID *int64,
 		}
 		folderPath = folder.DiskPath
 	}
-	diskPath := notesDiskPath(userID, folderPath, slug)
+	diskPath := notesDiskPath(userUUID, folderPath, slug)
 
 	content := ""
 	hash := HashContent(content)
@@ -129,7 +129,7 @@ func (s *Service) UpdateNoteMetadata(ctx context.Context, userID, noteID int64, 
 // MoveNote moves a note to newFolderID (nil = root). It:
 // 1. Moves the file on disk.
 // 2. Updates the note's folder_id and disk_path in DB.
-func (s *Service) MoveNote(ctx context.Context, userID, noteID int64, newFolderID *int64) error {
+func (s *Service) MoveNote(ctx context.Context, userID int64, userUUID string, noteID int64, newFolderID *int64) error {
 	note, err := s.notes.GetByID(ctx, userID, noteID)
 	if err != nil {
 		return err
@@ -150,7 +150,7 @@ func (s *Service) MoveNote(ctx context.Context, userID, noteID int64, newFolderI
 	}
 
 	oldDiskPath := note.DiskPath
-	newDiskPath := notesDiskPath(userID, newFolderPath, note.Slug)
+	newDiskPath := notesDiskPath(userUUID, newFolderPath, note.Slug)
 
 	if err := s.fs.RenameFile(oldDiskPath, newDiskPath); err != nil {
 		return apperror.Internal("move note file", err)

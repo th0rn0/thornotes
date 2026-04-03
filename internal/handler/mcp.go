@@ -173,7 +173,7 @@ func (h *MCPHandler) HandlePOST(c *gin.Context) {
 
 	// Batch request — JSON array.
 	if trimmed[0] == '[' {
-		h.handleBatch(c, trimmed, sessionID, user.ID)
+		h.handleBatch(c, trimmed, sessionID, user)
 		return
 	}
 
@@ -201,7 +201,7 @@ func (h *MCPHandler) HandlePOST(c *gin.Context) {
 		newID := h.sessions.create()
 		c.Header("Mcp-Session-Id", newID)
 		c.Header("Content-Type", "application/json")
-		writeRPCJSON(c.Writer, h.dispatch(c.Request, req, user.ID))
+		writeRPCJSON(c.Writer, h.dispatch(c.Request, req, user))
 		return
 	}
 
@@ -212,7 +212,7 @@ func (h *MCPHandler) HandlePOST(c *gin.Context) {
 	}
 
 	c.Header("Content-Type", "application/json")
-	writeRPCJSON(c.Writer, h.dispatch(c.Request, req, user.ID))
+	writeRPCJSON(c.Writer, h.dispatch(c.Request, req, user))
 }
 
 // HandleGET handles GET /mcp — opens a server-sent event stream.
@@ -266,7 +266,7 @@ func (h *MCPHandler) HandleDELETE(c *gin.Context) {
 
 // handleBatch processes a JSON array of JSON-RPC messages.
 // Notifications are handled silently. If all messages are notifications, returns 202.
-func (h *MCPHandler) handleBatch(c *gin.Context, body []byte, sessionID string, userID int64) {
+func (h *MCPHandler) handleBatch(c *gin.Context, body []byte, sessionID string, user *model.User) {
 	var reqs []rpcRequest
 	if err := json.Unmarshal(body, &reqs); err != nil {
 		c.Header("Content-Type", "application/json")
@@ -288,7 +288,7 @@ func (h *MCPHandler) handleBatch(c *gin.Context, body []byte, sessionID string, 
 			responses = append(responses, rpcErr(req.ID, -32001, "session not found"))
 			continue
 		}
-		responses = append(responses, h.dispatch(c.Request, req, userID))
+		responses = append(responses, h.dispatch(c.Request, req, user))
 	}
 
 	if len(responses) == 0 {
@@ -303,18 +303,18 @@ func (h *MCPHandler) handleBatch(c *gin.Context, body []byte, sessionID string, 
 
 // dispatch routes a JSON-RPC request to the correct MCP method handler
 // and returns the response object.
-func (h *MCPHandler) dispatch(r *http.Request, req rpcRequest, userID int64) rpcResponse {
+func (h *MCPHandler) dispatch(r *http.Request, req rpcRequest, user *model.User) rpcResponse {
 	switch req.Method {
 	case "initialize":
 		return h.handleInitialize(req)
 	case "tools/list":
 		return h.handleToolsList(req)
 	case "tools/call":
-		return h.handleToolsCall(r, req, userID)
+		return h.handleToolsCall(r, req, user)
 	case "resources/list":
-		return h.handleResourcesList(r, req, userID)
+		return h.handleResourcesList(r, req, user.ID)
 	case "resources/read":
-		return h.handleResourcesRead(r, req, userID)
+		return h.handleResourcesRead(r, req, user.ID)
 	default:
 		return rpcErr(req.ID, rpcMethodNotFound, "method not found: "+req.Method)
 	}
@@ -408,7 +408,13 @@ func (h *MCPHandler) handleToolsList(req rpcRequest) rpcResponse {
 	return rpcOK(req.ID, map[string]any{"tools": tools})
 }
 
-func (h *MCPHandler) handleToolsCall(r *http.Request, req rpcRequest, userID int64) rpcResponse {
+// writeTools is the set of tool names that require readwrite scope.
+var writeTools = map[string]bool{
+	"create_note": true,
+	"update_note": true,
+}
+
+func (h *MCPHandler) handleToolsCall(r *http.Request, req rpcRequest, user *model.User) rpcResponse {
 	var params struct {
 		Name      string          `json:"name"`
 		Arguments json.RawMessage `json:"arguments"`
@@ -417,6 +423,13 @@ func (h *MCPHandler) handleToolsCall(r *http.Request, req rpcRequest, userID int
 		return rpcErr(req.ID, rpcInvalidParams, "invalid params")
 	}
 
+	// Enforce scope: read-only tokens cannot call write tools.
+	if writeTools[params.Name] && user.TokenScope == "read" {
+		return rpcErr(req.ID, -32001, "this API token is read-only — create a readwrite token to use "+params.Name)
+	}
+
+	userID := user.ID
+	userUUID := user.UUID
 	ctx := r.Context()
 
 	switch params.Name {
@@ -482,7 +495,7 @@ func (h *MCPHandler) handleToolsCall(r *http.Request, req rpcRequest, userID int
 		if args.Tags == nil {
 			args.Tags = []string{}
 		}
-		note, err := h.notes.CreateNote(ctx, userID, args.FolderID, args.Title, args.Tags)
+		note, err := h.notes.CreateNote(ctx, userID, userUUID, args.FolderID, args.Title, args.Tags)
 		if err != nil {
 			return rpcErr(req.ID, rpcInternalError, errorString(err))
 		}

@@ -7,11 +7,15 @@ import (
 )
 
 type UserRepository interface {
-	Create(ctx context.Context, username, passwordHash string) (*model.User, error)
+	Create(ctx context.Context, username, passwordHash, uuid string) (*model.User, error)
 	GetByID(ctx context.Context, id int64) (*model.User, error)
 	GetByUsername(ctx context.Context, username string) (*model.User, error)
 	Count(ctx context.Context) (int, error)
 	IDs(ctx context.Context) ([]int64, error)
+	// SetUUID assigns a UUID to an existing user (startup migration only).
+	SetUUID(ctx context.Context, id int64, uuid string) error
+	// ListWithoutUUID returns IDs of users that have no UUID assigned yet.
+	ListWithoutUUID(ctx context.Context) ([]int64, error)
 }
 
 type SessionRepository interface {
@@ -64,7 +68,7 @@ type NoteRepository interface {
 }
 
 type APITokenRepository interface {
-	Create(ctx context.Context, userID int64, name, token string) (*model.APIToken, error)
+	Create(ctx context.Context, userID int64, name, token, scope string) (*model.APIToken, error)
 	GetByToken(ctx context.Context, token string) (*model.APIToken, error)
 	ListByUser(ctx context.Context, userID int64) ([]*model.APIToken, error)
 	Delete(ctx context.Context, userID, tokenID int64) error

@@ -59,6 +59,7 @@ func New(
 	eventsH := handler.NewEventsHandler(h)
 	journalsH := handler.NewJournalsHandler(notesSvc)
 	historyH := handler.NewHistoryHandler(notesSvc)
+	importH := handler.NewImportHandler(notesSvc)
 
 	bearerMW := auth.BearerMiddleware(apiTokenRepo, userRepo)
 	sessionMW := authSvc.SessionMiddleware()
@@ -141,6 +142,9 @@ func New(
 		account.POST("/tokens", csrfMW, accountH.CreateToken)
 		account.DELETE("/tokens/:id", csrfMW, accountH.DeleteToken)
 	}
+
+	// Import.
+	r.POST("/api/v1/import", sessionMW, csrfMW, importH.Import)
 
 	// Journals.
 	journals := r.Group("/api/v1/journals", sessionMW)

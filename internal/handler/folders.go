@@ -42,7 +42,7 @@ func (h *FoldersHandler) Create(c *gin.Context) {
 		return
 	}
 
-	folder, err := h.svc.CreateFolder(c.Request.Context(), user.ID, req.ParentID, req.Name)
+	folder, err := h.svc.CreateFolder(c.Request.Context(), user.ID, user.UUID, req.ParentID, req.Name)
 	if err != nil {
 		writeError(c, err)
 		return
@@ -59,7 +59,7 @@ func (h *FoldersHandler) Rename(c *gin.Context) {
 	user := ginUser(c)
 	folderID, err := ginParamInt64(c, "id")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid folder id"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "folder id must be a positive integer"})
 		return
 	}
 
@@ -69,7 +69,7 @@ func (h *FoldersHandler) Rename(c *gin.Context) {
 		return
 	}
 
-	if err := h.svc.RenameFolder(c.Request.Context(), user.ID, folderID, req.Name); err != nil {
+	if err := h.svc.RenameFolder(c.Request.Context(), user.ID, user.UUID, folderID, req.Name); err != nil {
 		writeError(c, err)
 		return
 	}
@@ -81,7 +81,7 @@ func (h *FoldersHandler) Delete(c *gin.Context) {
 	user := ginUser(c)
 	folderID, err := ginParamInt64(c, "id")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid folder id"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "folder id must be a positive integer"})
 		return
 	}
 
@@ -101,7 +101,7 @@ func (h *FoldersHandler) Move(c *gin.Context) {
 	user := ginUser(c)
 	folderID, err := ginParamInt64(c, "id")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid folder id"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "folder id must be a positive integer"})
 		return
 	}
 
@@ -111,7 +111,7 @@ func (h *FoldersHandler) Move(c *gin.Context) {
 		return
 	}
 
-	if err := h.svc.MoveFolder(c.Request.Context(), user.ID, folderID, req.ParentID); err != nil {
+	if err := h.svc.MoveFolder(c.Request.Context(), user.ID, user.UUID, folderID, req.ParentID); err != nil {
 		writeError(c, err)
 		return
 	}
@@ -123,7 +123,7 @@ func (h *FoldersHandler) ListNotes(c *gin.Context) {
 	user := ginUser(c)
 	folderID, err := ginParamInt64(c, "id")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid folder id"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "folder id must be a positive integer"})
 		return
 	}
 

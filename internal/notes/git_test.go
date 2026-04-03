@@ -66,7 +66,7 @@ func TestFileStore_GitIgnoreCreated(t *testing.T) {
 func TestService_NoteHistory_GitDisabled_Returns501(t *testing.T) {
 	svc, userID := newTestStack(t)
 
-	note, err := svc.CreateNote(context.Background(), userID, nil, "Test Note", nil)
+	note, err := svc.CreateNote(context.Background(), userID, "test-uuid", nil, "Test Note", nil)
 	require.NoError(t, err)
 
 	_, err = svc.NoteHistory(context.Background(), userID, note.ID, 10)
@@ -77,7 +77,7 @@ func TestService_NoteHistory_GitDisabled_Returns501(t *testing.T) {
 func TestService_NoteContentAt_GitDisabled_Returns501(t *testing.T) {
 	svc, userID := newTestStack(t)
 
-	note, err := svc.CreateNote(context.Background(), userID, nil, "Test Note", nil)
+	note, err := svc.CreateNote(context.Background(), userID, "test-uuid", nil, "Test Note", nil)
 	require.NoError(t, err)
 
 	_, err = svc.NoteContentAt(context.Background(), userID, note.ID, "abc123")
@@ -93,7 +93,7 @@ func TestService_NoteHistory_RecordsCreate(t *testing.T) {
 	svc, userID := newTestStackGit(t)
 	ctx := context.Background()
 
-	note, err := svc.CreateNote(ctx, userID, nil, "History Note", nil)
+	note, err := svc.CreateNote(ctx, userID, "test-uuid", nil, "History Note", nil)
 	require.NoError(t, err)
 
 	entries, err := svc.NoteHistory(ctx, userID, note.ID, 50)
@@ -107,7 +107,7 @@ func TestService_NoteHistory_RecordsMultipleSaves(t *testing.T) {
 	svc, userID := newTestStackGit(t)
 	ctx := context.Background()
 
-	note, err := svc.CreateNote(ctx, userID, nil, "Multi-save Note", nil)
+	note, err := svc.CreateNote(ctx, userID, "test-uuid", nil, "Multi-save Note", nil)
 	require.NoError(t, err)
 
 	// Two content updates → two more commits.
@@ -127,7 +127,7 @@ func TestService_NoteHistory_LimitRespected(t *testing.T) {
 	svc, userID := newTestStackGit(t)
 	ctx := context.Background()
 
-	note, err := svc.CreateNote(ctx, userID, nil, "Limit Note", nil)
+	note, err := svc.CreateNote(ctx, userID, "test-uuid", nil, "Limit Note", nil)
 	require.NoError(t, err)
 
 	h := note.ContentHash
@@ -151,7 +151,7 @@ func TestService_NoteContentAt_ReturnsCorrectContent(t *testing.T) {
 	svc, userID := newTestStackGit(t)
 	ctx := context.Background()
 
-	note, err := svc.CreateNote(ctx, userID, nil, "At Note", nil)
+	note, err := svc.CreateNote(ctx, userID, "test-uuid", nil, "At Note", nil)
 	require.NoError(t, err)
 
 	hash1, err := svc.UpdateNoteContent(ctx, userID, note.ID, "# version one", note.ContentHash)
@@ -178,7 +178,7 @@ func TestService_NoteContentAt_InvalidSHA(t *testing.T) {
 	svc, userID := newTestStackGit(t)
 	ctx := context.Background()
 
-	note, err := svc.CreateNote(ctx, userID, nil, "InvalidSHA Note", nil)
+	note, err := svc.CreateNote(ctx, userID, "test-uuid", nil, "InvalidSHA Note", nil)
 	require.NoError(t, err)
 
 	_, err = svc.NoteContentAt(ctx, userID, note.ID, "deadbeefdeadbeefdeadbeefdeadbeef00000000")
@@ -193,7 +193,7 @@ func TestService_NoteRestoreAt_RestoresContent(t *testing.T) {
 	svc, userID := newTestStackGit(t)
 	ctx := context.Background()
 
-	note, err := svc.CreateNote(ctx, userID, nil, "Restore Note", nil)
+	note, err := svc.CreateNote(ctx, userID, "test-uuid", nil, "Restore Note", nil)
 	require.NoError(t, err)
 
 	hash1, err := svc.UpdateNoteContent(ctx, userID, note.ID, "# original", note.ContentHash)
@@ -227,7 +227,7 @@ func TestService_NoteRestoreAt_GitDisabled_Returns501(t *testing.T) {
 	svc, userID := newTestStack(t)
 	ctx := context.Background()
 
-	note, err := svc.CreateNote(ctx, userID, nil, "Restore No Git", nil)
+	note, err := svc.CreateNote(ctx, userID, "test-uuid", nil, "Restore No Git", nil)
 	require.NoError(t, err)
 
 	_, err = svc.NoteRestoreAt(ctx, userID, note.ID, "abc123", note.ContentHash)
@@ -258,7 +258,7 @@ func TestService_GitHistory_DeleteNote_RecordsCommit(t *testing.T) {
 	ctx := context.Background()
 
 	// Create and write to a note so there's something in history.
-	note, err := svc.CreateNote(ctx, userID, nil, "Delete Git Note", nil)
+	note, err := svc.CreateNote(ctx, userID, "test-uuid", nil, "Delete Git Note", nil)
 	require.NoError(t, err)
 	hash1, err := svc.UpdateNoteContent(ctx, userID, note.ID, "some content", note.ContentHash)
 	require.NoError(t, err)
@@ -277,16 +277,16 @@ func TestService_GitHistory_RenameFolder_RecordsCommit(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a folder with a note in it.
-	folder, err := svc.CreateFolder(ctx, userID, nil, "FolderToRename")
+	folder, err := svc.CreateFolder(ctx, userID, "test-uuid", nil, "FolderToRename")
 	require.NoError(t, err)
 	folderID := folder.ID
 
-	note, err := svc.CreateNote(ctx, userID, &folderID, "Note In Folder", nil)
+	note, err := svc.CreateNote(ctx, userID, "test-uuid", &folderID, "Note In Folder", nil)
 	require.NoError(t, err)
 	_, err = svc.UpdateNoteContent(ctx, userID, note.ID, "folder note content", note.ContentHash)
 	require.NoError(t, err)
 
 	// Rename folder — this triggers fs.RenameDir → git.CommitRename → commitAll.
-	err = svc.RenameFolder(ctx, userID, folder.ID, "RenamedFolder")
+	err = svc.RenameFolder(ctx, userID, "test-uuid", folder.ID, "RenamedFolder")
 	require.NoError(t, err)
 }

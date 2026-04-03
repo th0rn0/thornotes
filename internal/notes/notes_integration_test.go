@@ -45,7 +45,7 @@ func newTestStackFull(t *testing.T) *serviceStack {
 	searchRepo := sqlite_repo.NewSearchRepo(pool.ReadDB, pool.WriteDB)
 
 	ctx := context.Background()
-	user, err := userRepo.Create(ctx, "testuser", "$2a$12$fakehash0000000000000000000000000000000000000000000000")
+	user, err := userRepo.Create(ctx, "testuser", "$2a$12$fakehash0000000000000000000000000000000000000000000000", "test-uuid-" + "testuser")
 	require.NoError(t, err)
 
 	svc := notes.NewService(noteRepo, folderRepo, searchRepo, sqlite_repo.NewJournalRepo(pool.ReadDB, pool.WriteDB), fs)
@@ -69,7 +69,7 @@ func newTestStack(t *testing.T) (svc *notes.Service, userID int64) {
 	searchRepo := sqlite_repo.NewSearchRepo(pool.ReadDB, pool.WriteDB)
 
 	ctx := context.Background()
-	user, err := userRepo.Create(ctx, "testuser", "$2a$12$fakehash0000000000000000000000000000000000000000000000")
+	user, err := userRepo.Create(ctx, "testuser", "$2a$12$fakehash0000000000000000000000000000000000000000000000", "test-uuid-" + "testuser")
 	require.NoError(t, err)
 
 	svc = notes.NewService(noteRepo, folderRepo, searchRepo, sqlite_repo.NewJournalRepo(pool.ReadDB, pool.WriteDB), fs)
@@ -80,7 +80,7 @@ func TestService_CreateNote_Simple(t *testing.T) {
 	svc, userID := newTestStack(t)
 	ctx := context.Background()
 
-	note, err := svc.CreateNote(ctx, userID, nil, "My Note", nil)
+	note, err := svc.CreateNote(ctx, userID, "test-uuid", nil, "My Note", nil)
 	require.NoError(t, err)
 	assert.Equal(t, "My Note", note.Title)
 	assert.Equal(t, "", note.Content)
@@ -91,7 +91,7 @@ func TestService_CreateNote_InvalidTitle(t *testing.T) {
 	svc, userID := newTestStack(t)
 	ctx := context.Background()
 
-	_, err := svc.CreateNote(ctx, userID, nil, "", nil)
+	_, err := svc.CreateNote(ctx, userID, "test-uuid", nil, "", nil)
 	require.Error(t, err)
 	var appErr *apperror.AppError
 	require.ErrorAs(t, err, &appErr)
@@ -103,7 +103,7 @@ func TestService_CreateNote_InvalidParentFolder(t *testing.T) {
 	ctx := context.Background()
 
 	nonexistentFolderID := int64(99999)
-	_, err := svc.CreateNote(ctx, userID, &nonexistentFolderID, "Note with invalid parent", nil)
+	_, err := svc.CreateNote(ctx, userID, "test-uuid", &nonexistentFolderID, "Note with invalid parent", nil)
 	require.Error(t, err)
 }
 
@@ -112,7 +112,7 @@ func TestService_CreateFolder_InvalidParent(t *testing.T) {
 	ctx := context.Background()
 
 	nonexistentParentID := int64(99999)
-	_, err := svc.CreateFolder(ctx, userID, &nonexistentParentID, "Child Folder")
+	_, err := svc.CreateFolder(ctx, userID, "test-uuid", &nonexistentParentID, "Child Folder")
 	require.Error(t, err)
 }
 
@@ -120,7 +120,7 @@ func TestService_RenameFolder_InvalidFolder(t *testing.T) {
 	svc, userID := newTestStack(t)
 	ctx := context.Background()
 
-	err := svc.RenameFolder(ctx, userID, 99999, "NewName")
+	err := svc.RenameFolder(ctx, userID, "test-uuid", 99999, "NewName")
 	require.Error(t, err)
 }
 
@@ -136,7 +136,7 @@ func TestService_GetNote(t *testing.T) {
 	svc, userID := newTestStack(t)
 	ctx := context.Background()
 
-	created, err := svc.CreateNote(ctx, userID, nil, "Test Note", nil)
+	created, err := svc.CreateNote(ctx, userID, "test-uuid", nil, "Test Note", nil)
 	require.NoError(t, err)
 
 	got, err := svc.GetNote(ctx, userID, created.ID)
@@ -149,7 +149,7 @@ func TestService_UpdateNoteContent(t *testing.T) {
 	svc, userID := newTestStack(t)
 	ctx := context.Background()
 
-	note, err := svc.CreateNote(ctx, userID, nil, "Content Note", nil)
+	note, err := svc.CreateNote(ctx, userID, "test-uuid", nil, "Content Note", nil)
 	require.NoError(t, err)
 
 	newHash, err := svc.UpdateNoteContent(ctx, userID, note.ID, "new content", note.ContentHash)
@@ -162,7 +162,7 @@ func TestService_UpdateNoteContent_Conflict(t *testing.T) {
 	svc, userID := newTestStack(t)
 	ctx := context.Background()
 
-	note, err := svc.CreateNote(ctx, userID, nil, "Conflict Note", nil)
+	note, err := svc.CreateNote(ctx, userID, "test-uuid", nil, "Conflict Note", nil)
 	require.NoError(t, err)
 
 	_, err = svc.UpdateNoteContent(ctx, userID, note.ID, "new content", "wrong-hash")
@@ -174,7 +174,7 @@ func TestService_UpdateNoteContent_TooLarge(t *testing.T) {
 	svc, userID := newTestStack(t)
 	ctx := context.Background()
 
-	note, err := svc.CreateNote(ctx, userID, nil, "Large Note", nil)
+	note, err := svc.CreateNote(ctx, userID, "test-uuid", nil, "Large Note", nil)
 	require.NoError(t, err)
 
 	// 1MB + 1 byte.
@@ -190,7 +190,7 @@ func TestService_UpdateNoteMetadata(t *testing.T) {
 	svc, userID := newTestStack(t)
 	ctx := context.Background()
 
-	note, err := svc.CreateNote(ctx, userID, nil, "Old Title", nil)
+	note, err := svc.CreateNote(ctx, userID, "test-uuid", nil, "Old Title", nil)
 	require.NoError(t, err)
 
 	err = svc.UpdateNoteMetadata(ctx, userID, note.ID, "New Title", []string{"tag1", "tag2"})
@@ -206,7 +206,7 @@ func TestService_DeleteNote(t *testing.T) {
 	svc, userID := newTestStack(t)
 	ctx := context.Background()
 
-	note, err := svc.CreateNote(ctx, userID, nil, "Delete Me", nil)
+	note, err := svc.CreateNote(ctx, userID, "test-uuid", nil, "Delete Me", nil)
 	require.NoError(t, err)
 
 	err = svc.DeleteNote(ctx, userID, note.ID)
@@ -221,7 +221,7 @@ func TestService_SetShareToken(t *testing.T) {
 	svc, userID := newTestStack(t)
 	ctx := context.Background()
 
-	note, err := svc.CreateNote(ctx, userID, nil, "Share Note", nil)
+	note, err := svc.CreateNote(ctx, userID, "test-uuid", nil, "Share Note", nil)
 	require.NoError(t, err)
 
 	// Set share token.
@@ -245,9 +245,9 @@ func TestService_ListNotes_Root(t *testing.T) {
 	svc, userID := newTestStack(t)
 	ctx := context.Background()
 
-	_, err := svc.CreateNote(ctx, userID, nil, "Note 1", nil)
+	_, err := svc.CreateNote(ctx, userID, "test-uuid", nil, "Note 1", nil)
 	require.NoError(t, err)
-	_, err = svc.CreateNote(ctx, userID, nil, "Note 2", nil)
+	_, err = svc.CreateNote(ctx, userID, "test-uuid", nil, "Note 2", nil)
 	require.NoError(t, err)
 
 	items, err := svc.ListNotes(ctx, userID, nil)
@@ -259,7 +259,7 @@ func TestService_FolderTree(t *testing.T) {
 	svc, userID := newTestStack(t)
 	ctx := context.Background()
 
-	_, err := svc.CreateFolder(ctx, userID, nil, "Projects")
+	_, err := svc.CreateFolder(ctx, userID, "test-uuid", nil, "Projects")
 	require.NoError(t, err)
 
 	tree, err := svc.FolderTree(ctx, userID)
@@ -272,7 +272,7 @@ func TestService_CreateFolder(t *testing.T) {
 	svc, userID := newTestStack(t)
 	ctx := context.Background()
 
-	folder, err := svc.CreateFolder(ctx, userID, nil, "Work")
+	folder, err := svc.CreateFolder(ctx, userID, "test-uuid", nil, "Work")
 	require.NoError(t, err)
 	assert.Equal(t, "Work", folder.Name)
 	assert.NotEmpty(t, folder.DiskPath)
@@ -282,15 +282,15 @@ func TestService_RenameFolder(t *testing.T) {
 	svc, userID := newTestStack(t)
 	ctx := context.Background()
 
-	folder, err := svc.CreateFolder(ctx, userID, nil, "OldName")
+	folder, err := svc.CreateFolder(ctx, userID, "test-uuid", nil, "OldName")
 	require.NoError(t, err)
 
 	// Create a note inside the folder.
-	note, err := svc.CreateNote(ctx, userID, &folder.ID, "Note in folder", nil)
+	note, err := svc.CreateNote(ctx, userID, "test-uuid", &folder.ID, "Note in folder", nil)
 	require.NoError(t, err)
 	oldDiskPath := note.DiskPath
 
-	err = svc.RenameFolder(ctx, userID, folder.ID, "NewName")
+	err = svc.RenameFolder(ctx, userID, "test-uuid", folder.ID, "NewName")
 	require.NoError(t, err)
 
 	// Verify the note's disk_path was updated.
@@ -304,7 +304,7 @@ func TestService_DeleteFolder(t *testing.T) {
 	svc, userID := newTestStack(t)
 	ctx := context.Background()
 
-	folder, err := svc.CreateFolder(ctx, userID, nil, "ToDelete")
+	folder, err := svc.CreateFolder(ctx, userID, "test-uuid", nil, "ToDelete")
 	require.NoError(t, err)
 
 	err = svc.DeleteFolder(ctx, userID, folder.ID)
@@ -319,7 +319,7 @@ func TestService_Search(t *testing.T) {
 	svc, userID := newTestStack(t)
 	ctx := context.Background()
 
-	note, err := svc.CreateNote(ctx, userID, nil, "Searchable Note", nil)
+	note, err := svc.CreateNote(ctx, userID, "test-uuid", nil, "Searchable Note", nil)
 	require.NoError(t, err)
 
 	_, err = svc.UpdateNoteContent(ctx, userID, note.ID, "This note contains the word thornotes", note.ContentHash)
@@ -362,7 +362,7 @@ func TestService_CreateFolder_EmptyName(t *testing.T) {
 	svc, userID := newTestStack(t)
 	ctx := context.Background()
 
-	_, err := svc.CreateFolder(ctx, userID, nil, "")
+	_, err := svc.CreateFolder(ctx, userID, "test-uuid", nil, "")
 	require.Error(t, err)
 	var appErr *apperror.AppError
 	require.ErrorAs(t, err, &appErr)
@@ -373,10 +373,10 @@ func TestService_RenameFolder_EmptyName(t *testing.T) {
 	svc, userID := newTestStack(t)
 	ctx := context.Background()
 
-	folder, err := svc.CreateFolder(ctx, userID, nil, "ValidName")
+	folder, err := svc.CreateFolder(ctx, userID, "test-uuid", nil, "ValidName")
 	require.NoError(t, err)
 
-	err = svc.RenameFolder(ctx, userID, folder.ID, "")
+	err = svc.RenameFolder(ctx, userID, "test-uuid", folder.ID, "")
 	require.Error(t, err)
 	var appErr *apperror.AppError
 	require.ErrorAs(t, err, &appErr)
@@ -387,10 +387,10 @@ func TestService_CreateFolder_Nested(t *testing.T) {
 	svc, userID := newTestStack(t)
 	ctx := context.Background()
 
-	parent, err := svc.CreateFolder(ctx, userID, nil, "Parent")
+	parent, err := svc.CreateFolder(ctx, userID, "test-uuid", nil, "Parent")
 	require.NoError(t, err)
 
-	child, err := svc.CreateFolder(ctx, userID, &parent.ID, "Child")
+	child, err := svc.CreateFolder(ctx, userID, "test-uuid", &parent.ID, "Child")
 	require.NoError(t, err)
 	assert.Contains(t, child.DiskPath, "Parent")
 	assert.Contains(t, child.DiskPath, "Child")
@@ -400,13 +400,13 @@ func TestService_RenameFolder_WithParent(t *testing.T) {
 	svc, userID := newTestStack(t)
 	ctx := context.Background()
 
-	parent, err := svc.CreateFolder(ctx, userID, nil, "ParentFolder")
+	parent, err := svc.CreateFolder(ctx, userID, "test-uuid", nil, "ParentFolder")
 	require.NoError(t, err)
 
-	child, err := svc.CreateFolder(ctx, userID, &parent.ID, "ChildOld")
+	child, err := svc.CreateFolder(ctx, userID, "test-uuid", &parent.ID, "ChildOld")
 	require.NoError(t, err)
 
-	err = svc.RenameFolder(ctx, userID, child.ID, "ChildNew")
+	err = svc.RenameFolder(ctx, userID, "test-uuid", child.ID, "ChildNew")
 	require.NoError(t, err)
 
 	updated, err := svc.FolderTree(ctx, userID)
@@ -424,10 +424,10 @@ func TestService_CreateNote_InFolder(t *testing.T) {
 	svc, userID := newTestStack(t)
 	ctx := context.Background()
 
-	folder, err := svc.CreateFolder(ctx, userID, nil, "MyFolder")
+	folder, err := svc.CreateFolder(ctx, userID, "test-uuid", nil, "MyFolder")
 	require.NoError(t, err)
 
-	note, err := svc.CreateNote(ctx, userID, &folder.ID, "Folder Note", nil)
+	note, err := svc.CreateNote(ctx, userID, "test-uuid", &folder.ID, "Folder Note", nil)
 	require.NoError(t, err)
 	assert.Contains(t, note.DiskPath, "MyFolder")
 }
@@ -458,12 +458,12 @@ func TestService_Reconcile(t *testing.T) {
 	searchRepo := sqlite_repo.NewSearchRepo(pool.ReadDB, pool.WriteDB)
 
 	ctx := context.Background()
-	user, err := userRepo.Create(ctx, "testuser2", "$2a$12$fakehash0000000000000000000000000000000000000000000000")
+	user, err := userRepo.Create(ctx, "testuser2", "$2a$12$fakehash0000000000000000000000000000000000000000000000", "test-uuid-" + "testuser2")
 	require.NoError(t, err)
 
 	svc := notes.NewService(noteRepo, folderRepo, searchRepo, sqlite_repo.NewJournalRepo(pool.ReadDB, pool.WriteDB), fs)
 
-	note, err := svc.CreateNote(ctx, user.ID, nil, "Reconcile Test", nil)
+	note, err := svc.CreateNote(ctx, user.ID, "test-uuid", nil, "Reconcile Test", nil)
 	require.NoError(t, err)
 
 	// Manually change the file on disk.
@@ -489,7 +489,7 @@ func TestService_Reconcile_ProgressLogging(t *testing.T) {
 	ctx := context.Background()
 
 	for i := range 105 {
-		_, err := svc.CreateNote(ctx, userID, nil, fmt.Sprintf("note-%03d", i), nil)
+		_, err := svc.CreateNote(ctx, userID, "test-uuid", nil, fmt.Sprintf("note-%03d", i), nil)
 		require.NoError(t, err)
 	}
 
@@ -513,12 +513,12 @@ func TestService_Reconcile_MissingFile(t *testing.T) {
 	searchRepo := sqlite_repo.NewSearchRepo(pool.ReadDB, pool.WriteDB)
 
 	ctx := context.Background()
-	user, err := userRepo.Create(ctx, "testuser3", "$2a$12$fakehash000000000000000000000000000000000000000000000")
+	user, err := userRepo.Create(ctx, "testuser3", "$2a$12$fakehash000000000000000000000000000000000000000000000", "test-uuid-" + "testuser3")
 	require.NoError(t, err)
 
 	svc := notes.NewService(noteRepo, folderRepo, searchRepo, sqlite_repo.NewJournalRepo(pool.ReadDB, pool.WriteDB), fs)
 
-	note, err := svc.CreateNote(ctx, user.ID, nil, "Note Missing File", nil)
+	note, err := svc.CreateNote(ctx, user.ID, "test-uuid", nil, "Note Missing File", nil)
 	require.NoError(t, err)
 
 	// Delete the file from disk so Reconcile hits the fs.Read error path.
@@ -535,13 +535,13 @@ func TestService_CreateFolder_DuplicateName(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a folder named "Alpha".
-	_, err := svc.CreateFolder(ctx, userID, nil, "Alpha")
+	_, err := svc.CreateFolder(ctx, userID, "test-uuid", nil, "Alpha")
 	require.NoError(t, err)
 
 	// Creating another folder with the same name should fail at DB insert
 	// (UNIQUE constraint on name within parent). The service must clean up
 	// the directory it created before returning the error.
-	_, err = svc.CreateFolder(ctx, userID, nil, "Alpha")
+	_, err = svc.CreateFolder(ctx, userID, "test-uuid", nil, "Alpha")
 	require.Error(t, err)
 }
 
@@ -549,7 +549,7 @@ func TestService_RenameFolder_FolderNotFound(t *testing.T) {
 	svc, userID := newTestStack(t)
 	ctx := context.Background()
 
-	err := svc.RenameFolder(ctx, userID, 99999, "NewName")
+	err := svc.RenameFolder(ctx, userID, "test-uuid", 99999, "NewName")
 	require.Error(t, err)
 	assert.ErrorIs(t, err, apperror.ErrNotFound)
 }
@@ -562,15 +562,15 @@ func TestService_CreateNote_FsWriteError(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a note so the user directory gets created.
-	_, err := st.svc.CreateNote(ctx, st.userID, nil, "Seed Note", nil)
+	_, err := st.svc.CreateNote(ctx, st.userID, "test-uuid", nil, "Seed Note", nil)
 	require.NoError(t, err)
 
 	// Make the user directory non-writable so the next CreateTemp call fails.
-	userDir := filepath.Join(st.notesDir, fmt.Sprintf("%d", st.userID))
+	userDir := filepath.Join(st.notesDir, "test-uuid")
 	require.NoError(t, os.Chmod(userDir, 0500))
 	t.Cleanup(func() { _ = os.Chmod(userDir, 0700) })
 
-	_, err = st.svc.CreateNote(ctx, st.userID, nil, "Will Fail", nil)
+	_, err = st.svc.CreateNote(ctx, st.userID, "test-uuid", nil, "Will Fail", nil)
 	require.Error(t, err)
 }
 
@@ -581,11 +581,11 @@ func TestService_UpdateNoteContent_FsWriteError(t *testing.T) {
 	st := newTestStackFull(t)
 	ctx := context.Background()
 
-	note, err := st.svc.CreateNote(ctx, st.userID, nil, "Note To Patch", nil)
+	note, err := st.svc.CreateNote(ctx, st.userID, "test-uuid", nil, "Note To Patch", nil)
 	require.NoError(t, err)
 
 	// Block writes to the user directory.
-	userDir := filepath.Join(st.notesDir, fmt.Sprintf("%d", st.userID))
+	userDir := filepath.Join(st.notesDir, "test-uuid")
 	require.NoError(t, os.Chmod(userDir, 0500))
 	t.Cleanup(func() { _ = os.Chmod(userDir, 0700) })
 
@@ -598,13 +598,13 @@ func TestService_CreateNote_DbCreateError(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a note with a specific title.
-	_, err := svc.CreateNote(ctx, userID, nil, "Duplicate Note", nil)
+	_, err := svc.CreateNote(ctx, userID, "test-uuid", nil, "Duplicate Note", nil)
 	require.NoError(t, err)
 
 	// Creating a second note with the same title triggers a UNIQUE constraint
 	// on the slug column. The service must run cleanup (delete the file it
 	// wrote to disk) and return the DB error.
-	_, err = svc.CreateNote(ctx, userID, nil, "Duplicate Note", nil)
+	_, err = svc.CreateNote(ctx, userID, "test-uuid", nil, "Duplicate Note", nil)
 	require.Error(t, err)
 }
 
@@ -623,7 +623,7 @@ func TestService_DeleteNote_DbDeleteError(t *testing.T) {
 	st := newTestStackFull(t)
 	ctx := context.Background()
 
-	note, err := st.svc.CreateNote(ctx, st.userID, nil, "Note To Delete", nil)
+	note, err := st.svc.CreateNote(ctx, st.userID, "test-uuid", nil, "Note To Delete", nil)
 	require.NoError(t, err)
 
 	// GetByID uses readDB (stays open), but Delete uses writeDB (closed).
@@ -637,7 +637,7 @@ func TestService_SetShareToken_DbError(t *testing.T) {
 	st := newTestStackFull(t)
 	ctx := context.Background()
 
-	note, err := st.svc.CreateNote(ctx, st.userID, nil, "Share Token Note", nil)
+	note, err := st.svc.CreateNote(ctx, st.userID, "test-uuid", nil, "Share Token Note", nil)
 	require.NoError(t, err)
 
 	// SetShareToken uses writeDB (closed) → DB error on SET.
@@ -653,7 +653,7 @@ func TestService_CreateJournal_Simple(t *testing.T) {
 	svc, userID := newTestStack(t)
 	ctx := context.Background()
 
-	j, err := svc.CreateJournal(ctx, userID, "Personal")
+	j, err := svc.CreateJournal(ctx, userID, "test-uuid", "Personal")
 	require.NoError(t, err)
 	assert.NotZero(t, j.ID)
 	assert.Equal(t, "Personal", j.Name)
@@ -664,7 +664,7 @@ func TestService_CreateJournal_EmptyName(t *testing.T) {
 	svc, userID := newTestStack(t)
 	ctx := context.Background()
 
-	_, err := svc.CreateJournal(ctx, userID, "")
+	_, err := svc.CreateJournal(ctx, userID, "test-uuid", "")
 	require.Error(t, err)
 	var appErr *apperror.AppError
 	require.ErrorAs(t, err, &appErr)
@@ -675,11 +675,11 @@ func TestService_CreateJournal_DuplicateName(t *testing.T) {
 	svc, userID := newTestStack(t)
 	ctx := context.Background()
 
-	_, err := svc.CreateJournal(ctx, userID, "Work")
+	_, err := svc.CreateJournal(ctx, userID, "test-uuid", "Work")
 	require.NoError(t, err)
 
 	// Second create with same name should fail on journal record (folder already exists).
-	_, err = svc.CreateJournal(ctx, userID, "Work")
+	_, err = svc.CreateJournal(ctx, userID, "test-uuid", "Work")
 	require.Error(t, err)
 }
 
@@ -696,9 +696,9 @@ func TestService_ListJournals_Multiple(t *testing.T) {
 	svc, userID := newTestStack(t)
 	ctx := context.Background()
 
-	_, err := svc.CreateJournal(ctx, userID, "Personal")
+	_, err := svc.CreateJournal(ctx, userID, "test-uuid", "Personal")
 	require.NoError(t, err)
-	_, err = svc.CreateJournal(ctx, userID, "Work")
+	_, err = svc.CreateJournal(ctx, userID, "test-uuid", "Work")
 	require.NoError(t, err)
 
 	journals, err := svc.ListJournals(ctx, userID)
@@ -710,7 +710,7 @@ func TestService_DeleteJournal(t *testing.T) {
 	svc, userID := newTestStack(t)
 	ctx := context.Background()
 
-	j, err := svc.CreateJournal(ctx, userID, "Temp")
+	j, err := svc.CreateJournal(ctx, userID, "test-uuid", "Temp")
 	require.NoError(t, err)
 
 	err = svc.DeleteJournal(ctx, userID, j.ID)
@@ -734,18 +734,18 @@ func TestService_TodayEntry_CreateAndRetrieve(t *testing.T) {
 	svc, userID := newTestStack(t)
 	ctx := context.Background()
 
-	j, err := svc.CreateJournal(ctx, userID, "Daily")
+	j, err := svc.CreateJournal(ctx, userID, "test-uuid", "Daily")
 	require.NoError(t, err)
 
 	// First call creates the entry.
-	note, err := svc.TodayEntry(ctx, userID, j.ID, time.UTC)
+	note, err := svc.TodayEntry(ctx, userID, "test-uuid", j.ID, time.UTC)
 	require.NoError(t, err)
 	assert.NotZero(t, note.ID)
 	assert.Contains(t, note.Tags, "journal entry")
 	assert.Contains(t, note.Tags, "Daily")
 
 	// Second call returns the same note.
-	note2, err := svc.TodayEntry(ctx, userID, j.ID, time.UTC)
+	note2, err := svc.TodayEntry(ctx, userID, "test-uuid", j.ID, time.UTC)
 	require.NoError(t, err)
 	assert.Equal(t, note.ID, note2.ID)
 }
@@ -754,7 +754,7 @@ func TestService_TodayEntry_NotFoundJournal(t *testing.T) {
 	svc, userID := newTestStack(t)
 	ctx := context.Background()
 
-	_, err := svc.TodayEntry(ctx, userID, 99999, time.UTC)
+	_, err := svc.TodayEntry(ctx, userID, "test-uuid", 99999, time.UTC)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, apperror.ErrNotFound)
 }
@@ -765,7 +765,7 @@ func TestService_CreateGettingStartedNote_CreatesNote(t *testing.T) {
 	svc, userID := newTestStack(t)
 	ctx := context.Background()
 
-	svc.CreateGettingStartedNote(ctx, userID)
+	svc.CreateGettingStartedNote(ctx, userID, "test-uuid")
 
 	// Note should exist in root with correct title.
 	items, err := svc.ListNotes(ctx, userID, nil)
@@ -786,8 +786,8 @@ func TestService_CreateGettingStartedNote_Idempotent(t *testing.T) {
 	ctx := context.Background()
 
 	// Call twice — should not error or create duplicates.
-	svc.CreateGettingStartedNote(ctx, userID)
-	svc.CreateGettingStartedNote(ctx, userID)
+	svc.CreateGettingStartedNote(ctx, userID, "test-uuid")
+	svc.CreateGettingStartedNote(ctx, userID, "test-uuid")
 
 	items, err := svc.ListNotes(ctx, userID, nil)
 	require.NoError(t, err)
@@ -808,14 +808,14 @@ func TestService_ListAllNotes_AcrossFolders(t *testing.T) {
 	ctx := context.Background()
 
 	// Root note.
-	_, err := svc.CreateNote(ctx, userID, nil, "Root Note", nil)
+	_, err := svc.CreateNote(ctx, userID, "test-uuid", nil, "Root Note", nil)
 	require.NoError(t, err)
 
 	// Note in a folder.
-	folder, err := svc.CreateFolder(ctx, userID, nil, "MyFolder")
+	folder, err := svc.CreateFolder(ctx, userID, "test-uuid", nil, "MyFolder")
 	require.NoError(t, err)
 	folderID := folder.ID
-	_, err = svc.CreateNote(ctx, userID, &folderID, "Folder Note", nil)
+	_, err = svc.CreateNote(ctx, userID, "test-uuid", &folderID, "Folder Note", nil)
 	require.NoError(t, err)
 
 	all, err := svc.ListAllNotes(ctx, userID)
@@ -859,7 +859,7 @@ func TestService_NoteContext_WithNotes(t *testing.T) {
 	svc, userID := newTestStack(t)
 	ctx := context.Background()
 
-	note, err := svc.CreateNote(ctx, userID, nil, "My Note", nil)
+	note, err := svc.CreateNote(ctx, userID, "test-uuid", nil, "My Note", nil)
 	require.NoError(t, err)
 	_, err = svc.UpdateNoteContent(ctx, userID, note.ID, "hello world", note.ContentHash)
 	require.NoError(t, err)
@@ -881,13 +881,13 @@ func TestService_NoteContext_Truncated(t *testing.T) {
 	// Use 150k chars per note — the second note should be truncated.
 	bigContent := strings.Repeat("x", 150_000)
 
-	note1, err := svc.CreateNote(ctx, userID, nil, "Big Note 1", nil)
+	note1, err := svc.CreateNote(ctx, userID, "test-uuid", nil, "Big Note 1", nil)
 	require.NoError(t, err)
 	hash1, err := svc.UpdateNoteContent(ctx, userID, note1.ID, bigContent, note1.ContentHash)
 	require.NoError(t, err)
 	_ = hash1
 
-	note2, err := svc.CreateNote(ctx, userID, nil, "Big Note 2", nil)
+	note2, err := svc.CreateNote(ctx, userID, "test-uuid", nil, "Big Note 2", nil)
 	require.NoError(t, err)
 	hash2, err := svc.UpdateNoteContent(ctx, userID, note2.ID, bigContent, note2.ContentHash)
 	require.NoError(t, err)
@@ -905,14 +905,14 @@ func TestService_NoteContext_FolderFilter(t *testing.T) {
 	ctx := context.Background()
 
 	// Root note.
-	_, err := svc.CreateNote(ctx, userID, nil, "Root Note", nil)
+	_, err := svc.CreateNote(ctx, userID, "test-uuid", nil, "Root Note", nil)
 	require.NoError(t, err)
 
 	// Note in a folder.
-	folder, err := svc.CreateFolder(ctx, userID, nil, "Work")
+	folder, err := svc.CreateFolder(ctx, userID, "test-uuid", nil, "Work")
 	require.NoError(t, err)
 	folderID := folder.ID
-	_, err = svc.CreateNote(ctx, userID, &folderID, "Work Note", nil)
+	_, err = svc.CreateNote(ctx, userID, "test-uuid", &folderID, "Work Note", nil)
 	require.NoError(t, err)
 
 	// Context scoped to folder only should not include root note.

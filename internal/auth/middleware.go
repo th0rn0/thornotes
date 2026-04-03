@@ -81,6 +81,9 @@ func BearerMiddleware(tokens repository.APITokenRepository, users repository.Use
 			_ = tokens.TouchLastUsed(context.Background(), apiToken.ID)
 		}()
 
+		// Stamp the token scope onto the user so handlers can enforce it.
+		user.TokenScope = apiToken.Scope
+
 		// Set user both ways so auth.UserFromContext still works.
 		ctx := context.WithValue(c.Request.Context(), userContextKey, user)
 		c.Request = c.Request.WithContext(ctx)

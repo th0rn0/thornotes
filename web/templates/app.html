@@ -311,6 +311,15 @@ body {
 .note-ctx-menu button.ctx-danger { color: #c00; }
 .note-ctx-menu button.ctx-danger:hover { background: #fff0f0; }
 .note-ctx-menu .ctx-sep { border: none; border-top: 1px solid var(--border-light); margin: 3px 0; }
+.folder-ctx-menu { position: fixed; background: var(--bg-modal); border: 1px solid var(--border); border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,.18); z-index: 2000; min-width: 130px; padding: 4px 0; display: none; }
+.folder-ctx-menu button { display: block; width: 100%; text-align: left; padding: 7px 14px; background: none; border: none; cursor: pointer; font-size: 13px; color: var(--text); }
+.folder-ctx-menu button:hover { background: var(--bg-hover); }
+.folder-ctx-menu button.ctx-danger { color: #c00; }
+.folder-ctx-menu button.ctx-danger:hover { background: #fff0f0; }
+.folder-ctx-menu .ctx-sep { border: none; border-top: 1px solid var(--border-light); margin: 3px 0; }
+.token-scope-badge { font-size: 10px; padding: 2px 6px; border-radius: 3px; font-weight: 600; margin-left: 4px; }
+.token-scope-badge.read { background: #e8f4fd; color: #1a6fa8; }
+.token-scope-badge.readwrite { background: #e8f5e9; color: #2e7d32; }
 
 /* ── RESPONSIVE / MOBILE ──────────────────────────────────────────────────── */
 @media (max-width: 640px) {
@@ -412,6 +421,7 @@ body {
       <div class="sidebar-toolbar">
         <button id="create-note-btn">+ Note</button>
         <button id="create-folder-btn">+ Folder</button>
+        <button id="import-btn" title="Import .md or .zip">↑ Import</button>
       </div>
       <div class="sidebar-search">
         <input id="search-input" type="search" placeholder="Search notes…" />
@@ -516,8 +526,12 @@ body {
       <div class="token-value" id="token-reveal-value"></div>
       <button class="token-copy-btn">Copy</button>
     </div>
-    <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px">
-      <input id="new-token-name" type="text" placeholder="Token name (e.g. Claude Desktop)" style="flex:1;border:1px solid #ccc;padding:7px 8px;font-size:12px" />
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
+      <input id="new-token-name" type="text" placeholder="Token name (e.g. Claude Desktop)" style="flex:1;min-width:140px;border:1px solid #ccc;padding:7px 8px;font-size:12px" />
+      <select id="new-token-scope" style="border:1px solid #ccc;padding:7px 8px;font-size:12px;background:#fff">
+        <option value="readwrite">Read + Write</option>
+        <option value="read">Read only</option>
+      </select>
       <button id="create-token-btn" style="padding:7px 14px;font-size:12px;border:1px solid #ccc;background:#fff;cursor:pointer;white-space:nowrap">+ New token</button>
     </div>
     <div class="modal-actions">
@@ -562,10 +576,36 @@ body {
 </div>
 
 <div id="notification"></div>
+
+<!-- NOTE context menu -->
 <div id="note-ctx-menu" class="note-ctx-menu">
   <button data-ctx-action="open">Open</button>
   <hr class="ctx-sep">
   <button data-ctx-action="delete" class="ctx-danger">Delete</button>
+</div>
+
+<!-- FOLDER context menu -->
+<div id="folder-ctx-menu" class="folder-ctx-menu">
+  <button data-folder-ctx-action="rename">Rename</button>
+  <hr class="ctx-sep">
+  <button data-folder-ctx-action="delete" class="ctx-danger">Delete</button>
+</div>
+
+<!-- IMPORT MODAL -->
+<div class="modal-overlay" id="import-modal" style="display:none">
+  <div class="modal" style="max-width:400px">
+    <h2>Import Notes</h2>
+    <p style="font-size:13px;color:var(--text-muted);margin-bottom:16px">
+      Import a single <code>.md</code> file or a <code>.zip</code> archive of Markdown files.
+      Folder structure inside the ZIP will be preserved as folders.
+    </p>
+    <input type="file" id="import-file-input" accept=".md,.zip" style="margin-bottom:16px;font-size:13px;width:100%">
+    <div id="import-status" style="font-size:13px;color:var(--text-muted);min-height:20px;margin-bottom:12px"></div>
+    <div class="modal-actions">
+      <button id="import-cancel-btn">Cancel</button>
+      <button id="import-confirm-btn" class="primary">Import</button>
+    </div>
+  </div>
 </div>
 
 <div id="disk-full-banner">&#9888; Your disk is full &mdash; note could not be saved. Free up space to continue.<a id="disk-full-dismiss">Dismiss</a></div>

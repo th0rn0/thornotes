@@ -18,11 +18,11 @@ func NewUserRepo(db *sql.DB) *UserRepo {
 	return &UserRepo{db: db}
 }
 
-func (r *UserRepo) Create(ctx context.Context, username, passwordHash string) (*model.User, error) {
+func (r *UserRepo) Create(ctx context.Context, username, passwordHash, uuid string) (*model.User, error) {
 	var id int64
 	err := r.db.QueryRowContext(ctx,
-		`INSERT INTO users (username, password_hash) VALUES (?, ?) RETURNING id`,
-		username, passwordHash,
+		`INSERT INTO users (username, password_hash, uuid) VALUES (?, ?, ?) RETURNING id`,
+		username, passwordHash, uuid,
 	).Scan(&id)
 	if err != nil {
 		if isUniqueConstraint(err) {
@@ -36,30 +36,34 @@ func (r *UserRepo) Create(ctx context.Context, username, passwordHash string) (*
 
 func (r *UserRepo) GetByUsername(ctx context.Context, username string) (*model.User, error) {
 	u := &model.User{}
+	var uuid sql.NullString
 	err := r.db.QueryRowContext(ctx,
-		`SELECT id, username, password_hash, created_at FROM users WHERE username = ?`,
+		`SELECT id, uuid, username, password_hash, created_at FROM users WHERE username = ?`,
 		username,
-	).Scan(&u.ID, &u.Username, &u.PasswordHash, &u.CreatedAt)
+	).Scan(&u.ID, &uuid, &u.Username, &u.PasswordHash, &u.CreatedAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, apperror.ErrNotFound
 		}
 		return nil, fmt.Errorf("get user: %w", err)
 	}
+	u.UUID = uuid.String
 	return u, nil
 }
 
 func (r *UserRepo) GetByID(ctx context.Context, id int64) (*model.User, error) {
 	u := &model.User{}
+	var uuid sql.NullString
 	err := r.db.QueryRowContext(ctx,
-		`SELECT id, username, password_hash, created_at FROM users WHERE id = ?`, id,
-	).Scan(&u.ID, &u.Username, &u.PasswordHash, &u.CreatedAt)
+		`SELECT id, uuid, username, password_hash, created_at FROM users WHERE id = ?`, id,
+	).Scan(&u.ID, &uuid, &u.Username, &u.PasswordHash, &u.CreatedAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, apperror.ErrNotFound
 		}
 		return nil, fmt.Errorf("get user by id: %w", err)
 	}
+	u.UUID = uuid.String
 	return u, nil
 }
 
@@ -76,6 +80,28 @@ func (r *UserRepo) IDs(ctx context.Context) ([]int64, error) {
 	}
 	defer rows.Close()
 
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+func (r *UserRepo) SetUUID(ctx context.Context, id int64, uuid string) error {
+	_, err := r.db.ExecContext(ctx, `UPDATE users SET uuid = ? WHERE id = ?`, uuid, id)
+	return err
+}
+
+func (r *UserRepo) ListWithoutUUID(ctx context.Context) ([]int64, error) {
+	rows, err := r.db.QueryContext(ctx, `SELECT id FROM users WHERE uuid IS NULL OR uuid = ''`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
 	var ids []int64
 	for rows.Next() {
 		var id int64
