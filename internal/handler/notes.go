@@ -103,7 +103,12 @@ func (h *NotesHandler) Patch(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "updated"})
+	note, err := h.svc.GetNote(c.Request.Context(), user.ID, noteID)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"message": "updated"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "updated", "slug": note.Slug, "title": note.Title})
 }
 
 type moveNoteRequest struct {

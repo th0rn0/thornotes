@@ -727,9 +727,18 @@ function setSaveStatus(state) {
 
 async function onTitleChange() {
   if (!currentNote) return;
-  const title = document.getElementById('note-title').value;
-  await api('PATCH', `/api/v1/notes/${currentNote.id}`, { title }).catch(() => {});
+  const title = document.getElementById('note-title').value.trim();
+  if (!title || title === currentNote.title) return;
+  const updated = await api('PATCH', `/api/v1/notes/${currentNote.id}`, { title }).catch(() => null);
   currentNote.title = title;
+  if (updated && updated.slug) {
+    currentNote.slug = updated.slug;
+    history.replaceState({ noteId: currentNote.id }, '', noteDeepLink(currentNote));
+  }
+  // Update the in-memory list so renderTree() shows the new title immediately.
+  const updateInList = list => { const n = list.find(n => n.id === currentNote.id); if (n) n.title = title; };
+  updateInList(rootNotes);
+  for (const fid of Object.keys(notesByFolder)) updateInList(notesByFolder[fid]);
   renderTree();
 }
 

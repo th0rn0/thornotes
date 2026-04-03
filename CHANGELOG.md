@@ -2,6 +2,12 @@
 
 All notable changes to thornotes are documented here.
 
+## [1.5.2.0] - 2026-04-03
+
+### Changed
+- **URL updates when note title changes** — renaming a note in the titlebar now updates the browser URL to reflect the new slug immediately, via `history.replaceState`. The PATCH response now returns the server-computed slug and title so the client stays in sync.
+- **Faster sidebar update on title rename** — the in-memory note list (`notesByFolder` / `rootNotes`) is updated immediately before `renderTree()` is called, so the sidebar reflects the new title without waiting for a full tree reload.
+
 ## [1.5.1.0] - 2026-04-03
 
 ### Added
