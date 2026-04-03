@@ -2,6 +2,11 @@
 
 All notable changes to thornotes are documented here.
 
+## [1.1.1.0] - 2026-04-03
+
+### Added
+- **Dark mode on shared note preview** — the `/s/:token` share page now respects the visitor's OS dark mode preference. Uses `prefers-color-scheme` media queries: dark background (`#1a1a1a`), light text, adapted code blocks and blockquotes. Syntax highlighting swaps to `highlight-github-dark.min.css` via CSS `media` attribute — no JS, no flash.
+
 ## [1.1.0.0] - 2026-04-03
 
 ### Added

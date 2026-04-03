@@ -22,7 +22,16 @@ h1.note-title { font-size: 26px; margin-bottom: 6px; letter-spacing: -0.5px; }
 .content blockquote { border-left: 3px solid #ddd; padding-left: 14px; color: #666; margin-bottom: 12px; }
 .content a { color: #222; }
 .footer { margin-top: 48px; padding-top: 16px; border-top: 1px solid #eee; font-size: 11px; color: #bbb; }
-<link rel="stylesheet" href="/static/css/highlight-github.min.css">
+@media (prefers-color-scheme: dark) {
+  body { color: #e0e0e0; background: #1a1a1a; }
+  .content code { background: #2a2a2a; }
+  .content pre { background: #242424; }
+  .content blockquote { border-left-color: #444; color: #aaa; }
+  .content a { color: #e0e0e0; }
+  .footer { border-top-color: #333; }
+}
+<link rel="stylesheet" href="/static/css/highlight-github.min.css" media="(prefers-color-scheme: light), (prefers-color-scheme: no-preference)">
+<link rel="stylesheet" href="/static/css/highlight-github-dark.min.css" media="(prefers-color-scheme: dark)">
 </style>
 </head>
 <body>
