@@ -257,6 +257,78 @@ func TestHistoryRestore_BadJSON(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, rr.Code)
 }
 
+// ─── MoveNote handler validation ────────────────────────────────────────────
+
+func newMoveNoteRouter(user *model.User, svc *notes.Service) *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	h := NewNotesHandler(svc)
+	r.Use(func(c *gin.Context) {
+		c.Set("user", user)
+		c.Next()
+	})
+	r.PATCH("/notes/:id/move", h.Move)
+	return r
+}
+
+func TestMoveNote_InvalidID(t *testing.T) {
+	user := &model.User{ID: 1}
+	r := newMoveNoteRouter(user, nil)
+	req := httptest.NewRequest(http.MethodPatch, "/notes/notanid/move",
+		strings.NewReader(`{"folder_id":null}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+func TestMoveNote_BadJSON(t *testing.T) {
+	user := &model.User{ID: 1}
+	r := newMoveNoteRouter(user, nil)
+	req := httptest.NewRequest(http.MethodPatch, "/notes/1/move",
+		strings.NewReader("notjson"))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+// ─── MoveFolder handler validation ──────────────────────────────────────────
+
+func newMoveFolderRouter(user *model.User, svc *notes.Service) *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	h := NewFoldersHandler(svc)
+	r.Use(func(c *gin.Context) {
+		c.Set("user", user)
+		c.Next()
+	})
+	r.PATCH("/folders/:id/move", h.Move)
+	return r
+}
+
+func TestMoveFolder_InvalidID(t *testing.T) {
+	user := &model.User{ID: 1}
+	r := newMoveFolderRouter(user, nil)
+	req := httptest.NewRequest(http.MethodPatch, "/folders/notanid/move",
+		strings.NewReader(`{"parent_id":null}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+func TestMoveFolder_BadJSON(t *testing.T) {
+	user := &model.User{ID: 1}
+	r := newMoveFolderRouter(user, nil)
+	req := httptest.NewRequest(http.MethodPatch, "/folders/1/move",
+		strings.NewReader("notjson"))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
 // ─── ShareHandler unit tests ──────────────────────────────────────────────────
 
 func TestShareHandler_EmptyToken(t *testing.T) {

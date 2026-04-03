@@ -138,6 +138,17 @@ func (s *Service) FileStore() *FileStore {
 	return s.fs
 }
 
+// ptrEq reports whether two *int64 pointers point to equal values (or are both nil).
+func ptrEq(a, b *int64) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return *a == *b
+}
+
 // FolderTree returns the folder tree for a user.
 func (s *Service) FolderTree(ctx context.Context, userID int64) ([]*model.FolderTreeItem, error) {
 	return s.folders.Tree(ctx, userID)

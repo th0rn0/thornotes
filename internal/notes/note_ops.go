@@ -126,6 +126,44 @@ func (s *Service) UpdateNoteMetadata(ctx context.Context, userID, noteID int64, 
 	return s.notes.Update(ctx, note)
 }
 
+// MoveNote moves a note to newFolderID (nil = root/unsorted). It:
+// 1. Moves the file on disk.
+// 2. Updates the note's folder_id and disk_path in DB.
+func (s *Service) MoveNote(ctx context.Context, userID, noteID int64, newFolderID *int64) error {
+	note, err := s.notes.GetByID(ctx, userID, noteID)
+	if err != nil {
+		return err
+	}
+
+	// No-op if already in the target folder.
+	if ptrEq(note.FolderID, newFolderID) {
+		return nil
+	}
+
+	var newFolderPath string
+	if newFolderID != nil {
+		folder, err := s.folders.GetByID(ctx, userID, *newFolderID)
+		if err != nil {
+			return err
+		}
+		newFolderPath = folder.DiskPath
+	}
+
+	oldDiskPath := note.DiskPath
+	newDiskPath := notesDiskPath(userID, newFolderPath, note.Slug)
+
+	if err := s.fs.RenameFile(oldDiskPath, newDiskPath); err != nil {
+		return apperror.Internal("move note file", err)
+	}
+
+	if err := s.notes.Move(ctx, userID, noteID, newFolderID, newDiskPath); err != nil {
+		_ = s.fs.RenameFile(newDiskPath, oldDiskPath)
+		return err
+	}
+
+	return nil
+}
+
 // DeleteNote removes a note from DB and disk.
 func (s *Service) DeleteNote(ctx context.Context, userID, noteID int64) error {
 	note, err := s.notes.GetByID(ctx, userID, noteID)

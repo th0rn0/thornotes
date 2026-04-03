@@ -179,6 +179,31 @@ func (fs *FileStore) RenameDir(oldRelPath, newRelPath string) error {
 	return nil
 }
 
+// RenameFile moves a single file from oldRelPath to newRelPath.
+// Both paths are relative to notesRoot.
+func (fs *FileStore) RenameFile(oldRelPath, newRelPath string) error {
+	oldAbs, err := fs.safePath(oldRelPath)
+	if err != nil {
+		return err
+	}
+	newAbs, err := fs.safePath(newRelPath)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(newAbs), 0700); err != nil {
+		return fmt.Errorf("mkdir parent: %w", err)
+	}
+	if err := os.Rename(oldAbs, newAbs); err != nil {
+		return fmt.Errorf("rename file: %w", err)
+	}
+	if fs.git != nil {
+		if err := fs.git.CommitRename(oldRelPath, newRelPath); err != nil {
+			log.Warn().Err(err).Str("old", oldRelPath).Str("new", newRelPath).Msg("git commit rename")
+		}
+	}
+	return nil
+}
+
 // EnsureDir creates the directory at relativePath if it doesn't exist.
 func (fs *FileStore) EnsureDir(relativePath string) error {
 	absPath, err := fs.safePath(relativePath)

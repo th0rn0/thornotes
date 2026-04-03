@@ -193,6 +193,25 @@ func (r *NoteRepo) UpdateContent(ctx context.Context, userID, noteID int64, cont
 	return nil
 }
 
+func (r *NoteRepo) Move(ctx context.Context, userID, noteID int64, newFolderID *int64, newDiskPath string) error {
+	res, err := r.db.ExecContext(ctx,
+		`UPDATE notes SET folder_id = ?, disk_path = ?, updated_at = NOW()
+		 WHERE id = ? AND user_id = ?`,
+		newFolderID, newDiskPath, noteID, userID,
+	)
+	if err != nil {
+		if isUniqueConstraint(err) {
+			return apperror.Conflict("a note with that name already exists in the destination folder")
+		}
+		return fmt.Errorf("move note: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return apperror.ErrNotFound
+	}
+	return nil
+}
+
 func (r *NoteRepo) Delete(ctx context.Context, userID, noteID int64) error {
 	res, err := r.db.ExecContext(ctx,
 		`DELETE FROM notes WHERE id = ? AND user_id = ?`, noteID, userID)

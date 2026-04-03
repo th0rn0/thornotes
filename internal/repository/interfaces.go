@@ -30,6 +30,8 @@ type FolderRepository interface {
 	GetByDiskPath(ctx context.Context, diskPath string) (*model.Folder, error)
 	Tree(ctx context.Context, userID int64) ([]*model.FolderTreeItem, error)
 	Rename(ctx context.Context, userID, folderID int64, newName, newDiskPath string) error
+	// Move updates the folder's parent_id and disk_path (used when reparenting via drag-and-drop).
+	Move(ctx context.Context, userID, folderID int64, newParentID *int64, newDiskPath string) error
 	// UpdateDescendantPaths is called as part of folder rename to cascade disk_path updates.
 	// Must run inside the same transaction as the OS rename.
 	UpdateDescendantPaths(ctx context.Context, oldPrefix, newPrefix string) error
@@ -55,6 +57,8 @@ type NoteRepository interface {
 	ListForContext(ctx context.Context, userID int64, folderID *int64) ([]*model.Note, error)
 	Update(ctx context.Context, n *model.Note) error
 	UpdateContent(ctx context.Context, userID, noteID int64, content, contentHash, expectedHash string) error
+	// Move updates the note's folder_id and disk_path (used when reparenting via drag-and-drop).
+	Move(ctx context.Context, userID, noteID int64, newFolderID *int64, newDiskPath string) error
 	Delete(ctx context.Context, userID, noteID int64) error
 	SetShareToken(ctx context.Context, userID, noteID int64, token *string) error
 }

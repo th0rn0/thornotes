@@ -203,7 +203,7 @@ function renderTree() {
 
     const folderActive = currentFolderId === f.id ? ' active' : '';
     html += `<div class="tree-folder" data-folder-id="${f.id}">`;
-    html += `<div class="tree-folder-label${folderActive}" style="padding-left:${8 + indent}px" data-action="select-folder" data-folder-id="${f.id}">`;
+    html += `<div class="tree-folder-label${folderActive}" style="padding-left:${8 + indent}px" data-action="select-folder" data-folder-id="${f.id}" draggable="true">`;
     html += `<span class="icon">${icon}</span>${esc(f.name)}`;
     html += `</div>`;
 
@@ -211,7 +211,7 @@ function renderTree() {
       html += `<div class="tree-notes">`;
       for (const n of notes) {
         const active = currentNote && currentNote.id === n.id ? ' active' : '';
-        html += `<div class="tree-note${active}" style="padding-left:${20 + indent}px" data-action="open-note" data-note-id="${n.id}" title="${esc(n.title)}">${esc(n.title)}</div>`;
+        html += `<div class="tree-note${active}" style="padding-left:${20 + indent}px" data-action="open-note" data-note-id="${n.id}" title="${esc(n.title)}" draggable="true">${esc(n.title)}</div>`;
       }
       for (const child of children) {
         renderFolder(child, depth + 1);
@@ -226,11 +226,14 @@ function renderTree() {
 
   // Root (unsorted) notes.
   if (rootNotes.length > 0) {
-    html += `<div class="tree-unsorted">Unsorted</div>`;
+    html += `<div class="tree-unsorted drop-root">Unsorted</div>`;
     for (const n of rootNotes) {
       const active = currentNote && currentNote.id === n.id ? ' active' : '';
-      html += `<div class="tree-note${active}" style="padding-left:12px" data-action="open-note" data-note-id="${n.id}" title="${esc(n.title)}">${esc(n.title)}</div>`;
+      html += `<div class="tree-note${active}" style="padding-left:12px" data-action="open-note" data-note-id="${n.id}" title="${esc(n.title)}" draggable="true">${esc(n.title)}</div>`;
     }
+  } else {
+    // No unsorted notes yet — invisible until a drag starts.
+    html += `<div class="tree-root-drop drop-root">Unsorted</div>`;
   }
 
   tree.innerHTML = html;
@@ -245,6 +248,98 @@ async function selectFolder(folderId) {
     await loadFolderNotes(folderId);
   }
 }
+
+// ── Drag-and-drop tree ─────────────────────────────────────────────────────
+let _dndPayload = null; // { type: 'note'|'folder', id: number }
+
+(function initTreeDnd() {
+  const treeEl = document.getElementById('tree');
+
+  treeEl.addEventListener('dragstart', function(e) {
+    const noteEl = e.target.closest('[data-note-id]');
+    const folderEl = e.target.closest('[data-folder-id][draggable]');
+    if (noteEl) {
+      _dndPayload = { type: 'note', id: parseInt(noteEl.dataset.noteId) };
+    } else if (folderEl) {
+      _dndPayload = { type: 'folder', id: parseInt(folderEl.dataset.folderId) };
+    } else {
+      e.preventDefault();
+      return;
+    }
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', ''); // required for Firefox
+    e.target.classList.add('dnd-dragging');
+    treeEl.classList.add('dnd-active');
+  });
+
+  treeEl.addEventListener('dragend', function(e) {
+    _dndPayload = null;
+    treeEl.classList.remove('dnd-active');
+    treeEl.querySelectorAll('.dnd-dragging').forEach(el => el.classList.remove('dnd-dragging'));
+    treeEl.querySelectorAll('.dnd-over').forEach(el => el.classList.remove('dnd-over'));
+  });
+
+  treeEl.addEventListener('dragover', function(e) {
+    if (!_dndPayload) return;
+    const target = e.target.closest('.tree-folder-label, .drop-root');
+    if (!target) return;
+    // Can't drop a folder onto its own label.
+    if (_dndPayload.type === 'folder' && target.dataset.folderId === String(_dndPayload.id)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    treeEl.querySelectorAll('.dnd-over').forEach(el => el.classList.remove('dnd-over'));
+    target.classList.add('dnd-over');
+  });
+
+  treeEl.addEventListener('drop', async function(e) {
+    e.preventDefault();
+    treeEl.querySelectorAll('.dnd-over').forEach(el => el.classList.remove('dnd-over'));
+    if (!_dndPayload) return;
+
+    const folderLabel = e.target.closest('.tree-folder-label');
+    const rootTarget = e.target.closest('.drop-root');
+    if (!folderLabel && !rootTarget) return;
+
+    // Determine destination: folder ID or null (root).
+    let destFolderId = null;
+    if (folderLabel) {
+      const id = parseInt(folderLabel.dataset.folderId);
+      if (_dndPayload.type === 'folder' && id === _dndPayload.id) return;
+      destFolderId = id;
+    }
+
+    const payload = _dndPayload;
+    _dndPayload = null;
+
+    try {
+      if (payload.type === 'note') {
+        await api('PATCH', `/api/v1/notes/${payload.id}/move`, { folder_id: destFolderId });
+      } else {
+        await api('PATCH', `/api/v1/folders/${payload.id}/move`, { parent_id: destFolderId });
+      }
+    } catch (err) {
+      showNotification(err.message || 'Move failed', true);
+      return;
+    }
+
+    // Reload tree, preserving which folders were expanded.
+    const wasExpanded = new Set(loadedFolderIds);
+    notesByFolder = {};
+    loadedFolderIds = new Set();
+    [folders, rootNotes] = await Promise.all([
+      api('GET', '/api/v1/folders'),
+      api('GET', '/api/v1/notes/root'),
+    ]);
+    await Promise.all([...wasExpanded].map(async id => {
+      if (folders.find(f => f.id === id)) {
+        const items = await api('GET', `/api/v1/folders/${id}/notes`).catch(() => []);
+        notesByFolder[id] = items || [];
+        loadedFolderIds.add(id);
+      }
+    }));
+    renderTree();
+  });
+})();
 
 // ── Search ─────────────────────────────────────────────────────────────────
 let searchDebounce = null;

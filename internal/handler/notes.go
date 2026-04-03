@@ -106,6 +106,32 @@ func (h *NotesHandler) Patch(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "updated"})
 }
 
+type moveNoteRequest struct {
+	FolderID *int64 `json:"folder_id"` // null = move to root/unsorted
+}
+
+func (h *NotesHandler) Move(c *gin.Context) {
+	user := ginUser(c)
+	noteID, err := ginParamInt64(c, "id")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid note id"})
+		return
+	}
+
+	var req moveNoteRequest
+	if err := readJSON(c, &req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := h.svc.MoveNote(c.Request.Context(), user.ID, noteID, req.FolderID); err != nil {
+		writeError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "moved"})
+}
+
 func (h *NotesHandler) Delete(c *gin.Context) {
 	user := ginUser(c)
 	noteID, err := ginParamInt64(c, "id")

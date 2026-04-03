@@ -2,6 +2,14 @@
 
 All notable changes to thornotes are documented here.
 
+## [1.1.0.0] - 2026-04-03
+
+### Added
+- **Move notes and folders** — drag or right-click to move any note into a folder (or back to the root). Folders can be reparented to any other folder (with circular-reference protection). Full cascade: moving a folder renames all descendant disk paths in one transaction. File is moved on disk before DB update; disk rename rolls back automatically on DB failure.
+
+### Security
+- **Path traversal fix (HIGH)** — folder names containing `..` or `/` are now rejected at the service layer in `CreateFolder` and `RenameFolder`. `filepath.Join("1", "../2")` evaluates to `"2"` in Go, which mapped attacker user_id=1's folder into user_id=2's root directory. The previous `safePath` guard only prevented escaping `notesRoot` entirely; it did not block cross-user traversal within it. Fix: `filepath.Base(name) != name || name == ".." || name == "."` guard added to both operations. Covers `CreateJournal` automatically (it calls `CreateFolder` internally).
+
 ## [1.0.0.0] - 2026-04-02
 
 ### Changed

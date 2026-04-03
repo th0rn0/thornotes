@@ -111,6 +111,24 @@ func (r *FolderRepo) Rename(ctx context.Context, userID, folderID int64, newName
 	return nil
 }
 
+func (r *FolderRepo) Move(ctx context.Context, userID, folderID int64, newParentID *int64, newDiskPath string) error {
+	res, err := r.writeDB.ExecContext(ctx,
+		`UPDATE folders SET parent_id = ?, disk_path = ? WHERE id = ? AND user_id = ?`,
+		newParentID, newDiskPath, folderID, userID,
+	)
+	if err != nil {
+		if isUniqueConstraint(err) {
+			return apperror.Conflict("a folder with that name already exists in the destination")
+		}
+		return fmt.Errorf("move folder: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return apperror.ErrNotFound
+	}
+	return nil
+}
+
 func (r *FolderRepo) UpdateDescendantPaths(ctx context.Context, oldPrefix, newPrefix string) error {
 	// Update all folders whose disk_path starts with oldPrefix.
 	_, err := r.writeDB.ExecContext(ctx,

@@ -93,6 +93,12 @@ body {
 .tree-note:hover { background: #eee; }
 .tree-note.active { background: #222; color: #fff; }
 .tree-unsorted { padding: 8px 8px 2px; font-size: 10px; color: #aaa; text-transform: uppercase; letter-spacing: 0.5px; }
+.dnd-dragging { opacity: 0.4; }
+.tree-folder-label.dnd-over { background: #d0e8ff; outline: 2px dashed #5ba3f5; outline-offset: -2px; border-radius: 3px; }
+.tree-unsorted.dnd-over { background: #d0e8ff; outline: 2px dashed #5ba3f5; outline-offset: -2px; border-radius: 3px; color: #444; }
+.tree-root-drop { display: none; padding: 6px 8px; font-size: 10px; color: #aaa; text-transform: uppercase; letter-spacing: 0.5px; border-radius: 3px; }
+.tree-root-drop.dnd-over { background: #d0e8ff; outline: 2px dashed #5ba3f5; outline-offset: -2px; color: #444; }
+#tree.dnd-active .tree-root-drop { display: block; }
 
 /* EDITOR */
 .editor-pane { flex: 1; display: flex; flex-direction: column; overflow: hidden; background: #fff; min-width: 0; }
@@ -191,6 +197,10 @@ body.dark .tree-note { color: #ababab; }
 body.dark .tree-note:hover { background: #2d2d2d; }
 body.dark .tree-note.active { background: #04395e; color: #d4d4d4; }
 body.dark .tree-unsorted { color: #555; }
+body.dark .tree-folder-label.dnd-over { background: #1a3a5c; outline-color: #5ba3f5; }
+body.dark .tree-unsorted.dnd-over { background: #1a3a5c; outline-color: #5ba3f5; color: #ccc; }
+body.dark .tree-root-drop { color: #555; }
+body.dark .tree-root-drop.dnd-over { background: #1a3a5c; outline-color: #5ba3f5; color: #ccc; }
 body.dark .editor-pane { background: #1e1e1e; }
 body.dark .editor-titlebar { border-bottom-color: #3e3e42; }
 body.dark .editor-titlebar input { color: #d4d4d4; }

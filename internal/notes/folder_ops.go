@@ -2,6 +2,7 @@ package notes
 
 import (
 	"context"
+	"path/filepath"
 
 	"github.com/th0rn0/thornotes/internal/apperror"
 	"github.com/th0rn0/thornotes/internal/model"
@@ -11,6 +12,9 @@ import (
 func (s *Service) CreateFolder(ctx context.Context, userID int64, parentID *int64, name string) (*model.Folder, error) {
 	if len(name) == 0 || len(name) > 255 {
 		return nil, apperror.BadRequest("folder name must be 1–255 characters")
+	}
+	if filepath.Base(name) != name || name == ".." || name == "." {
+		return nil, apperror.BadRequest("folder name must not contain path separators")
 	}
 
 	var parentPath string
@@ -44,6 +48,9 @@ func (s *Service) CreateFolder(ctx context.Context, userID int64, parentID *int6
 func (s *Service) RenameFolder(ctx context.Context, userID, folderID int64, newName string) error {
 	if len(newName) == 0 || len(newName) > 255 {
 		return apperror.BadRequest("folder name must be 1–255 characters")
+	}
+	if filepath.Base(newName) != newName || newName == ".." || newName == "." {
+		return apperror.BadRequest("folder name must not contain path separators")
 	}
 
 	folder, err := s.folders.GetByID(ctx, userID, folderID)
@@ -84,6 +91,88 @@ func (s *Service) RenameFolder(ctx context.Context, userID, folderID int64, newN
 	}
 
 	return nil
+}
+
+// MoveFolder reparents a folder to newParentID (nil = root). It:
+// 1. Validates the move (no circular references).
+// 2. Renames the OS directory.
+// 3. Updates the folder's parent_id and disk_path in DB.
+// 4. Cascades disk_path updates to all descendants.
+func (s *Service) MoveFolder(ctx context.Context, userID, folderID int64, newParentID *int64) error {
+	folder, err := s.folders.GetByID(ctx, userID, folderID)
+	if err != nil {
+		return err
+	}
+
+	// No-op if already in the target location.
+	if ptrEq(folder.ParentID, newParentID) {
+		return nil
+	}
+
+	// Validate the target parent.
+	var newParentPath string
+	if newParentID != nil {
+		// Prevent moving into itself.
+		if *newParentID == folderID {
+			return apperror.BadRequest("cannot move a folder into itself")
+		}
+		// Prevent moving into a descendant.
+		desc, err := s.isFolderDescendant(ctx, userID, folderID, *newParentID)
+		if err != nil {
+			return err
+		}
+		if desc {
+			return apperror.BadRequest("cannot move a folder into one of its own descendants")
+		}
+		parent, err := s.folders.GetByID(ctx, userID, *newParentID)
+		if err != nil {
+			return err
+		}
+		newParentPath = parent.DiskPath
+	}
+
+	oldDiskPath := folder.DiskPath
+	newDiskPath := folderDiskPath(userID, newParentPath, folder.Name)
+
+	if err := s.fs.RenameDir(oldDiskPath, newDiskPath); err != nil {
+		return apperror.Internal("move folder on disk", err)
+	}
+
+	if err := s.folders.Move(ctx, userID, folderID, newParentID, newDiskPath); err != nil {
+		_ = s.fs.RenameDir(newDiskPath, oldDiskPath)
+		return err
+	}
+
+	if err := s.folders.UpdateDescendantPaths(ctx, oldDiskPath, newDiskPath); err != nil {
+		return apperror.Internal("cascade folder move", err)
+	}
+
+	return nil
+}
+
+// isFolderDescendant reports whether candidateID is a descendant of ancestorID
+// by walking up the parent chain from candidateID.
+func (s *Service) isFolderDescendant(ctx context.Context, userID, ancestorID, candidateID int64) (bool, error) {
+	visited := map[int64]bool{candidateID: true}
+	current := candidateID
+	for {
+		f, err := s.folders.GetByID(ctx, userID, current)
+		if err != nil {
+			return false, err
+		}
+		if f.ParentID == nil {
+			return false, nil
+		}
+		if *f.ParentID == ancestorID {
+			return true, nil
+		}
+		if visited[*f.ParentID] {
+			// Cycle guard (shouldn't happen with valid data).
+			return false, nil
+		}
+		visited[*f.ParentID] = true
+		current = *f.ParentID
+	}
 }
 
 // DeleteFolder removes a folder and all its contents (cascade in DB via ON DELETE CASCADE).

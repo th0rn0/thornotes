@@ -104,6 +104,7 @@ func New(
 		folders.GET("", foldersH.List)
 		folders.POST("", csrfMW, foldersH.Create)
 		folders.PATCH("/:id", csrfMW, foldersH.Rename)
+		folders.PATCH("/:id/move", csrfMW, foldersH.Move)
 		folders.DELETE("/:id", csrfMW, foldersH.Delete)
 		folders.GET("/:id/notes", foldersH.ListNotes)
 	}
@@ -118,6 +119,7 @@ func New(
 		notesGroup.GET("/context", notesH.Context)
 		notesGroup.GET("/:id", notesH.Get)
 		notesGroup.PATCH("/:id", csrfMW, notesH.Patch)
+		notesGroup.PATCH("/:id/move", csrfMW, notesH.Move)
 		notesGroup.DELETE("/:id", csrfMW, notesH.Delete)
 		notesGroup.POST("/:id/share", csrfMW, notesH.Share)
 	}

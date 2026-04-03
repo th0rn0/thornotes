@@ -93,6 +93,32 @@ func (h *FoldersHandler) Delete(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
+type moveFolderRequest struct {
+	ParentID *int64 `json:"parent_id"` // null = move to root
+}
+
+func (h *FoldersHandler) Move(c *gin.Context) {
+	user := ginUser(c)
+	folderID, err := ginParamInt64(c, "id")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid folder id"})
+		return
+	}
+
+	var req moveFolderRequest
+	if err := readJSON(c, &req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := h.svc.MoveFolder(c.Request.Context(), user.ID, folderID, req.ParentID); err != nil {
+		writeError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "moved"})
+}
+
 func (h *FoldersHandler) ListNotes(c *gin.Context) {
 	user := ginUser(c)
 	folderID, err := ginParamInt64(c, "id")
