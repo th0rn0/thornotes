@@ -38,6 +38,7 @@ let currentFolderId = null;  // highlighted folder in the tree
 let editor = null;           // CM6 editor instance
 let editorPreviewEl = null;  // CM6 preview pane element
 let editorPreviewOpen = false;
+let editorSplitOpen = false;
 let saveTimer = null;
 let _loadingNote = false;  // suppresses auto-save during editor.setValue()
 let loadedFolderIds = new Set(); // tracks which folders have had their notes loaded
@@ -45,6 +46,7 @@ let folders = [];            // flat folder list from API
 let notesByFolder = {};      // { folderId: [noteListItem] }
 let rootNotes = [];          // notes with no folder
 let searchResults = null;    // null = not in search mode
+let _pendingTablePaste = null; // { from, text, rows } set while paste-convert bar is visible
 let journals = [];           // all journals for current user
 let currentFolderViewId = null; // folder ID currently shown in folder view (null = not shown)
 
@@ -491,13 +493,27 @@ async function openNote(noteId, { historyMode = 'push' } = {}) {
       '<button data-cmd="orderedList" title="Numbered list">1. List</button>' +
       '<span class="cm6-sep"></span>' +
       '<button data-cmd="link" title="Insert link">Link</button>' +
+      '<button data-cmd="table" title="Insert table">Table</button>' +
       '<span class="cm6-sep"></span>' +
       '<button data-cmd="preview" title="Toggle preview" id="cm6-preview-btn">Preview</button>' +
+      '<button data-cmd="split" title="Split editor / preview" id="cm6-split-btn">Split</button>' +
       '<button data-cmd="lineNumbers" title="Toggle line numbers" id="cm6-linenumbers-btn">&#x23;</button>' +
       '<span class="cm6-sep"></span>' +
       '<button data-cmd="undo" title="Undo">↩</button>' +
       '<button data-cmd="redo" title="Redo">↪</button>';
     editorArea.appendChild(toolbar);
+
+    // Table paste conversion bar (hidden until tabular content is detected)
+    const pasteBar = document.createElement('div');
+    pasteBar.id = 'table-paste-bar';
+    pasteBar.className = 'table-paste-bar';
+    pasteBar.setAttribute('role', 'status');
+    pasteBar.setAttribute('aria-live', 'polite');
+    pasteBar.innerHTML =
+      '<span class="tpb-info"></span>' +
+      '<button class="tpb-convert" id="table-paste-convert-btn">Convert to Markdown table</button>' +
+      '<button class="tpb-dismiss" id="table-paste-dismiss-btn" aria-label="Dismiss">\u00d7</button>';
+    editorArea.appendChild(pasteBar);
 
     // Editor + preview wrapper
     const wrap = document.createElement('div');
@@ -535,6 +551,8 @@ async function openNote(noteId, { historyMode = 'push' } = {}) {
       const cmd = btn.dataset.cmd;
       if (cmd === 'preview') {
         toggleEditorPreview();
+      } else if (cmd === 'split') {
+        toggleEditorSplit();
       } else if (cmd === 'lineNumbers') {
         toggleLineNumbers();
       } else if (CM6.commands[cmd]) {
@@ -542,8 +560,50 @@ async function openNote(noteId, { historyMode = 'push' } = {}) {
       }
     });
 
+    // Paste bar actions
+    document.getElementById('table-paste-convert-btn').addEventListener('click', convertPasteToTable);
+    document.getElementById('table-paste-dismiss-btn').addEventListener('click', hideTablePasteBar);
+
+    // Paste detection — fires before CM6 processes the paste so we can measure
+    // where the insertion will land, then show the bar after CM6 is done.
+    mount.addEventListener('paste', function(e) {
+      if (!editor) return;
+      const text = (e.clipboardData || window.clipboardData || {}).getData('text/plain') || '';
+      const rows = parseTabularText(text);
+      if (!rows) return;
+      const from = editor._view.state.selection.main.from;
+      // CM6 normalises \r\n → \n; pre-normalise so we can compute the end offset.
+      const normalised = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+      _pendingTablePaste = { from, text: normalised, rows };
+      requestAnimationFrame(function() {
+        const bar = document.getElementById('table-paste-bar');
+        if (!bar) return;
+        bar.querySelector('.tpb-info').textContent =
+          'Pasted ' + rows.length + ' row' + (rows.length !== 1 ? 's' : '') +
+          ' \u00d7 ' + rows[0].length + ' columns \u2014 convert to Markdown table?';
+        bar.style.display = 'flex';
+      });
+    });
+
+    // Editor context menu — show "Make into table" when text is selected.
+    mount.addEventListener('contextmenu', function(e) {
+      if (!editor) return;
+      const sel = editor._view.state.selection.main;
+      if (sel.empty) return; // no selection — let browser show its default menu
+      e.preventDefault();
+      const menu = document.getElementById('editor-ctx-menu');
+      const mw = 180, mh = 44;
+      menu.style.left = Math.min(e.clientX, window.innerWidth - mw) + 'px';
+      menu.style.top  = Math.min(e.clientY, window.innerHeight - mh) + 'px';
+      menu.style.display = 'block';
+    });
+
     // Restore line numbers preference on first editor init.
     applyLineNumbers();
+    // Restore split/preview mode preference.
+    const savedMode = localStorage.getItem('editorViewMode');
+    if (savedMode === 'split') toggleEditorSplit();
+    else if (savedMode === 'preview') toggleEditorPreview();
   }
 
   _loadingNote = true;
@@ -677,28 +737,69 @@ function toggleLineNumbers() {
 function toggleEditorPreview() {
   editorPreviewOpen = !editorPreviewOpen;
   const mount = document.querySelector('.cm6-mount');
-  const btn = document.getElementById('cm6-preview-btn');
+  const wrap  = document.querySelector('.cm6-wrap');
+  const btn   = document.getElementById('cm6-preview-btn');
   if (editorPreviewOpen) {
+    // Close split if it was open.
+    if (editorSplitOpen) {
+      editorSplitOpen = false;
+      wrap.classList.remove('split');
+      const sb = document.getElementById('cm6-split-btn');
+      if (sb) sb.classList.remove('active');
+      localStorage.setItem('editorViewMode', 'editor');
+    }
     renderPreviewContent(editor.getValue());
     editorPreviewEl.style.display = '';
     mount.style.display = 'none';
     btn.classList.add('active');
+    localStorage.setItem('editorViewMode', 'preview');
   } else {
     editorPreviewEl.style.display = 'none';
     mount.style.display = '';
     btn.classList.remove('active');
+    localStorage.setItem('editorViewMode', 'editor');
+    editor.focus();
+  }
+}
+
+function toggleEditorSplit() {
+  editorSplitOpen = !editorSplitOpen;
+  const mount = document.querySelector('.cm6-mount');
+  const wrap  = document.querySelector('.cm6-wrap');
+  const btn   = document.getElementById('cm6-split-btn');
+  if (editorSplitOpen) {
+    // Close preview-only if it was open.
+    if (editorPreviewOpen) {
+      editorPreviewOpen = false;
+      const pb = document.getElementById('cm6-preview-btn');
+      if (pb) pb.classList.remove('active');
+    }
+    renderPreviewContent(editor.getValue());
+    mount.style.display = '';
+    editorPreviewEl.style.display = '';
+    wrap.classList.add('split');
+    btn.classList.add('active');
+    localStorage.setItem('editorViewMode', 'split');
+  } else {
+    editorPreviewEl.style.display = 'none';
+    wrap.classList.remove('split');
+    btn.classList.remove('active');
+    localStorage.setItem('editorViewMode', 'editor');
     editor.focus();
   }
 }
 
 function onEditorChange() {
   if (_loadingNote) return;
+  // Dismiss the paste-conversion bar on any user edit (the paste state is
+  // cleared before dispatch in convertPasteToTable so this won't close it mid-convert).
+  if (_pendingTablePaste) hideTablePasteBar();
   setSaveStatus('saving');
   clearTimeout(saveTimer);
   saveTimer = setTimeout(autoSave, AUTO_SAVE_DELAY_MS);
   const content = editor.getValue();
   document.getElementById('note-stats').textContent = noteStats(content);
-  if (editorPreviewOpen && editorPreviewEl) {
+  if ((editorPreviewOpen || editorSplitOpen) && editorPreviewEl) {
     renderPreviewContent(content);
   }
 }
@@ -1414,7 +1515,7 @@ function isTextInputFocused() {
 }
 
 document.addEventListener('keydown', function(e) {
-  if (e.key === 'Escape') { hideNoteCtxMenu(); hideFolderCtxMenu(); return; }
+  if (e.key === 'Escape') { hideNoteCtxMenu(); hideFolderCtxMenu(); hideEditorCtxMenu(); hideTablePasteBar(); return; }
   // Delete key: delete the currently open note, but never while typing.
   if (e.key === 'Delete' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
     if (isTextInputFocused()) return;
@@ -1542,6 +1643,96 @@ document.getElementById('import-confirm-btn').addEventListener('click', async fu
 
 // Disk full banner
 document.getElementById('disk-full-dismiss').addEventListener('click', function() { document.getElementById('disk-full-banner').style.display = 'none'; });
+
+// ── Table feature ──────────────────────────────────────────────────────────
+
+// Hide the paste conversion bar and clear pending state.
+function hideTablePasteBar() {
+  _pendingTablePaste = null;
+  const bar = document.getElementById('table-paste-bar');
+  if (bar) bar.style.display = 'none';
+}
+
+// Replace the just-pasted raw text with its Markdown table equivalent.
+function convertPasteToTable() {
+  if (!_pendingTablePaste || !editor) return;
+  const { from, text, rows } = _pendingTablePaste;
+  // Clear state BEFORE dispatching so onEditorChange doesn't re-hide the bar.
+  _pendingTablePaste = null;
+  hideTablePasteBar();
+  const table = rowsToMarkdownTable(rows);
+  editor._view.dispatch({
+    changes: { from, to: from + text.length, insert: table },
+  });
+  editor._view.focus();
+}
+
+// Replace the current editor selection with a Markdown table.
+// Called from the editor context menu and (when selection is tabular) the toolbar.
+function selectionToTable() {
+  if (!editor) return;
+  const view = editor._view;
+  const sel = view.state.selection.main;
+  if (sel.empty) return;
+  const text = view.state.doc.sliceString(sel.from, sel.to);
+  const rows = parseTabularText(text);
+  if (!rows) {
+    showNotification('Selection is not CSV/TSV — nothing to convert', true);
+    return;
+  }
+  view.dispatch({
+    changes: { from: sel.from, to: sel.to, insert: rowsToMarkdownTable(rows) },
+  });
+  view.focus();
+}
+
+// Hide the editor context menu.
+function hideEditorCtxMenu() {
+  const m = document.getElementById('editor-ctx-menu');
+  if (m) m.style.display = 'none';
+}
+
+// Editor context menu click handler.
+document.getElementById('editor-ctx-menu').addEventListener('click', function(e) {
+  const btn = e.target.closest('[data-editor-ctx-action]');
+  if (!btn) return;
+  hideEditorCtxMenu();
+  if (btn.dataset.editorCtxAction === 'to-table') selectionToTable();
+});
+
+document.addEventListener('click', hideEditorCtxMenu);
+
+// ── CM6 extra commands ─────────────────────────────────────────────────────
+// Extend the vendor bundle's command map with commands that require app context.
+CM6.commands.table = function(ed) {
+  const view = ed._view;
+  const { state } = view;
+  const sel = state.selection.main;
+
+  // If there's a selection and it looks tabular, convert it.
+  if (!sel.empty) {
+    const text = state.doc.sliceString(sel.from, sel.to);
+    const rows = parseTabularText(text);
+    if (rows) {
+      view.dispatch({
+        changes: { from: sel.from, to: sel.to, insert: rowsToMarkdownTable(rows) },
+      });
+      view.focus();
+      return;
+    }
+  }
+
+  // No selection (or non-tabular selection): insert a blank template.
+  const lineStart = state.doc.lineAt(sel.from).from;
+  const prefix = sel.from === lineStart ? '' : '\n';
+  const tpl = prefix + '| Header 1 | Header 2 | Header 3 |\n| -------- | -------- | -------- |\n| Cell     | Cell     | Cell     |\n';
+  const cursorAt = sel.from + prefix.length + 2;
+  view.dispatch({
+    changes: { from: sel.from, to: sel.to, insert: tpl },
+    selection: { anchor: cursorAt, head: cursorAt + 8 }, // pre-select "Header 1"
+  });
+  view.focus();
+};
 
 // Browser back/forward — reopen the note recorded in history state.
 window.addEventListener('popstate', function(e) {

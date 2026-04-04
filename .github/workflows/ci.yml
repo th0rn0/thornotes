@@ -46,6 +46,80 @@ jobs:
           embed-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           embed-description: ${{ github.event.head_commit.message }}
 
+  test-js:
+    name: Test (JS)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Discord Webhook Action - Build Start
+        uses: tsickert/discord-webhook@86dc739f3f165f16dadc5666051c367efa1692f4 # v6.0.0
+        with:
+          webhook-url: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          embed-title: ${{ github.repository }} - ${{ github.head_ref || github.ref_name }} - JS Test Started!
+          embed-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          embed-description: ${{ github.event.head_commit.message }}
+
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+      - name: Run JS tests
+        run: |
+          node --test web/static/js/table-utils.test.js
+          node --test desktop/lib.test.js
+
+      - name: Discord Webhook Action - Build Success
+        uses: tsickert/discord-webhook@86dc739f3f165f16dadc5666051c367efa1692f4 # v6.0.0
+        with:
+          webhook-url: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          embed-title: ${{ github.repository }} - ${{ github.head_ref || github.ref_name }} - JS Test Success!
+          embed-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          embed-description: ${{ github.event.head_commit.message }}
+
+      - name: Discord Webhook Action - Build Failure
+        if: failure()
+        uses: tsickert/discord-webhook@86dc739f3f165f16dadc5666051c367efa1692f4 # v6.0.0
+        with:
+          webhook-url: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          embed-title: ${{ github.repository }} - ${{ github.head_ref || github.ref_name }} - JS Test Failure!
+          embed-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          embed-description: ${{ github.event.head_commit.message }}
+
+  build-desktop:
+    name: Desktop (syntax check)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Discord Webhook Action - Build Start
+        uses: tsickert/discord-webhook@86dc739f3f165f16dadc5666051c367efa1692f4 # v6.0.0
+        with:
+          webhook-url: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          embed-title: ${{ github.repository }} - ${{ github.head_ref || github.ref_name }} - Desktop Check Started!
+          embed-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          embed-description: ${{ github.event.head_commit.message }}
+
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+      - name: Syntax check desktop sources
+        run: node --check desktop/main.js desktop/preload.js desktop/lib.js
+
+      - name: Discord Webhook Action - Build Success
+        uses: tsickert/discord-webhook@86dc739f3f165f16dadc5666051c367efa1692f4 # v6.0.0
+        with:
+          webhook-url: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          embed-title: ${{ github.repository }} - ${{ github.head_ref || github.ref_name }} - Desktop Check Success!
+          embed-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          embed-description: ${{ github.event.head_commit.message }}
+
+      - name: Discord Webhook Action - Build Failure
+        if: failure()
+        uses: tsickert/discord-webhook@86dc739f3f165f16dadc5666051c367efa1692f4 # v6.0.0
+        with:
+          webhook-url: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          embed-title: ${{ github.repository }} - ${{ github.head_ref || github.ref_name }} - Desktop Check Failure!
+          embed-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          embed-description: ${{ github.event.head_commit.message }}
+
   test:
     name: Test
     runs-on: ubuntu-latest
@@ -79,9 +153,11 @@ jobs:
           go-version-file: go.mod
           cache: true
       - name: Run tests
-        run: go test -race ./...
+        run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
         env:
           THORNOTES_TEST_MYSQL_DSN: "thornotes:thornotes@tcp(127.0.0.1:3306)/thornotes_test?parseTime=true"
+      - name: Coverage report
+        run: go tool cover -func=coverage.out | tail -1
 
       - name: Discord Webhook Action - Build Success
         uses: tsickert/discord-webhook@86dc739f3f165f16dadc5666051c367efa1692f4 # v6.0.0
@@ -103,7 +179,7 @@ jobs:
   build-push:
     name: Build & Push
     runs-on: ubuntu-latest
-    needs: [lint, test]
+    needs: [lint, test, test-js, build-desktop]
     # Run on pushes to main OR on version tag pushes (v*)
     if: >
       github.event_name == 'push' &&

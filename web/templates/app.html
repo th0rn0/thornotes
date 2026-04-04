@@ -185,6 +185,9 @@ body {
 .cm6-wrap { flex: 1; overflow: hidden; display: flex; }
 .cm6-mount { flex: 1; overflow: auto; min-width: 0; }
 .cm6-mount .cm-editor { height: 100%; }
+/* SPLIT VIEW */
+.cm6-wrap.split .cm6-mount { border-right: 1px solid var(--border-light); }
+.cm6-wrap.split .cm6-preview { display: block !important; }
 .cm6-preview { flex: 1; overflow-y: auto; padding: 16px 24px; font-size: 14px; line-height: 1.7; min-width: 0; background: var(--bg-editor); color: var(--text); }
 .cm6-preview h1,.cm6-preview h2,.cm6-preview h3 { margin: 16px 0 8px; font-weight: 600; }
 .cm6-preview p { margin: 0 0 10px; }
@@ -198,6 +201,19 @@ body {
 .editor-statusbar-custom span { font-size: 11px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cm6-mount.show-line-numbers .cm-gutters { display: flex !important; }
 .cm6-mount.show-line-numbers .cm-lineNumbers { display: flex !important; }
+
+/* TABLE PASTE BAR */
+.table-paste-bar { display: none; align-items: center; gap: 8px; padding: 5px 10px; background: var(--bg-hover); border-bottom: 1px solid var(--border-light); font-size: 12px; color: var(--text-mute); flex-shrink: 0; flex-wrap: wrap; }
+.table-paste-bar .tpb-info { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.table-paste-bar .tpb-convert { background: var(--accent); color: var(--text-on-accent); border: none; padding: 3px 10px; font-size: 12px; cursor: pointer; border-radius: 2px; min-height: 26px; white-space: nowrap; }
+.table-paste-bar .tpb-convert:hover { background: var(--accent-hover); }
+.table-paste-bar .tpb-dismiss { background: none; border: none; color: var(--text-mute); cursor: pointer; font-size: 16px; line-height: 1; padding: 0 2px; min-height: 26px; flex-shrink: 0; }
+.table-paste-bar .tpb-dismiss:hover { color: var(--text); }
+
+/* EDITOR CONTEXT MENU */
+.editor-ctx-menu { position: fixed; background: var(--bg-modal); border: 1px solid var(--border); border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,.18); z-index: 2000; min-width: 160px; padding: 4px 0; display: none; }
+.editor-ctx-menu button { display: block; width: 100%; text-align: left; padding: 7px 14px; background: none; border: none; cursor: pointer; font-size: 13px; color: var(--text); }
+.editor-ctx-menu button:hover { background: var(--bg-hover); }
 
 /* WIKILINKS */
 .cm6-preview a.wikilink { color: var(--preview-link); border-bottom: 1px dashed var(--preview-link); text-decoration: none; }
@@ -368,6 +384,11 @@ body {
   .editor-titlebar { height: auto; min-height: 44px; flex-wrap: wrap; padding: 8px 12px; gap: 8px; }
   .editor-meta { width: 100%; }
   .editor-statusbar-custom span:first-child { display: none; }
+
+  /* Split view stacks vertically on mobile */
+  .cm6-wrap.split { flex-direction: column; }
+  .cm6-wrap.split .cm6-mount { flex: 1; min-height: 0; border-right: none; border-bottom: 1px solid var(--border-light); }
+  .cm6-wrap.split .cm6-preview { flex: 1; min-height: 0; }
 
   /* Bottom-sheet modals on mobile */
   .modal-overlay { align-items: flex-end; padding: 0; }
@@ -626,6 +647,11 @@ body {
   <button data-folder-ctx-action="delete" class="ctx-danger">Delete</button>
 </div>
 
+<!-- EDITOR context menu (right-click on selection) -->
+<div id="editor-ctx-menu" class="editor-ctx-menu">
+  <button data-editor-ctx-action="to-table">Make into table</button>
+</div>
+
 <!-- IMPORT MODAL -->
 <div class="modal-overlay" id="import-modal" style="display:none">
   <div class="modal" style="max-width:400px">
@@ -648,6 +674,7 @@ body {
 <script src="/static/js/vendor/codemirror6.min.js"></script>
 <script src="/static/js/vendor/marked.min.js"></script>
 <script src="/static/js/vendor/highlight.min.js"></script>
+<script src="/static/js/table-utils.js"></script>
 <script src="/static/js/app.js"></script>
 </body>
 </html>

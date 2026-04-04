@@ -1,5 +1,8 @@
 /thornotes
 dist/
+desktop/node_modules/
+desktop/dist/
+desktop/out/
 *.db
 *.db-shm
 *.db-wal

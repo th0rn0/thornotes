@@ -4,7 +4,7 @@ MAIN     := ./cmd/thornotes
 VERSION  := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS  := -ldflags "-s -w -X main.Version=$(VERSION)"
 
-.PHONY: build test run clean fmt vet lint release build-cm6
+.PHONY: build test run clean fmt vet lint release build-cm6 desktop desktop-dist
 
 build:
 	go build $(LDFLAGS) -o $(BINARY) $(MAIN)
@@ -34,6 +34,13 @@ release:
 
 build-cm6:
 	cd web/cm6-bundle && bun install --frozen-lockfile && bun build index.js --bundle --format=iife --target=browser --outfile=../static/js/vendor/codemirror6.min.js --minify
+
+# ── Desktop app (Electron) ────────────────────────────────────────────────────
+desktop:
+	cd desktop && npm install && npm start
+
+desktop-dist:
+	cd desktop && npm install && npm run dist:$(or $(PLATFORM),linux)
 
 clean:
 	rm -f $(BINARY)

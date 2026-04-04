@@ -2,6 +2,25 @@
 
 All notable changes to thornotes are documented here.
 
+## [1.5.4.0] - 2026-04-04
+
+### Added
+- **Desktop app** — Electron wrapper (`desktop/`) connects to any thornotes server (local or remote). Includes setup screen, system tray with context menu, config persistence in OS user-data directory, and graceful fallback to setup on connection failure.
+- **Split view** — new toolbar button shows editor and live preview side-by-side (stacks vertically on mobile). View mode persisted to `localStorage`.
+- **Insert Markdown table** — toolbar button inserts a blank GFM table template, or converts selected tabular text to a Markdown table.
+- **CSV/Excel paste detection** — pasting tabular content (TSV from Excel, RFC 4180 CSV) shows an inline conversion bar offering to reformat as a Markdown table.
+- **Right-click "Make into table"** — selecting text and right-clicking the editor shows a context menu option to convert selected delimited content to a Markdown table.
+
+### Tests
+- `web/static/js/table-utils.test.js` — 31 JS unit tests for CSV/TSV parsing and Markdown table generation (using Node built-in `node:test`).
+- `desktop/lib.test.js` — 31 JS unit tests for desktop URL validation and config merge helpers.
+
+### CI
+- New `test-js` job runs all JS unit tests on every push.
+- New `build-desktop` job syntax-checks all desktop sources (`node --check`).
+- Go `test` job now emits a coverage summary (`go tool cover -func`).
+- `build-push` now requires all four CI jobs to pass before proceeding.
+
 ## [1.5.3.1] - 2026-04-04
 
 ### Added

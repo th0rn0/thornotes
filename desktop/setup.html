@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'self'; style-src 'unsafe-inline'; script-src 'self';">
+<title>thornotes — Connect</title>
+<style>
+/* System-aware dark/light theme */
+:root {
+  --bg: #ffffff; --bg-card: #f5f5f5; --border: #dddddd;
+  --text: #222222; --text-mute: #777777; --text-dim: #aaaaaa;
+  --accent: #222222; --accent-hover: #444444; --accent-text: #ffffff;
+  --input-bg: #ffffff; --error: #c00000;
+  --radius: 4px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1e1e1e; --bg-card: #252526; --border: #3e3e42;
+    --text: #d4d4d4; --text-mute: #858585; --text-dim: #555555;
+    --accent: #0e639c; --accent-hover: #1177bb; --accent-text: #ffffff;
+    --input-bg: #3c3c3c; --error: #f44747;
+  }
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-size: 13px;
+  background: var(--bg);
+  color: var(--text);
+  height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  user-select: none;
+  /* Draggable titlebar region on macOS (electron-specific) */
+  -webkit-user-select: none;
+  -webkit-app-region: drag;
+}
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 28px 28px 24px;
+  width: 340px;
+  -webkit-app-region: no-drag;
+}
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+.logo svg { flex-shrink: 0; }
+.logo-word { font-size: 16px; font-weight: 700; letter-spacing: -0.5px; }
+.tagline { font-size: 11px; color: var(--text-mute); margin-bottom: 20px; line-height: 1.5; }
+label { display: block; font-size: 11px; color: var(--text-mute); margin-bottom: 5px; }
+input[type="url"] {
+  display: block;
+  width: 100%;
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 13px;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  outline: none;
+  margin-bottom: 14px;
+  -webkit-app-region: no-drag;
+}
+input[type="url"]:focus { border-color: var(--accent); }
+button {
+  width: 100%;
+  background: var(--accent);
+  color: var(--accent-text);
+  border: none;
+  border-radius: var(--radius);
+  padding: 9px 0;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+button:hover { background: var(--accent-hover); }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+.error-box {
+  display: none;
+  background: color-mix(in srgb, var(--error) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--error) 40%, transparent);
+  border-radius: var(--radius);
+  color: var(--error);
+  font-size: 11px;
+  padding: 7px 10px;
+  margin-bottom: 14px;
+  line-height: 1.5;
+}
+.error-box.visible { display: block; }
+.hint { font-size: 11px; color: var(--text-dim); margin-top: 12px; line-height: 1.6; }
+.hint code {
+  font-family: 'SF Mono', 'Cascadia Code', Consolas, monospace;
+  font-size: 10px;
+  background: var(--border);
+  padding: 1px 4px;
+  border-radius: 2px;
+}
+</style>
+</head>
+<body>
+<div class="card">
+  <!-- Logo — inline SVG of the thornotes mark -->
+  <div class="logo">
+    <svg width="28" height="28" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+      <rect width="512" height="512" rx="72" fill="#111111"/>
+      <path d="M256,108 C270,130 308,198 306,290 C304,358 284,408 256,408 C228,408 208,358 206,290 C204,198 242,130 256,108 Z" fill="white"/>
+    </svg>
+    <span class="logo-word">thornotes</span>
+  </div>
+
+  <p class="tagline">Enter the address of your thornotes server to connect.</p>
+
+  <div class="error-box" id="error-box"></div>
+
+  <label for="url-input">Server URL</label>
+  <input
+    type="url"
+    id="url-input"
+    placeholder="http://localhost:8080"
+    autocomplete="url"
+    spellcheck="false"
+  />
+
+  <button id="connect-btn">Connect</button>
+
+  <p class="hint">
+    Running locally? Start thornotes with <code>./thornotes</code> and use
+    <code>http://localhost:8080</code>.<br>
+    Hosted remotely? Enter your server's public URL.
+  </p>
+</div>
+
+<script>
+'use strict';
+(async function () {
+  const urlInput   = document.getElementById('url-input');
+  const connectBtn = document.getElementById('connect-btn');
+  const errorBox   = document.getElementById('error-box');
+
+  function showError(msg) {
+    errorBox.textContent = msg;
+    errorBox.classList.add('visible');
+  }
+  function clearError() {
+    errorBox.textContent = '';
+    errorBox.classList.remove('visible');
+  }
+
+  // Pre-fill from query params (set by main process when navigating here).
+  const params = new URLSearchParams(window.location.search);
+  const savedUrl = params.get('serverUrl');
+  const loadError = params.get('error');
+
+  if (savedUrl) urlInput.value = savedUrl;
+  if (loadError) showError(loadError);
+
+  // If we have thornotes API (desktop app), pre-fill from stored config.
+  if (window.thornotes) {
+    try {
+      const cfg = await window.thornotes.getConfig();
+      if (cfg.serverUrl && !savedUrl) urlInput.value = cfg.serverUrl;
+    } catch {}
+  }
+
+  // Focus the input, place cursor at end.
+  urlInput.focus();
+  urlInput.setSelectionRange(urlInput.value.length, urlInput.value.length);
+
+  urlInput.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') connect();
+    else clearError();
+  });
+
+  connectBtn.addEventListener('click', connect);
+
+  async function connect() {
+    clearError();
+    const url = urlInput.value.trim();
+    if (!url) { showError('Please enter a server URL.'); return; }
+
+    connectBtn.disabled = true;
+    connectBtn.textContent = 'Connecting…';
+
+    if (window.thornotes) {
+      // Desktop app — delegate to main process.
+      const result = await window.thornotes.saveConfig({ serverUrl: url });
+      if (!result.ok) {
+        showError(result.error || 'Connection failed.');
+        connectBtn.disabled = false;
+        connectBtn.textContent = 'Connect';
+      }
+      // On success main process closes this window and opens the main window.
+    } else {
+      // Fallback: plain browser (shouldn't happen in production).
+      window.location.href = url;
+    }
+  }
+})();
+</script>
+</body>
+</html>
