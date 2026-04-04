@@ -2,6 +2,18 @@
 
 All notable changes to thornotes are documented here.
 
+## [1.5.3.1] - 2026-04-04
+
+### Added
+- **Logo mark in topbar** — the app icon now appears alongside the "thornotes" wordmark in the top bar.
+
+### Changed
+- **Refined app icon** — `icon-192.svg` and `icon-512.svg` updated to a clean teardrop/flame mark on a dark background, replacing the "tn" text icon.
+
+### Fixed
+- **Folder select clears active note** — switching to a folder now resets `currentNote` so stale note state can't bleed into the folder view.
+- **Note open clears active folder** — opening a note now resets `currentFolderId`, keeping folder and note selection mutually exclusive.
+
 ## [1.5.3.0] - 2026-04-03
 
 ### Fixed

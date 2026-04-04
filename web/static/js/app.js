@@ -262,6 +262,7 @@ function renderTree() {
 }
 
 async function selectFolder(folderId) {
+  currentNote = null;
   currentFolderId = folderId;
   if (loadedFolderIds.has(folderId)) {
     loadedFolderIds.delete(folderId);
@@ -460,6 +461,7 @@ async function openNote(noteId, { historyMode = 'push' } = {}) {
   currentNote = note;
   if (isMobile()) closeSidebar();
 
+  currentFolderId = null;
   document.getElementById('empty-state').style.display = 'none';
   document.getElementById('folder-view').style.display = 'none';
   currentFolderViewId = null;

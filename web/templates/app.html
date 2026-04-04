@@ -106,7 +106,8 @@ body {
 /* APP */
 #app-screen { display: none; height: 100%; flex-direction: column; }
 .topbar { display: flex; align-items: center; justify-content: space-between; background: var(--bg-topbar); border-bottom: 1px solid var(--border); padding: 0 12px; height: 44px; flex-shrink: 0; gap: 8px; }
-.topbar .logo { font-size: 14px; font-weight: 600; letter-spacing: -0.5px; }
+.topbar .logo { font-size: 14px; font-weight: 600; letter-spacing: -0.5px; display: flex; align-items: center; gap: 6px; }
+.topbar .logo img { display: block; border-radius: 4px; flex-shrink: 0; }
 .topbar .user { font-size: 11px; color: var(--text-mute); display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
 .topbar .user button { background: none; border: none; color: var(--text-mute); cursor: pointer; font-size: 11px; padding: 4px 6px; min-height: 32px; }
 .main { display: flex; flex: 1; overflow: hidden; position: relative; }
@@ -416,7 +417,7 @@ body {
 <div id="app-screen">
   <div class="topbar">
     <button class="topbar-menu-btn" aria-label="Toggle sidebar">&#9776;</button>
-    <span class="logo">thornotes</span>
+    <span class="logo"><img src="/static/icons/icon-192.svg" width="20" height="20" alt="">thornotes</span>
     <select id="theme-select" title="Theme" aria-label="Select theme">
       <option value="auto">Auto</option>
       <option value="light">Light</option>
