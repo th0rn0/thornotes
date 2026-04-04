@@ -2,21 +2,14 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"log"
 	"os"
 	"os/exec"
-	"path/filepath"
 
 	"github.com/getlantern/systray"
 	"github.com/th0rn0/thornotes-desktop-wails/internal/config"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
-
-// Config is persisted to the OS user-data directory.
-type Config struct {
-	ServerURL string `json:"serverUrl"`
-}
 
 // SaveResult is returned to the frontend JS after SaveConfig is called.
 type SaveResult struct {
@@ -28,21 +21,25 @@ type SaveResult struct {
 // to the frontend under window.go.main.App.
 type App struct {
 	ctx        context.Context
-	cfg        Config
+	cfg        config.AppConfig
 	configPath string
 }
 
 func NewApp() *App {
 	dir, _ := os.UserConfigDir()
 	return &App{
-		configPath: filepath.Join(dir, "thornotes-wails", "config.json"),
+		configPath: dir + "/thornotes-wails/config.json",
 	}
 }
 
 // startup is called by Wails when the window is ready.
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
-	a.loadConfig()
+	cfg, err := config.Load(a.configPath)
+	if err != nil {
+		log.Printf("thornotes-wails: failed to load config: %v", err)
+	}
+	a.cfg = cfg
 	if a.cfg.ServerURL != "" {
 		runtime.Navigate(ctx, a.cfg.ServerURL)
 	}
@@ -56,7 +53,7 @@ func (a *App) shutdown(_ context.Context) {
 // ── Frontend-bound methods ────────────────────────────────────────────────────
 
 // GetConfig returns the persisted config to the setup page.
-func (a *App) GetConfig() Config {
+func (a *App) GetConfig() config.AppConfig {
 	return a.cfg
 }
 
@@ -67,7 +64,7 @@ func (a *App) SaveConfig(serverURL string) SaveResult {
 		return SaveResult{OK: false, Error: err.Error()}
 	}
 	a.cfg.ServerURL = u
-	if err := a.persistConfig(); err != nil {
+	if err := config.Save(a.configPath, a.cfg); err != nil {
 		return SaveResult{OK: false, Error: "Failed to save config: " + err.Error()}
 	}
 	runtime.Navigate(a.ctx, u)
@@ -100,8 +97,8 @@ func (a *App) onTrayReady() {
 				// from an external URL context (X-Frame-Options: DENY prevents iframes;
 				// Wails has no cross-platform "navigate back to embedded assets" API).
 				a.cfg.ServerURL = ""
-				if err := a.persistConfig(); err != nil {
-					log.Printf("thornotes: failed to clear config: %v", err)
+				if err := config.Save(a.configPath, a.cfg); err != nil {
+					log.Printf("thornotes-wails: failed to clear config: %v", err)
 				}
 				if exe, err := os.Executable(); err == nil {
 					_ = exec.Command(exe).Start()
@@ -121,24 +118,3 @@ func (a *App) onTrayReady() {
 }
 
 func (a *App) onTrayExit() {}
-
-// ── Config persistence ────────────────────────────────────────────────────────
-
-func (a *App) loadConfig() {
-	data, err := os.ReadFile(a.configPath)
-	if err != nil {
-		return
-	}
-	_ = json.Unmarshal(data, &a.cfg)
-}
-
-func (a *App) persistConfig() error {
-	if err := os.MkdirAll(filepath.Dir(a.configPath), 0o755); err != nil {
-		return err
-	}
-	data, err := json.MarshalIndent(a.cfg, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(a.configPath, data, 0o644)
-}

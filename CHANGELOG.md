@@ -2,6 +2,13 @@
 
 All notable changes to thornotes are documented here.
 
+## [1.5.4.1] - 2026-04-05
+
+### Added
+- **`docker-compose.yml`** — local MariaDB 11 service matching CI credentials exactly. `make test-db-up` starts it, `make test-with-db` runs the full Go test suite against it.
+- **Wails config persistence tests** — `desktop-wails/internal/config/config.go` extracts `Load`/`Save` from `app.go` into a testable package. 11 new tests cover: missing file, valid JSON, invalid JSON, unknown fields, round-trip, directory creation, overwrite, and empty config.
+- **Full Wails CI build** — `test-wails` job now installs webkit2gtk + builds with CGO (`go build ./...`) + runs `go test -race ./...` with coverage report. Pinned to `ubuntu-22.04` for consistent webkit2gtk package names.
+
 ## [1.5.4.0] - 2026-04-04
 
 ### Added

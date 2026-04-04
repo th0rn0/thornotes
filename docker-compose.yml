@@ -1,0 +1,29 @@
+# Local development and testing environment.
+# Matches the MariaDB configuration used by CI exactly.
+#
+# Usage:
+#   docker compose up -d          # start database
+#   make test-with-db             # run Go tests against it
+#   docker compose down           # stop and remove containers
+#   docker compose down -v        # also delete the database volume
+
+services:
+  db:
+    image: mariadb:11
+    environment:
+      MARIADB_ROOT_PASSWORD: rootpassword
+      MARIADB_DATABASE: thornotes_test
+      MARIADB_USER: thornotes
+      MARIADB_PASSWORD: thornotes
+    ports:
+      - "3306:3306"
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - db-data:/var/lib/mysql
+
+volumes:
+  db-data:

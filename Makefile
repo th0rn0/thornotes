@@ -4,7 +4,7 @@ MAIN     := ./cmd/thornotes
 VERSION  := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS  := -ldflags "-s -w -X main.Version=$(VERSION)"
 
-.PHONY: build test run clean fmt vet lint release build-cm6 desktop desktop-dist desktop-wails desktop-wails-dist
+.PHONY: build test run clean fmt vet lint release build-cm6 desktop desktop-dist desktop-wails desktop-wails-dist test-db-up test-db-down test-with-db
 
 build:
 	go build $(LDFLAGS) -o $(BINARY) $(MAIN)
@@ -50,6 +50,21 @@ desktop-wails:
 
 desktop-wails-dist:
 	cd desktop-wails && wails build -o thornotes-wails$(or $(WAILS_EXT),)
+
+# ── Database (local testing via Docker Compose) ───────────────────────────────
+TEST_DSN := thornotes:thornotes@tcp(127.0.0.1:3306)/thornotes_test?parseTime=true
+
+test-db-up:
+	docker compose up -d db
+	@echo "Waiting for MariaDB to be healthy..."
+	@until docker compose exec db healthcheck.sh --connect --innodb_initialized 2>/dev/null; do sleep 1; done
+	@echo "MariaDB ready."
+
+test-db-down:
+	docker compose down
+
+test-with-db:
+	THORNOTES_TEST_MYSQL_DSN="$(TEST_DSN)" go test -race ./... -count=1 -timeout 120s
 
 clean:
 	rm -f $(BINARY)
