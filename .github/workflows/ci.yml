@@ -84,6 +84,44 @@ jobs:
           embed-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           embed-description: ${{ github.event.head_commit.message }}
 
+  test-wails:
+    name: Desktop Wails (test)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Discord Webhook Action - Build Start
+        uses: tsickert/discord-webhook@86dc739f3f165f16dadc5666051c367efa1692f4 # v6.0.0
+        with:
+          webhook-url: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          embed-title: ${{ github.repository }} - ${{ github.head_ref || github.ref_name }} - Wails Test Started!
+          embed-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          embed-description: ${{ github.event.head_commit.message }}
+
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: "1.22"
+          cache: true
+          cache-dependency-path: desktop-wails/go.sum
+      - name: Test pure Go (no CGO required)
+        run: cd desktop-wails && go test ./internal/...
+
+      - name: Discord Webhook Action - Build Success
+        uses: tsickert/discord-webhook@86dc739f3f165f16dadc5666051c367efa1692f4 # v6.0.0
+        with:
+          webhook-url: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          embed-title: ${{ github.repository }} - ${{ github.head_ref || github.ref_name }} - Wails Test Success!
+          embed-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          embed-description: ${{ github.event.head_commit.message }}
+
+      - name: Discord Webhook Action - Build Failure
+        if: failure()
+        uses: tsickert/discord-webhook@86dc739f3f165f16dadc5666051c367efa1692f4 # v6.0.0
+        with:
+          webhook-url: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          embed-title: ${{ github.repository }} - ${{ github.head_ref || github.ref_name }} - Wails Test Failure!
+          embed-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          embed-description: ${{ github.event.head_commit.message }}
+
   build-desktop:
     name: Desktop (syntax check)
     runs-on: ubuntu-latest
@@ -179,7 +217,7 @@ jobs:
   build-push:
     name: Build & Push
     runs-on: ubuntu-latest
-    needs: [lint, test, test-js, build-desktop]
+    needs: [lint, test, test-js, build-desktop, test-wails]
     # Run on pushes to main OR on version tag pushes (v*)
     if: >
       github.event_name == 'push' &&

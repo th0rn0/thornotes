@@ -3,6 +3,7 @@ dist/
 desktop/node_modules/
 desktop/dist/
 desktop/out/
+desktop-wails/build/
 *.db
 *.db-shm
 *.db-wal

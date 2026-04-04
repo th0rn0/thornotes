@@ -4,7 +4,7 @@ MAIN     := ./cmd/thornotes
 VERSION  := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS  := -ldflags "-s -w -X main.Version=$(VERSION)"
 
-.PHONY: build test run clean fmt vet lint release build-cm6 desktop desktop-dist
+.PHONY: build test run clean fmt vet lint release build-cm6 desktop desktop-dist desktop-wails desktop-wails-dist
 
 build:
 	go build $(LDFLAGS) -o $(BINARY) $(MAIN)
@@ -41,6 +41,15 @@ desktop:
 
 desktop-dist:
 	cd desktop && npm install && npm run dist:$(or $(PLATFORM),linux)
+
+# ── Desktop app (Wails) ───────────────────────────────────────────────────────
+# Requires: wails CLI — go install github.com/wailsapp/wails/v2/cmd/wails@latest
+# Linux deps: libgtk-3-dev libwebkit2gtk-4.0-dev libayatana-appindicator3-dev
+desktop-wails:
+	cd desktop-wails && wails dev
+
+desktop-wails-dist:
+	cd desktop-wails && wails build -o thornotes-wails$(or $(WAILS_EXT),)
 
 clean:
 	rm -f $(BINARY)
