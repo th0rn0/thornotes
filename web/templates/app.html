@@ -188,6 +188,14 @@ body {
 /* SPLIT VIEW */
 .cm6-wrap.split .cm6-mount { border-right: 1px solid var(--border-light); }
 .cm6-wrap.split .cm6-preview { display: block !important; }
+/* PREVIEW EDIT MODE */
+.cm6-wrap.preview-edit .cm6-preview { display: block !important; }
+.pe-block { border-radius: 3px; margin: -2px -4px; padding: 2px 4px; transition: background 0.1s; }
+.cm6-wrap.preview-edit .pe-block:hover { background: rgba(0,0,0,0.05); cursor: text; }
+[data-theme="dark"] .cm6-wrap.preview-edit .pe-block:hover,
+[data-theme="catppuccin"] .cm6-wrap.preview-edit .pe-block:hover { background: rgba(255,255,255,0.07); }
+.pe-inline-editor { display: block; width: 100%; box-sizing: border-box; font-family: "Cascadia Code","Fira Code",Consolas,monospace; font-size: 13px; line-height: 1.6; padding: 6px 8px; border: 2px solid var(--accent); border-radius: 3px; background: var(--bg-input); color: var(--text); resize: none; overflow: hidden; outline: none; min-height: 32px; }
+.cm6-preview-edit-hint { font-size: 11px; color: var(--text-dim); text-align: right; padding: 4px 0 0; pointer-events: none; }
 .cm6-preview { flex: 1; overflow-y: auto; padding: 16px 24px; font-size: 14px; line-height: 1.7; min-width: 0; background: var(--bg-editor); color: var(--text); }
 .cm6-preview h1,.cm6-preview h2,.cm6-preview h3 { margin: 16px 0 8px; font-weight: 600; }
 .cm6-preview p { margin: 0 0 10px; }
@@ -209,6 +217,13 @@ body {
 .table-paste-bar .tpb-convert:hover { background: var(--accent-hover); }
 .table-paste-bar .tpb-dismiss { background: none; border: none; color: var(--text-mute); cursor: pointer; font-size: 16px; line-height: 1; padding: 0 2px; min-height: 26px; flex-shrink: 0; }
 .table-paste-bar .tpb-dismiss:hover { color: var(--text); }
+
+/* TABLE SIZE PICKER */
+.table-size-picker { position: fixed; background: var(--bg-modal); border: 1px solid var(--border); border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,.18); z-index: 2000; padding: 8px; display: none; }
+.tsp-grid { display: grid; grid-template-columns: repeat(8, 18px); gap: 2px; }
+.tsp-cell { width: 18px; height: 18px; border: 1px solid var(--border); border-radius: 2px; cursor: pointer; background: var(--bg); box-sizing: border-box; }
+.tsp-cell.active { background: var(--accent); border-color: var(--accent); opacity: 0.7; }
+.tsp-label { text-align: center; font-size: 11px; color: var(--text-mute); margin-top: 6px; }
 
 /* EDITOR CONTEXT MENU */
 .editor-ctx-menu { position: fixed; background: var(--bg-modal); border: 1px solid var(--border); border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,.18); z-index: 2000; min-width: 160px; padding: 4px 0; display: none; }
@@ -645,6 +660,12 @@ body {
   <button data-folder-ctx-action="rename">Rename</button>
   <hr class="ctx-sep">
   <button data-folder-ctx-action="delete" class="ctx-danger">Delete</button>
+</div>
+
+<!-- TABLE SIZE PICKER -->
+<div id="table-size-picker" class="table-size-picker" role="dialog" aria-label="Select table size">
+  <div class="tsp-grid" id="tsp-grid"></div>
+  <div class="tsp-label" id="tsp-label">1 × 1</div>
 </div>
 
 <!-- EDITOR context menu (right-click on selection) -->

@@ -2,6 +2,12 @@
 
 All notable changes to thornotes are documented here.
 
+## [1.5.5.0] - 2026-04-05
+
+### Added
+- **Table size picker** — clicking the Table toolbar button now opens an 8×8 grid picker. Hover to select dimensions, click to insert a table of that size. Tabular selections still convert to Markdown tables directly. Dismiss with Escape, click-outside, or a second click on the button.
+- **Preview Edit mode** (`Pedit` toolbar button) — renders the note as a full-width preview. Click any block (paragraph, heading, list, code fence, table, etc.) to replace it with an inline textarea pre-filled with that block's raw Markdown. `Ctrl+Enter` or click-away saves and re-renders; `Escape` cancels. Auto-saves on commit. Mode is persisted to `localStorage` across sessions.
+
 ## [1.5.4.2] - 2026-04-05
 
 ### Changed

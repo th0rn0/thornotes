@@ -39,6 +39,8 @@ let editor = null;           // CM6 editor instance
 let editorPreviewEl = null;  // CM6 preview pane element
 let editorPreviewOpen = false;
 let editorSplitOpen = false;
+let editorPreviewEditOpen = false;
+let _previewEditBlocks = []; // [{raw, type}] from marked.lexer — used in preview-edit mode
 let saveTimer = null;
 let _loadingNote = false;  // suppresses auto-save during editor.setValue()
 let loadedFolderIds = new Set(); // tracks which folders have had their notes loaded
@@ -493,9 +495,10 @@ async function openNote(noteId, { historyMode = 'push' } = {}) {
       '<button data-cmd="orderedList" title="Numbered list">1. List</button>' +
       '<span class="cm6-sep"></span>' +
       '<button data-cmd="link" title="Insert link">Link</button>' +
-      '<button data-cmd="table" title="Insert table">Table</button>' +
+      '<button data-cmd="table" title="Insert table" id="cm6-table-btn">Table</button>' +
       '<span class="cm6-sep"></span>' +
       '<button data-cmd="preview" title="Toggle preview" id="cm6-preview-btn">Preview</button>' +
+      '<button data-cmd="previewedit" title="Preview Edit — click any block to edit inline" id="cm6-previewedit-btn">Pedit</button>' +
       '<button data-cmd="split" title="Split editor / preview" id="cm6-split-btn">Split</button>' +
       '<button data-cmd="lineNumbers" title="Toggle line numbers" id="cm6-linenumbers-btn">&#x23;</button>' +
       '<span class="cm6-sep"></span>' +
@@ -531,13 +534,19 @@ async function openNote(noteId, { historyMode = 'push' } = {}) {
     editorPreviewEl.style.display = 'none';
     wrap.appendChild(editorPreviewEl);
 
-    // Intercept wikilink clicks in the preview pane.
+    // Intercept wikilink clicks + preview-edit block clicks in the preview pane.
     editorPreviewEl.addEventListener('click', function(e) {
       const a = e.target.closest('a.wikilink[data-note-id]');
-      if (!a) return;
-      e.preventDefault();
-      const id = parseInt(a.dataset.noteId);
-      if (id) openNote(id);
+      if (a) {
+        e.preventDefault();
+        const id = parseInt(a.dataset.noteId);
+        if (id) openNote(id);
+        return;
+      }
+      if (!editorPreviewEditOpen) return;
+      const block = e.target.closest('.pe-block[data-pe-idx]');
+      if (!block) return;
+      openPreviewEditInlineEditor(block, +block.dataset.peIdx);
     });
 
     editor = CM6.createEditor(mount, {
@@ -551,10 +560,14 @@ async function openNote(noteId, { historyMode = 'push' } = {}) {
       const cmd = btn.dataset.cmd;
       if (cmd === 'preview') {
         toggleEditorPreview();
+      } else if (cmd === 'previewedit') {
+        toggleEditorPreviewEdit();
       } else if (cmd === 'split') {
         toggleEditorSplit();
       } else if (cmd === 'lineNumbers') {
         toggleLineNumbers();
+      } else if (cmd === 'table') {
+        handleTableBtn(e, btn);
       } else if (CM6.commands[cmd]) {
         CM6.commands[cmd](editor);
       }
@@ -604,6 +617,7 @@ async function openNote(noteId, { historyMode = 'push' } = {}) {
     const savedMode = localStorage.getItem('editorViewMode');
     if (savedMode === 'split') toggleEditorSplit();
     else if (savedMode === 'preview') toggleEditorPreview();
+    else if (savedMode === 'previewedit') toggleEditorPreviewEdit();
   }
 
   _loadingNote = true;
@@ -645,12 +659,7 @@ function processWikilinks(content) {
   });
 }
 
-function renderPreviewContent(content) {
-  const processed = processWikilinks(content);
-  const html = marked.parse(processed);
-  const tmp = document.createElement('div');
-  tmp.innerHTML = html;
-  // Mark resolved vs unresolved wikilinks.
+function _applyPreviewPostProcess(tmp) {
   tmp.querySelectorAll('a[href^="#tn-"]').forEach(a => {
     const id = a.getAttribute('href').slice(4);
     if (id) {
@@ -661,7 +670,119 @@ function renderPreviewContent(content) {
     }
   });
   tmp.querySelectorAll('pre code').forEach(el => hljs.highlightElement(el));
+}
+
+function renderPreviewContent(content) {
+  if (editorPreviewEditOpen) {
+    renderPreviewEditContent(content);
+    return;
+  }
+  const processed = processWikilinks(content);
+  const html = marked.parse(processed);
+  const tmp = document.createElement('div');
+  tmp.innerHTML = html;
+  _applyPreviewPostProcess(tmp);
   editorPreviewEl.innerHTML = tmp.innerHTML;
+}
+
+// Render content in preview-edit mode: wrap each block in a .pe-block div
+// annotated with its token index so clicks can round-trip back to markdown source.
+function renderPreviewEditContent(rawContent) {
+  const tokens = marked.lexer(rawContent);
+  _previewEditBlocks = tokens.map(tok => ({ raw: tok.raw, type: tok.type }));
+
+  // Render the full document (wikilinks + hljs) into a temp container.
+  const processed = processWikilinks(rawContent);
+  const tmp = document.createElement('div');
+  tmp.innerHTML = marked.parse(processed);
+  _applyPreviewPostProcess(tmp);
+
+  // Build an index: non-space token positions in _previewEditBlocks.
+  const nonSpaceIdxs = [];
+  _previewEditBlocks.forEach(function(b, i) { if (b.type !== 'space') nonSpaceIdxs.push(i); });
+
+  // Wrap each rendered top-level child in a pe-block div keyed to its token index.
+  editorPreviewEl.innerHTML = '';
+  Array.from(tmp.children).forEach(function(el, i) {
+    const wrap = document.createElement('div');
+    wrap.className = 'pe-block';
+    if (nonSpaceIdxs[i] !== undefined) wrap.dataset.peIdx = nonSpaceIdxs[i];
+    wrap.appendChild(el);
+    editorPreviewEl.appendChild(wrap);
+  });
+
+  // Hint at the bottom.
+  const hint = document.createElement('p');
+  hint.className = 'cm6-preview-edit-hint';
+  hint.textContent = 'Click any block to edit \u2022 Ctrl+Enter to save \u2022 Esc to cancel';
+  editorPreviewEl.appendChild(hint);
+}
+
+// Open an inline textarea editor over a .pe-block element.
+function openPreviewEditInlineEditor(block, idx) {
+  if (block.querySelector('.pe-inline-editor')) return; // already editing
+  const blockData = _previewEditBlocks[idx];
+  if (!blockData) return;
+
+  // Replace block children with a textarea.
+  const savedChildren = Array.from(block.childNodes).map(n => n.cloneNode(true));
+  block.innerHTML = '';
+
+  const ta = document.createElement('textarea');
+  ta.className = 'pe-inline-editor';
+  const rawTrimmed = blockData.raw.trimEnd();
+  const rawTrail = blockData.raw.slice(rawTrimmed.length) || '\n';
+  ta.value = rawTrimmed;
+  block.appendChild(ta);
+
+  requestAnimationFrame(function() {
+    ta.style.height = ta.scrollHeight + 'px';
+    ta.focus();
+    ta.setSelectionRange(0, ta.value.length);
+  });
+
+  ta.addEventListener('input', function() {
+    ta.style.height = 'auto';
+    ta.style.height = ta.scrollHeight + 'px';
+  });
+
+  let done = false;
+
+  function commitEdit() {
+    if (done) return;
+    done = true;
+    _previewEditBlocks[idx].raw = ta.value.trimEnd() + rawTrail;
+    const newContent = _previewEditBlocks.map(function(b) { return b.raw; }).join('');
+    _loadingNote = true;
+    editor.setValue(newContent);
+    _loadingNote = false;
+    document.getElementById('note-stats').textContent = noteStats(newContent);
+    setSaveStatus('saving');
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(autoSave, AUTO_SAVE_DELAY_MS);
+    renderPreviewContent(newContent);
+  }
+
+  function cancelEdit() {
+    if (done) return;
+    done = true;
+    block.innerHTML = '';
+    savedChildren.forEach(function(n) { block.appendChild(n); });
+  }
+
+  ta.addEventListener('blur', commitEdit);
+
+  ta.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      ta.removeEventListener('blur', commitEdit);
+      cancelEdit();
+    } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      ta.removeEventListener('blur', commitEdit);
+      commitEdit();
+    }
+  });
 }
 
 // ── Folder view ────────────────────────────────────────────────────────────
@@ -734,20 +855,30 @@ function toggleLineNumbers() {
   applyLineNumbers();
 }
 
+function closePreviewEditMode() {
+  if (!editorPreviewEditOpen) return;
+  editorPreviewEditOpen = false;
+  _previewEditBlocks = [];
+  const wrap = document.querySelector('.cm6-wrap');
+  if (wrap) wrap.classList.remove('preview-edit');
+  const peb = document.getElementById('cm6-previewedit-btn');
+  if (peb) peb.classList.remove('active');
+}
+
 function toggleEditorPreview() {
   editorPreviewOpen = !editorPreviewOpen;
   const mount = document.querySelector('.cm6-mount');
   const wrap  = document.querySelector('.cm6-wrap');
   const btn   = document.getElementById('cm6-preview-btn');
   if (editorPreviewOpen) {
-    // Close split if it was open.
+    // Close split and preview-edit if open.
     if (editorSplitOpen) {
       editorSplitOpen = false;
       wrap.classList.remove('split');
       const sb = document.getElementById('cm6-split-btn');
       if (sb) sb.classList.remove('active');
-      localStorage.setItem('editorViewMode', 'editor');
     }
+    closePreviewEditMode();
     renderPreviewContent(editor.getValue());
     editorPreviewEl.style.display = '';
     mount.style.display = 'none';
@@ -768,12 +899,13 @@ function toggleEditorSplit() {
   const wrap  = document.querySelector('.cm6-wrap');
   const btn   = document.getElementById('cm6-split-btn');
   if (editorSplitOpen) {
-    // Close preview-only if it was open.
+    // Close preview-only and preview-edit if open.
     if (editorPreviewOpen) {
       editorPreviewOpen = false;
       const pb = document.getElementById('cm6-preview-btn');
       if (pb) pb.classList.remove('active');
     }
+    closePreviewEditMode();
     renderPreviewContent(editor.getValue());
     mount.style.display = '';
     editorPreviewEl.style.display = '';
@@ -783,6 +915,41 @@ function toggleEditorSplit() {
   } else {
     editorPreviewEl.style.display = 'none';
     wrap.classList.remove('split');
+    btn.classList.remove('active');
+    localStorage.setItem('editorViewMode', 'editor');
+    editor.focus();
+  }
+}
+
+function toggleEditorPreviewEdit() {
+  editorPreviewEditOpen = !editorPreviewEditOpen;
+  const mount = document.querySelector('.cm6-mount');
+  const wrap  = document.querySelector('.cm6-wrap');
+  const btn   = document.getElementById('cm6-previewedit-btn');
+  if (editorPreviewEditOpen) {
+    // Close split and preview if open.
+    if (editorSplitOpen) {
+      editorSplitOpen = false;
+      wrap.classList.remove('split');
+      const sb = document.getElementById('cm6-split-btn');
+      if (sb) sb.classList.remove('active');
+    }
+    if (editorPreviewOpen) {
+      editorPreviewOpen = false;
+      const pb = document.getElementById('cm6-preview-btn');
+      if (pb) pb.classList.remove('active');
+    }
+    wrap.classList.add('preview-edit');
+    renderPreviewContent(editor.getValue());
+    editorPreviewEl.style.display = '';
+    mount.style.display = 'none';
+    btn.classList.add('active');
+    localStorage.setItem('editorViewMode', 'previewedit');
+  } else {
+    _previewEditBlocks = [];
+    wrap.classList.remove('preview-edit');
+    editorPreviewEl.style.display = 'none';
+    mount.style.display = '';
     btn.classList.remove('active');
     localStorage.setItem('editorViewMode', 'editor');
     editor.focus();
@@ -799,7 +966,7 @@ function onEditorChange() {
   saveTimer = setTimeout(autoSave, AUTO_SAVE_DELAY_MS);
   const content = editor.getValue();
   document.getElementById('note-stats').textContent = noteStats(content);
-  if ((editorPreviewOpen || editorSplitOpen) && editorPreviewEl) {
+  if ((editorPreviewOpen || editorSplitOpen || editorPreviewEditOpen) && editorPreviewEl) {
     renderPreviewContent(content);
   }
 }
@@ -1515,7 +1682,7 @@ function isTextInputFocused() {
 }
 
 document.addEventListener('keydown', function(e) {
-  if (e.key === 'Escape') { hideNoteCtxMenu(); hideFolderCtxMenu(); hideEditorCtxMenu(); hideTablePasteBar(); return; }
+  if (e.key === 'Escape') { hideNoteCtxMenu(); hideFolderCtxMenu(); hideEditorCtxMenu(); hideTablePasteBar(); hideTablePicker(); return; }
   // Delete key: delete the currently open note, but never while typing.
   if (e.key === 'Delete' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
     if (isTextInputFocused()) return;
@@ -1653,6 +1820,114 @@ function hideTablePasteBar() {
   if (bar) bar.style.display = 'none';
 }
 
+// ── Table size picker ─────────────────────────────────────────────────────────
+
+const TSP_COLS = 8;
+const TSP_ROWS = 8;
+
+(function initTablePicker() {
+  const grid = document.getElementById('tsp-grid');
+  if (!grid) return;
+  for (let r = 1; r <= TSP_ROWS; r++) {
+    for (let c = 1; c <= TSP_COLS; c++) {
+      const cell = document.createElement('div');
+      cell.className = 'tsp-cell';
+      cell.dataset.row = r;
+      cell.dataset.col = c;
+      grid.appendChild(cell);
+    }
+  }
+})();
+
+function hideTablePicker() {
+  const picker = document.getElementById('table-size-picker');
+  if (picker) picker.style.display = 'none';
+}
+
+function showTablePicker(anchorBtn) {
+  const picker = document.getElementById('table-size-picker');
+  if (!picker) return;
+  // Reset highlight to 1×1
+  updateTablePickerHighlight(1, 1);
+  // Position below the anchor button
+  const rect = anchorBtn.getBoundingClientRect();
+  picker.style.display = 'block';
+  const pw = picker.offsetWidth;
+  const ph = picker.offsetHeight;
+  let left = rect.left;
+  let top = rect.bottom + 4;
+  if (left + pw > window.innerWidth - 8) left = window.innerWidth - pw - 8;
+  if (top + ph > window.innerHeight - 8) top = rect.top - ph - 4;
+  picker.style.left = left + 'px';
+  picker.style.top = top + 'px';
+}
+
+function updateTablePickerHighlight(rows, cols) {
+  const grid = document.getElementById('tsp-grid');
+  const label = document.getElementById('tsp-label');
+  if (!grid) return;
+  grid.querySelectorAll('.tsp-cell').forEach(function(cell) {
+    const r = +cell.dataset.row;
+    const c = +cell.dataset.col;
+    cell.classList.toggle('active', r <= rows && c <= cols);
+  });
+  if (label) label.textContent = cols + ' \u00d7 ' + rows;
+}
+
+function insertTableTemplate(rows, cols) {
+  if (!editor) return;
+  hideTablePicker();
+  const view = editor._view;
+  const sel = view.state.selection.main;
+  const lineStart = view.state.doc.lineAt(sel.from).from;
+  const prefix = sel.from === lineStart ? '' : '\n';
+  const header = '| ' + Array.from({ length: cols }, function(_, i) { return 'Col ' + (i + 1); }).join(' | ') + ' |';
+  const sep    = '| ' + Array.from({ length: cols }, function() { return '--------'; }).join(' | ') + ' |';
+  const row    = '| ' + Array.from({ length: cols }, function() { return 'Cell    '; }).join(' | ') + ' |';
+  const lines  = [header, sep].concat(Array.from({ length: rows }, function() { return row; }));
+  const tpl = prefix + lines.join('\n') + '\n';
+  const cursorAt = sel.from + prefix.length + 2;
+  view.dispatch({
+    changes: { from: sel.from, to: sel.to, insert: tpl },
+    selection: { anchor: cursorAt, head: cursorAt + ('Col 1').length },
+  });
+  view.focus();
+}
+
+document.getElementById('tsp-grid').addEventListener('mouseover', function(e) {
+  const cell = e.target.closest('.tsp-cell');
+  if (!cell) return;
+  updateTablePickerHighlight(+cell.dataset.row, +cell.dataset.col);
+});
+
+document.getElementById('tsp-grid').addEventListener('click', function(e) {
+  const cell = e.target.closest('.tsp-cell');
+  if (!cell) return;
+  insertTableTemplate(+cell.dataset.row, +cell.dataset.col);
+});
+
+function handleTableBtn(e, btn) {
+  e.stopPropagation();
+  // If there is a tabular selection, convert it immediately.
+  if (editor) {
+    const view = editor._view;
+    const sel = view.state.selection.main;
+    if (!sel.empty) {
+      const text = view.state.doc.sliceString(sel.from, sel.to);
+      if (parseTabularText(text)) {
+        selectionToTable();
+        return;
+      }
+    }
+  }
+  const picker = document.getElementById('table-size-picker');
+  if (picker && picker.style.display !== 'none') {
+    hideTablePicker();
+  } else {
+    showTablePicker(btn);
+  }
+}
+
 // Replace the just-pasted raw text with its Markdown table equivalent.
 function convertPasteToTable() {
   if (!_pendingTablePaste || !editor) return;
@@ -1701,6 +1976,11 @@ document.getElementById('editor-ctx-menu').addEventListener('click', function(e)
 });
 
 document.addEventListener('click', hideEditorCtxMenu);
+document.addEventListener('click', function(e) {
+  if (!e.target.closest('#table-size-picker') && !e.target.closest('#cm6-table-btn')) {
+    hideTablePicker();
+  }
+});
 
 // ── CM6 extra commands ─────────────────────────────────────────────────────
 // Extend the vendor bundle's command map with commands that require app context.
