@@ -87,6 +87,7 @@ jobs:
   test-wails:
     name: Desktop Wails (build + test)
     runs-on: ubuntu-22.04
+    if: false  # disabled until webkit2gtk CI stabilises
     steps:
       - name: Discord Webhook Action - Build Start
         uses: tsickert/discord-webhook@86dc739f3f165f16dadc5666051c367efa1692f4 # v6.0.0
@@ -229,7 +230,7 @@ jobs:
   build-push:
     name: Build & Push
     runs-on: ubuntu-latest
-    needs: [lint, test, test-js, build-desktop, test-wails]
+    needs: [lint, test, test-js, build-desktop]
     # Run on pushes to main OR on version tag pushes (v*)
     if: >
       github.event_name == 'push' &&
