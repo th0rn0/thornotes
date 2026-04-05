@@ -5,9 +5,13 @@ All notable changes to thornotes are documented here.
 ## [1.5.4.1] - 2026-04-05
 
 ### Added
+- **Wails desktop app** — Go-native alternative to the Electron wrapper (`desktop-wails/`). Uses OS native webview, system tray, and config persistence in `~/.config/thornotes-wails/`. ~10–15 MB vs ~150 MB for Electron.
 - **`docker-compose.yml`** — local MariaDB 11 service matching CI credentials exactly. `make test-db-up` starts it, `make test-with-db` runs the full Go test suite against it.
-- **Wails config persistence tests** — `desktop-wails/internal/config/config.go` extracts `Load`/`Save` from `app.go` into a testable package. 11 new tests cover: missing file, valid JSON, invalid JSON, unknown fields, round-trip, directory creation, overwrite, and empty config.
-- **Full Wails CI build** — `test-wails` job now installs webkit2gtk + builds with CGO (`go build ./...`) + runs `go test -race ./...` with coverage report. Pinned to `ubuntu-22.04` for consistent webkit2gtk package names.
+- **Wails config persistence tests** — `desktop-wails/internal/config` package with `Load`/`Save` functions and 11 new tests covering: missing file, valid JSON, invalid JSON, unknown fields, round-trip, directory creation, overwrite, and empty config.
+- **Full Wails CI build** — `test-wails` job installs webkit2gtk + builds with CGO + runs `go test -race ./...` with coverage report. Pinned to `ubuntu-22.04`.
+
+### Fixed
+- **Line number toggle** — the `#` toolbar button now correctly shows and hides line numbers. The CM6 bundle was missing `lineNumbers()` in its extensions, so the gutter DOM elements were never rendered and the CSS toggle had nothing to act on.
 
 ## [1.5.4.0] - 2026-04-04
 
