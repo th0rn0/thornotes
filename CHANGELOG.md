@@ -2,6 +2,11 @@
 
 All notable changes to thornotes are documented here.
 
+## [1.5.4.2] - 2026-04-05
+
+### Changed
+- Disabled Wails CI job temporarily while webkit2gtk dependency install is stabilised.
+
 ## [1.5.4.1] - 2026-04-05
 
 ### Added
