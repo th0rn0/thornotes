@@ -194,7 +194,9 @@ body {
 .cm6-wrap.preview-edit .pe-block:hover { background: rgba(0,0,0,0.05); cursor: text; }
 [data-theme="dark"] .cm6-wrap.preview-edit .pe-block:hover,
 [data-theme="catppuccin"] .cm6-wrap.preview-edit .pe-block:hover { background: rgba(255,255,255,0.07); }
-.pe-inline-editor { display: block; width: 100%; box-sizing: border-box; font-family: "Cascadia Code","Fira Code",Consolas,monospace; font-size: 13px; line-height: 1.6; padding: 6px 8px; border: 2px solid var(--accent); border-radius: 3px; background: var(--bg-input); color: var(--text); resize: none; overflow: hidden; outline: none; min-height: 32px; }
+.pe-inline-editor { display: block; width: 100%; box-sizing: border-box; font-family: "Cascadia Code","Fira Code",Consolas,monospace; font-size: 12px; line-height: 1.5; padding: 4px 8px; border: 1px solid var(--border); border-bottom: none; border-radius: 3px 3px 0 0; background: var(--bg-input); color: var(--text-mute); resize: none; overflow: hidden; outline: none; min-height: 28px; }
+.pe-live-preview { border: 2px solid var(--accent); border-radius: 0 0 3px 3px; padding: 6px 10px; background: var(--bg-editor); min-height: 24px; }
+.pe-live-preview > *:last-child { margin-bottom: 0; }
 .cm6-preview-edit-hint { font-size: 11px; color: var(--text-dim); text-align: right; padding: 4px 0 0; pointer-events: none; }
 .cm6-preview { flex: 1; overflow-y: auto; padding: 16px 24px; font-size: 14px; line-height: 1.7; min-width: 0; background: var(--bg-editor); color: var(--text); }
 .cm6-preview h1,.cm6-preview h2,.cm6-preview h3 { margin: 16px 0 8px; font-weight: 600; }

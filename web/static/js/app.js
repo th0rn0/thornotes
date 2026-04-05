@@ -724,16 +724,31 @@ function openPreviewEditInlineEditor(block, idx) {
   const blockData = _previewEditBlocks[idx];
   if (!blockData) return;
 
-  // Replace block children with a textarea.
   const savedChildren = Array.from(block.childNodes).map(n => n.cloneNode(true));
   block.innerHTML = '';
 
+  // Raw markdown textarea (compact, at top).
   const ta = document.createElement('textarea');
   ta.className = 'pe-inline-editor';
   const rawTrimmed = blockData.raw.trimEnd();
   const rawTrail = blockData.raw.slice(rawTrimmed.length) || '\n';
   ta.value = rawTrimmed;
   block.appendChild(ta);
+
+  // Live rendered preview — updates on every keystroke.
+  const liveEl = document.createElement('div');
+  liveEl.className = 'pe-live-preview markdown-body';
+  block.appendChild(liveEl);
+
+  function updateLive() {
+    const raw = ta.value;
+    const processed = processWikilinks(raw);
+    const tmp = document.createElement('div');
+    tmp.innerHTML = marked.parse(processed);
+    _applyPreviewPostProcess(tmp);
+    liveEl.innerHTML = tmp.innerHTML;
+  }
+  updateLive();
 
   requestAnimationFrame(function() {
     ta.style.height = ta.scrollHeight + 'px';
@@ -744,6 +759,7 @@ function openPreviewEditInlineEditor(block, idx) {
   ta.addEventListener('input', function() {
     ta.style.height = 'auto';
     ta.style.height = ta.scrollHeight + 'px';
+    updateLive();
   });
 
   let done = false;

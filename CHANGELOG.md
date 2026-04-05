@@ -2,6 +2,11 @@
 
 All notable changes to thornotes are documented here.
 
+## [1.5.5.1] - 2026-04-05
+
+### Changed
+- **Preview Edit live render** — typing in the inline editor now updates the rendered preview instantly on every keystroke. The raw markdown textarea sits above a live output panel (blue border) so you see formatted output as you type — `##` becomes an `<h2>` the moment you add the space.
+
 ## [1.5.5.0] - 2026-04-05
 
 ### Added
