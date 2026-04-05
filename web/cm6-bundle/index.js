@@ -1,7 +1,7 @@
 // thornotes CM6 bundle — compiled to web/static/js/vendor/codemirror6.min.js
 // Build: cd web/cm6-bundle && bun install && bun run build
 
-import { EditorView, keymap } from "@codemirror/view";
+import { EditorView, keymap, lineNumbers } from "@codemirror/view";
 import { EditorState, Compartment } from "@codemirror/state";
 import {
   history, historyKeymap, defaultKeymap, indentWithTab,
@@ -26,8 +26,8 @@ const catppuccinTheme = EditorView.theme({
   },
   '&.cm-focused': { outline: 'none' },
   '.cm-activeLine': { backgroundColor: 'rgba(137,180,250,0.06)' },
-  '.cm-gutters': { display: 'none' },
-  '.cm-lineNumbers': { display: 'none' },
+  '.cm-gutters': { display: 'none', backgroundColor: '#1e1e2e', borderRight: '1px solid #313244', color: '#585b70' },
+  '.cm-lineNumbers .cm-gutterElement': { padding: '0 10px 0 8px', minWidth: '2.5em', textAlign: 'right' },
 }, { dark: true });
 
 const darkTheme = EditorView.theme({
@@ -44,8 +44,8 @@ const darkTheme = EditorView.theme({
   },
   '&.cm-focused': { outline: 'none' },
   '.cm-activeLine': { backgroundColor: 'rgba(255,255,255,0.04)' },
-  '.cm-gutters': { display: 'none' },
-  '.cm-lineNumbers': { display: 'none' },
+  '.cm-gutters': { display: 'none', backgroundColor: '#1e1e1e', borderRight: '1px solid #333', color: '#858585' },
+  '.cm-lineNumbers .cm-gutterElement': { padding: '0 10px 0 8px', minWidth: '2.5em', textAlign: 'right' },
 }, { dark: true });
 
 const lightTheme = EditorView.theme({
@@ -61,8 +61,8 @@ const lightTheme = EditorView.theme({
   },
   '&.cm-focused': { outline: 'none' },
   '.cm-activeLine': { backgroundColor: 'rgba(0,0,0,0.03)' },
-  '.cm-gutters': { display: 'none' },
-  '.cm-lineNumbers': { display: 'none' },
+  '.cm-gutters': { display: 'none', backgroundColor: '#f5f5f5', borderRight: '1px solid #ddd', color: '#999' },
+  '.cm-lineNumbers .cm-gutterElement': { padding: '0 10px 0 8px', minWidth: '2.5em', textAlign: 'right' },
 }, { dark: false });
 
 // ── Extensions ───────────────────────────────────────────────────────────────
@@ -70,6 +70,7 @@ const lightTheme = EditorView.theme({
 function baseExtensions(onChange) {
   const exts = [
     history(),
+    lineNumbers(),
     EditorView.lineWrapping,
     keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab]),
     markdown(),
