@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- thornotes thorn mark — same path as the desktop/setup.html SVG logo -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="512"
+    android:viewportHeight="512">
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M256,108 C270,130 308,198 306,290 C304,358 284,408 256,408 C228,408 208,358 206,290 C204,198 242,130 256,108 Z" />
+</vector>

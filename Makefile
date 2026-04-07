@@ -4,7 +4,7 @@ MAIN     := ./cmd/thornotes
 VERSION  := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS  := -ldflags "-s -w -X main.Version=$(VERSION)"
 
-.PHONY: build test run clean fmt vet lint release build-cm6 desktop desktop-dist desktop-wails desktop-wails-dist test-db-up test-db-down test-with-db
+.PHONY: build test run clean fmt vet lint release build-cm6 desktop desktop-dist desktop-wails desktop-wails-dist android android-release test-db-up test-db-down test-with-db
 
 build:
 	go build $(LDFLAGS) -o $(BINARY) $(MAIN)
@@ -50,6 +50,17 @@ desktop-wails:
 
 desktop-wails-dist:
 	cd desktop-wails && wails build -o thornotes-wails$(or $(WAILS_EXT),)
+
+# ── Android APK ───────────────────────────────────────────────────────────────
+# Requires: Android Studio or Android SDK + JDK 17+
+# First time: cd android && gradle wrapper  (generates gradlew JAR)
+android:
+	cd android && ./gradlew assembleDebug
+	@echo "APK: android/app/build/outputs/apk/debug/app-debug.apk"
+
+android-release:
+	cd android && ./gradlew assembleRelease
+	@echo "APK: android/app/build/outputs/apk/release/app-release-unsigned.apk"
 
 # ── Database (local testing via Docker Compose) ───────────────────────────────
 TEST_DSN := thornotes:thornotes@tcp(127.0.0.1:3306)/thornotes_test?parseTime=true
