@@ -4,6 +4,9 @@
 
 ---
 
+### Android APK: automated signing in CI
+Store the release keystore as a base64 GitHub Secret (`ANDROID_KEYSTORE_BASE64`), decode it in the `build-android` workflow job, and pass the key alias/password secrets to `apksigner`. Output a fully signed APK attached to the GitHub Release, removing the manual signing step.
+
 ---
 
 

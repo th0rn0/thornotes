@@ -2,6 +2,18 @@
 
 All notable changes to thornotes are documented here.
 
+## [1.5.7.0] - 2026-04-07
+
+### Added
+- **Enter to sign in** — pressing Enter in the username or password field submits the sign-in form. Same behaviour on the register form.
+- **Interactive checkboxes in preview** — clicking a checkbox in Preview or Split mode toggles `[ ]` / `[x]` in the markdown source and auto-saves.
+- **Auto-lint markdown** — a new toggle in Settings > Editor enables a persistent lint panel below the toolbar. Checks for trailing whitespace, hard tabs, multiple blank lines, heading level jumps, missing blank lines before headings, and bare URLs. Each issue is clickable to jump to the offending line. Updates live as you type.
+- **Android APK** — new `android/` project (Kotlin, WebView wrapper) that connects to any self-hosted thornotes server. Setup screen stores the server URL; back-navigates within the WebView; sessions persist via cookies. Mirrors the Electron desktop app pattern.
+
+### Added (developer)
+- `make android` / `make android-release` targets for building debug and release APKs.
+- `build-android` CI job builds the APK on every push and uploads it as a workflow artifact. On version tags, a `release-android` job attaches the unsigned release APK to the GitHub Release.
+
 ## [1.5.6.0] - 2026-04-07
 
 ### Added
