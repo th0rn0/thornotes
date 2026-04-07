@@ -391,3 +391,107 @@ jobs:
           embed-title: ${{ github.repository }} - v${{ steps.version.outputs.version }} Released!
           embed-url: ${{ github.server_url }}/${{ github.repository }}/releases/tag/v${{ steps.version.outputs.version }}
           embed-description: Docker image pushed and GitHub release created.
+
+  build-android:
+    name: Android APK
+    runs-on: ubuntu-latest
+    steps:
+      - name: Discord Webhook Action - Build Start
+        uses: tsickert/discord-webhook@86dc739f3f165f16dadc5666051c367efa1692f4 # v6.0.0
+        with:
+          webhook-url: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          embed-title: ${{ github.repository }} - ${{ github.head_ref || github.ref_name }} - Android Build Started!
+          embed-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          embed-description: ${{ github.event.head_commit.message }}
+
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: actions/setup-java@3a4f6e1af504cf6a31855fa899c6aa5aac3b89a9 # v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - uses: gradle/actions/setup-gradle@ac638b010cf58a27ee6c972d7336334ccaf61c96 # v4
+        with:
+          gradle-version: '8.7'
+          cache-read-only: false
+
+      - name: Build debug APK
+        working-directory: android
+        run: gradle assembleDebug
+        env:
+          ANDROID_SDK_ROOT: ${{ env.ANDROID_SDK_ROOT }}
+
+      - name: Build release APK (unsigned)
+        if: startsWith(github.ref, 'refs/tags/v')
+        working-directory: android
+        run: gradle assembleRelease
+        env:
+          ANDROID_SDK_ROOT: ${{ env.ANDROID_SDK_ROOT }}
+
+      - name: Upload debug APK artifact
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4
+        with:
+          name: thornotes-debug.apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 14
+
+      - name: Upload release APK artifact
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4
+        with:
+          name: thornotes-release-unsigned.apk
+          path: android/app/build/outputs/apk/release/app-release-unsigned.apk
+          retention-days: 90
+
+      - name: Discord Webhook Action - Build Success
+        uses: tsickert/discord-webhook@86dc739f3f165f16dadc5666051c367efa1692f4 # v6.0.0
+        with:
+          webhook-url: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          embed-title: ${{ github.repository }} - ${{ github.head_ref || github.ref_name }} - Android Build Success!
+          embed-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          embed-description: ${{ github.event.head_commit.message }}
+
+      - name: Discord Webhook Action - Build Failure
+        if: failure()
+        uses: tsickert/discord-webhook@86dc739f3f165f16dadc5666051c367efa1692f4 # v6.0.0
+        with:
+          webhook-url: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          embed-title: ${{ github.repository }} - ${{ github.head_ref || github.ref_name }} - Android Build Failure!
+          embed-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          embed-description: ${{ github.event.head_commit.message }}
+
+  release-android:
+    name: Android Release
+    runs-on: ubuntu-latest
+    needs: [release, build-android]
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Read version
+        id: version
+        run: echo "version=$(cat VERSION | tr -d '[:space:]')" >> $GITHUB_OUTPUT
+
+      - name: Download release APK
+        uses: actions/download-artifact@fa0a91b85d4f404e444306b2a2d2da43bf6d8b63 # v4
+        with:
+          name: thornotes-release-unsigned.apk
+          path: apk/
+
+      - name: Attach APK to GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload v${{ steps.version.outputs.version }} \
+            apk/app-release-unsigned.apk#thornotes-v${{ steps.version.outputs.version }}-android-unsigned.apk
+
+      - name: Discord Webhook Action - Android Release
+        uses: tsickert/discord-webhook@86dc739f3f165f16dadc5666051c367efa1692f4 # v6.0.0
+        with:
+          webhook-url: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          embed-title: ${{ github.repository }} - v${{ steps.version.outputs.version }} - Android APK attached!
+          embed-url: ${{ github.server_url }}/${{ github.repository }}/releases/tag/v${{ steps.version.outputs.version }}
+          embed-description: Unsigned APK attached to GitHub release — sign locally with apksigner before distributing.
