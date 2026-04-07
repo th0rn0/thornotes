@@ -278,6 +278,17 @@ body {
 .cm6-mount.show-line-numbers .cm-gutters { display: flex !important; }
 .cm6-mount.show-line-numbers .cm-lineNumbers { display: flex !important; }
 
+/* LINT PANEL */
+.lint-panel { display: none; flex-direction: column; max-height: 180px; overflow-y: auto; border-bottom: 1px solid var(--border-light); flex-shrink: 0; font-size: 12px; }
+.lint-panel.open { display: flex; }
+.lint-panel-empty { padding: 6px 12px; color: var(--text-mute); font-style: italic; }
+.lint-issue { display: flex; align-items: baseline; gap: 6px; padding: 3px 12px; cursor: pointer; border-left: 3px solid transparent; }
+.lint-issue:hover { background: var(--bg-hover); }
+.lint-issue.warn { border-left-color: #d4a017; }
+.lint-issue.error { border-left-color: #d03030; }
+.lint-issue-line { color: var(--text-mute); min-width: 48px; flex-shrink: 0; }
+.lint-issue-msg { color: var(--text); flex: 1; }
+
 /* TABLE PASTE BAR */
 .table-paste-bar { display: none; align-items: center; gap: 8px; padding: 5px 10px; background: var(--bg-hover); border-bottom: 1px solid var(--border-light); font-size: 12px; color: var(--text-mute); flex-shrink: 0; flex-wrap: wrap; }
 .table-paste-bar .tpb-info { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -777,6 +788,16 @@ body {
         <label>Auto-collapse folders after 30s of inactivity</label>
         <label class="toggle">
           <input type="checkbox" id="auto-collapse-toggle">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+    </div>
+    <div class="settings-section">
+      <h3>Editor</h3>
+      <div class="settings-row">
+        <label>Auto-lint markdown</label>
+        <label class="toggle">
+          <input type="checkbox" id="auto-lint-toggle">
           <span class="toggle-slider"></span>
         </label>
       </div>

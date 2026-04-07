@@ -524,6 +524,12 @@ async function openNote(noteId, { historyMode = 'push' } = {}) {
       '<button class="tpb-dismiss" id="table-paste-dismiss-btn" aria-label="Dismiss">\u00d7</button>';
     editorArea.appendChild(pasteBar);
 
+    // Lint panel (hidden until toggled)
+    const lintPanel = document.createElement('div');
+    lintPanel.id = 'lint-panel';
+    lintPanel.className = 'lint-panel';
+    editorArea.appendChild(lintPanel);
+
     // Editor + preview wrapper
     const wrap = document.createElement('div');
     wrap.className = 'cm6-wrap';
@@ -547,6 +553,21 @@ async function openNote(noteId, { historyMode = 'push' } = {}) {
         e.preventDefault();
         const id = parseInt(a.dataset.noteId);
         if (id) openNote(id);
+        return;
+      }
+      const cb = e.target.closest('input[type="checkbox"]');
+      if (cb) {
+        e.preventDefault();
+        const allCbs = Array.from(editorPreviewEl.querySelectorAll('input[type="checkbox"]'));
+        const idx = allCbs.indexOf(cb);
+        if (idx === -1) return;
+        const md = editor.getValue();
+        let count = 0;
+        const newMd = md.replace(/^([ \t]*[-*+] )(\[[ xX]\])/gm, function(match, prefix, box) {
+          if (count++ === idx) return prefix + (/[xX]/.test(box) ? '[ ]' : '[x]');
+          return match;
+        });
+        if (newMd !== md) editor.setValue(newMd);
         return;
       }
       if (!editorPreviewEditOpen) return;
@@ -676,6 +697,7 @@ function _applyPreviewPostProcess(tmp) {
     }
   });
   tmp.querySelectorAll('pre code').forEach(el => hljs.highlightElement(el));
+  tmp.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.removeAttribute('disabled'));
 }
 
 function renderPreviewContent(content) {
@@ -877,6 +899,106 @@ function toggleLineNumbers() {
   applyLineNumbers();
 }
 
+// ── Markdown linter ──────────────────────────────────────────────────────────
+
+function lintMarkdown(md) {
+  const issues = [];
+  const lines = md.split('\n');
+  let lastHeadingLevel = 0;
+  let blankCount = 0;
+  let inFence = false;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const lineNum = i + 1;
+
+    // Track fenced code blocks — don't lint inside them
+    if (/^```/.test(line)) { inFence = !inFence; blankCount = 0; continue; }
+    if (inFence) { blankCount = 0; continue; }
+
+    const blank = line.trim() === '';
+    if (blank) { blankCount++; } else { blankCount = 0; }
+
+    // Trailing whitespace
+    if (!blank && / +$/.test(line)) {
+      issues.push({ line: lineNum, severity: 'warn', msg: 'Trailing whitespace' });
+    }
+
+    // Hard tabs
+    if (/\t/.test(line)) {
+      issues.push({ line: lineNum, severity: 'warn', msg: 'Hard tab character' });
+    }
+
+    // Multiple consecutive blank lines
+    if (blankCount === 3) {
+      issues.push({ line: lineNum, severity: 'warn', msg: 'Multiple consecutive blank lines' });
+    }
+
+    // Heading checks
+    const headingMatch = line.match(/^(#{1,6})\s/);
+    if (headingMatch) {
+      const level = headingMatch[1].length;
+
+      // Heading level jumps (e.g. # then ###)
+      if (lastHeadingLevel > 0 && level > lastHeadingLevel + 1) {
+        issues.push({ line: lineNum, severity: 'warn', msg: `Heading jumps from h${lastHeadingLevel} to h${level}` });
+      }
+      lastHeadingLevel = level;
+
+      // No blank line before heading (except first line or after another heading)
+      if (i > 0 && lines[i - 1].trim() !== '' && !/^#{1,6}\s/.test(lines[i - 1])) {
+        issues.push({ line: lineNum, severity: 'warn', msg: 'No blank line before heading' });
+      }
+    }
+
+    // Bare URLs (http/https not inside [] or <>)
+    const bareUrlRe = /(?<![(<\[])(https?:\/\/[^\s)>\]]+)/g;
+    let m;
+    while ((m = bareUrlRe.exec(line)) !== null) {
+      issues.push({ line: lineNum, severity: 'warn', msg: `Bare URL: ${m[1].slice(0, 50)}${m[1].length > 50 ? '…' : ''}` });
+    }
+  }
+
+  return issues;
+}
+
+function applyLintSetting() {
+  const enabled = localStorage.getItem('autoLint') === 'true';
+  const panel = document.getElementById('lint-panel');
+  if (!panel) return;
+  if (enabled) {
+    panel.classList.add('open');
+    runLint();
+  } else {
+    panel.classList.remove('open');
+  }
+}
+
+function runLint() {
+  if (localStorage.getItem('autoLint') !== 'true' || !editor) return;
+  const panel = document.getElementById('lint-panel');
+  if (!panel) return;
+  const issues = lintMarkdown(editor.getValue());
+  panel.innerHTML = '';
+  if (issues.length === 0) {
+    panel.innerHTML = '<div class="lint-panel-empty">No issues found</div>';
+  } else {
+    issues.forEach(function(issue) {
+      const row = document.createElement('div');
+      row.className = `lint-issue ${issue.severity}`;
+      row.innerHTML = `<span class="lint-issue-line">Line ${issue.line}</span><span class="lint-issue-msg">${issue.msg}</span>`;
+      row.addEventListener('click', function() {
+        if (!editor) return;
+        const view = editor._view;
+        const line = view.state.doc.line(Math.min(issue.line, view.state.doc.lines));
+        view.dispatch({ selection: { anchor: line.from }, scrollIntoView: true });
+        view.focus();
+      });
+      panel.appendChild(row);
+    });
+  }
+}
+
 function closePreviewEditMode() {
   if (!editorPreviewEditOpen) return;
   editorPreviewEditOpen = false;
@@ -991,6 +1113,7 @@ function onEditorChange() {
   if ((editorPreviewOpen || editorSplitOpen || editorPreviewEditOpen) && editorPreviewEl) {
     renderPreviewContent(content);
   }
+  runLint();
 }
 
 async function autoSave() {
@@ -1562,6 +1685,8 @@ function openSettings() {
   if (sel) sel.value = VALID_THEMES.indexOf(saved) !== -1 ? saved : 'auto';
   const acToggle = document.getElementById('auto-collapse-toggle');
   if (acToggle) acToggle.checked = localStorage.getItem('autoCollapse') !== 'false';
+  const lintToggle = document.getElementById('auto-lint-toggle');
+  if (lintToggle) lintToggle.checked = localStorage.getItem('autoLint') === 'true';
 }
 function closeSettings() {
   document.getElementById('settings-modal').style.display = 'none';
@@ -1588,8 +1713,12 @@ _resetAutoCollapseTimer();
 // ── Event bindings (replaces inline onclick/onchange/oninput attrs) ─────────
 // Auth
 document.getElementById('login-btn').addEventListener('click', login);
+document.getElementById('login-username').addEventListener('keydown', e => { if (e.key === 'Enter') login(); });
+document.getElementById('login-password').addEventListener('keydown', e => { if (e.key === 'Enter') login(); });
 document.getElementById('show-register-link').addEventListener('click', showRegister);
 document.getElementById('register-btn').addEventListener('click', register);
+document.getElementById('reg-username').addEventListener('keydown', e => { if (e.key === 'Enter') register(); });
+document.getElementById('reg-password').addEventListener('keydown', e => { if (e.key === 'Enter') register(); });
 document.getElementById('show-login-link').addEventListener('click', showLogin);
 
 // Topbar
@@ -2076,6 +2205,10 @@ document.getElementById('auto-collapse-toggle').addEventListener('change', funct
   localStorage.setItem('autoCollapse', this.checked ? 'true' : 'false');
   if (this.checked) _resetAutoCollapseTimer();
   else if (_autoCollapseTimer) { clearTimeout(_autoCollapseTimer); _autoCollapseTimer = null; }
+});
+document.getElementById('auto-lint-toggle').addEventListener('change', function() {
+  localStorage.setItem('autoLint', this.checked ? 'true' : 'false');
+  applyLintSetting();
 });
 
 // Browser back/forward — reopen the note recorded in history state.
