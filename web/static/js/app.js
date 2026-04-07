@@ -4,15 +4,18 @@
 // ── Theme ──────────────────────────────────────────────────────────────────
 // FOUC prevention runs in <head> before paint (see app.html).
 // This block handles runtime switching and OS-preference live-updates.
-const VALID_THEMES = ['auto', 'light', 'dark', 'catppuccin'];
+const VALID_THEMES = ['auto', 'light', 'dark', 'catppuccin', 'nord', 'tokyonight', 'solarized'];
 const hljsThemeEl = document.getElementById('hljs-theme');
 const metaThemeColor = document.getElementById('meta-theme-color');
 const hljsHref = (t) => ({
   light: '/static/css/highlight-github.min.css',
   dark: '/static/css/highlight-github-dark.min.css',
   catppuccin: '/static/css/highlight-catppuccin-mocha.min.css',
+  nord: '/static/css/highlight-github-dark.min.css',
+  tokyonight: '/static/css/highlight-github-dark.min.css',
+  solarized: '/static/css/highlight-github.min.css',
 })[t] || '/static/css/highlight-github.min.css';
-const themeColors = { light: '#f5f5f5', dark: '#252526', catppuccin: '#1e1e2e' };
+const themeColors = { light: '#f5f5f5', dark: '#252526', catppuccin: '#1e1e2e', nord: '#3b4252', tokyonight: '#16161e', solarized: '#eee8d5' };
 function resolveAuto() {
   return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
 }
@@ -133,6 +136,9 @@ function showApp() {
   const sel = document.getElementById('theme-select');
   if (sel) sel.value = VALID_THEMES.indexOf(saved) !== -1 ? saved : 'auto';
   applyTheme(sel ? sel.value : 'auto');
+  // Load auto-collapse setting
+  const acToggle = document.getElementById('auto-collapse-toggle');
+  if (acToggle) acToggle.checked = localStorage.getItem('autoCollapse') !== 'false';
   connectEventSource();
 }
 
@@ -1547,6 +1553,38 @@ if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('/sw.js').catch(() => {});
 }
 
+// ── Settings modal ─────────────────────────────────────────────────────────
+function openSettings() {
+  const overlay = document.getElementById('settings-modal');
+  overlay.style.display = 'flex';
+  const sel = document.getElementById('theme-select');
+  let saved; try { saved = localStorage.getItem('theme'); } catch(e) {}
+  if (sel) sel.value = VALID_THEMES.indexOf(saved) !== -1 ? saved : 'auto';
+  const acToggle = document.getElementById('auto-collapse-toggle');
+  if (acToggle) acToggle.checked = localStorage.getItem('autoCollapse') !== 'false';
+}
+function closeSettings() {
+  document.getElementById('settings-modal').style.display = 'none';
+}
+
+// ── Auto-collapse sidebar ──────────────────────────────────────────────────
+let _autoCollapseTimer = null;
+function _resetAutoCollapseTimer() {
+  if (localStorage.getItem('autoCollapse') === 'false') return;
+  if (_autoCollapseTimer) clearTimeout(_autoCollapseTimer);
+  _autoCollapseTimer = setTimeout(function() {
+    if (localStorage.getItem('autoCollapse') === 'false') return;
+    if (loadedFolderIds.size > 0) {
+      loadedFolderIds = new Set();
+      renderTree();
+    }
+  }, 30000);
+}
+['mousemove', 'keydown', 'click', 'touchstart', 'scroll'].forEach(function(evt) {
+  document.addEventListener(evt, _resetAutoCollapseTimer, { passive: true });
+});
+_resetAutoCollapseTimer();
+
 // ── Event bindings (replaces inline onclick/onchange/oninput attrs) ─────────
 // Auth
 document.getElementById('login-btn').addEventListener('click', login);
@@ -1556,7 +1594,7 @@ document.getElementById('show-login-link').addEventListener('click', showLogin);
 
 // Topbar
 document.querySelector('.topbar-menu-btn').addEventListener('click', toggleSidebar);
-document.getElementById('theme-select').addEventListener('change', function() { applyTheme(this.value); });
+document.getElementById('settings-btn').addEventListener('click', openSettings);
 document.getElementById('account-btn').addEventListener('click', showAccountModal);
 document.getElementById('logout-btn').addEventListener('click', logout);
 
@@ -2029,6 +2067,16 @@ CM6.commands.table = function(ed) {
   });
   view.focus();
 };
+
+// Settings modal
+document.getElementById('settings-modal').addEventListener('click', function(e) { if (e.target === this) closeSettings(); });
+document.getElementById('settings-done-btn').addEventListener('click', closeSettings);
+document.getElementById('theme-select').addEventListener('change', function() { applyTheme(this.value); });
+document.getElementById('auto-collapse-toggle').addEventListener('change', function() {
+  localStorage.setItem('autoCollapse', this.checked ? 'true' : 'false');
+  if (this.checked) _resetAutoCollapseTimer();
+  else if (_autoCollapseTimer) { clearTimeout(_autoCollapseTimer); _autoCollapseTimer = null; }
+});
 
 // Browser back/forward — reopen the note recorded in history state.
 window.addEventListener('popstate', function(e) {

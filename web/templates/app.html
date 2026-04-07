@@ -17,13 +17,13 @@
 <link rel="prefetch" href="/static/css/highlight-catppuccin-mocha.min.css">
 <script>
 (function(){
-  var THEMES=['auto','light','dark','catppuccin'];
+  var THEMES=['auto','light','dark','catppuccin','nord','tokyonight','solarized'];
   var saved;try{saved=localStorage.getItem('theme');}catch(e){}
   var name=THEMES.indexOf(saved)!==-1?saved:'auto';
   var resolved=name==='auto'?(window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'):name;
   document.documentElement.setAttribute('data-theme',resolved);
   var hljs=document.getElementById('hljs-theme');
-  var hmap={light:'/static/css/highlight-github.min.css',dark:'/static/css/highlight-github-dark.min.css',catppuccin:'/static/css/highlight-catppuccin-mocha.min.css'};
+  var hmap={light:'/static/css/highlight-github.min.css',dark:'/static/css/highlight-github-dark.min.css',catppuccin:'/static/css/highlight-catppuccin-mocha.min.css',nord:'/static/css/highlight-github-dark.min.css',tokyonight:'/static/css/highlight-github-dark.min.css',solarized:'/static/css/highlight-github.min.css'};
   if(hljs&&hmap[resolved])hljs.href=hmap[resolved];
 })();
 </script>
@@ -73,6 +73,51 @@
   --history-active-bg:#45475a; --history-active-border:#89b4fa;
   --preview-link:#89dceb; --preview-code-bg:#313244; --preview-pre-bg:#313244; --preview-pre-border:#45475a;
   --notification-bg:#313244;
+}
+[data-theme="nord"] {
+  --bg:#2e3440; --bg-side:#3b4252; --bg-topbar:#3b4252; --bg-editor:#2e3440;
+  --bg-modal:#3b4252; --bg-hover:#434c5e; --bg-active-folder:#5e81ac;
+  --bg-active-note:#5e81ac; --bg-input:#434c5e; --bg-btn:#434c5e;
+  --bg-toolbar:#3b4252; --bg-statusbar:#3b4252; --bg-auth:#2e3440;
+  --border:#4c566a; --border-light:#434c5e;
+  --text:#eceff4; --text-mute:#adb5bd; --text-dim:#6c7a8a;
+  --text-on-accent:#2e3440; --text-btn:#d8dee9;
+  --accent:#88c0d0; --accent-hover:#81a1c1;
+  --theme-color:#3b4252;
+  --dnd-over-bg:#3d5a7a; --dnd-over-outline:#88c0d0;
+  --history-active-bg:#3d5a7a; --history-active-border:#88c0d0;
+  --preview-link:#88c0d0; --preview-code-bg:#434c5e; --preview-pre-bg:#434c5e; --preview-pre-border:#4c566a;
+  --notification-bg:#434c5e;
+}
+[data-theme="tokyonight"] {
+  --bg:#1a1b26; --bg-side:#16161e; --bg-topbar:#16161e; --bg-editor:#1a1b26;
+  --bg-modal:#1f2335; --bg-hover:#1f2335; --bg-active-folder:#364a82;
+  --bg-active-note:#364a82; --bg-input:#292e42; --bg-btn:#292e42;
+  --bg-toolbar:#16161e; --bg-statusbar:#16161e; --bg-auth:#13131a;
+  --border:#292e42; --border-light:#1f2335;
+  --text:#a9b1d6; --text-mute:#565f89; --text-dim:#3b4261;
+  --text-on-accent:#1a1b26; --text-btn:#9aa5ce;
+  --accent:#7aa2f7; --accent-hover:#7dcfff;
+  --theme-color:#16161e;
+  --dnd-over-bg:#1e2a5a; --dnd-over-outline:#7aa2f7;
+  --history-active-bg:#364a82; --history-active-border:#7aa2f7;
+  --preview-link:#7dcfff; --preview-code-bg:#1f2335; --preview-pre-bg:#1f2335; --preview-pre-border:#292e42;
+  --notification-bg:#1f2335;
+}
+[data-theme="solarized"] {
+  --bg:#fdf6e3; --bg-side:#eee8d5; --bg-topbar:#eee8d5; --bg-editor:#fdf6e3;
+  --bg-modal:#fdf6e3; --bg-hover:#e0d9c6; --bg-active-folder:#c8bea6;
+  --bg-active-note:#657b83; --bg-input:#fdf6e3; --bg-btn:#eee8d5;
+  --bg-toolbar:#eee8d5; --bg-statusbar:#eee8d5; --bg-auth:#e8e2d0;
+  --border:#c7bca0; --border-light:#ddd5be;
+  --text:#657b83; --text-mute:#93a1a1; --text-dim:#b8c0c0;
+  --text-on-accent:#fdf6e3; --text-btn:#586e75;
+  --accent:#268bd2; --accent-hover:#2aa198;
+  --theme-color:#eee8d5;
+  --dnd-over-bg:#d6e8f5; --dnd-over-outline:#268bd2;
+  --history-active-bg:#d6e8f5; --history-active-border:#268bd2;
+  --preview-link:#268bd2; --preview-code-bg:#eee8d5; --preview-pre-bg:#eee8d5; --preview-pre-border:#c7bca0;
+  --notification-bg:#586e75;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -127,8 +172,27 @@ body {
   flex-shrink: 0;
 }
 
-/* THEME SELECT */
-#theme-select { font-size: 11px; border: 1px solid var(--border); background: var(--bg-btn); color: var(--text-mute); padding: 3px 4px; cursor: pointer; height: 26px; }
+/* SETTINGS BUTTON */
+#settings-btn { background: none; border: 1px solid var(--border); color: var(--text-mute); cursor: pointer; font-size: 14px; padding: 3px 7px; height: 26px; line-height: 1; border-radius: 2px; }
+#settings-btn:hover { background: var(--bg-hover); }
+
+/* SETTINGS MODAL */
+.settings-modal { max-width: 360px; }
+.settings-section { margin-bottom: 20px; }
+.settings-section:last-child { margin-bottom: 0; }
+.settings-section h3 { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-dim); margin-bottom: 10px; }
+.settings-row { display: flex; align-items: center; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border-light); }
+.settings-row:last-child { border-bottom: none; }
+.settings-row label { font-size: 12px; color: var(--text); }
+.settings-row select { font-size: 11px; border: 1px solid var(--border); background: var(--bg-input); color: var(--text); padding: 3px 6px; cursor: pointer; }
+/* Toggle switch */
+.toggle-wrap { display: flex; align-items: center; gap: 6px; }
+.toggle { position: relative; width: 32px; height: 18px; flex-shrink: 0; }
+.toggle input { opacity: 0; width: 0; height: 0; position: absolute; }
+.toggle-slider { position: absolute; inset: 0; background: var(--border); border-radius: 9px; cursor: pointer; transition: background 0.2s; }
+.toggle-slider::before { content: ''; position: absolute; left: 2px; top: 2px; width: 14px; height: 14px; background: #fff; border-radius: 50%; transition: transform 0.2s; }
+.toggle input:checked + .toggle-slider { background: var(--accent); }
+.toggle input:checked + .toggle-slider::before { transform: translateX(14px); }
 
 /* SIDEBAR OVERLAY (mobile) */
 .sidebar-overlay {
@@ -193,7 +257,9 @@ body {
 .pe-block { border-radius: 3px; margin: -2px -4px; padding: 2px 4px; transition: background 0.1s; }
 .cm6-wrap.preview-edit .pe-block:hover { background: rgba(0,0,0,0.05); cursor: text; }
 [data-theme="dark"] .cm6-wrap.preview-edit .pe-block:hover,
-[data-theme="catppuccin"] .cm6-wrap.preview-edit .pe-block:hover { background: rgba(255,255,255,0.07); }
+[data-theme="catppuccin"] .cm6-wrap.preview-edit .pe-block:hover,
+[data-theme="nord"] .cm6-wrap.preview-edit .pe-block:hover,
+[data-theme="tokyonight"] .cm6-wrap.preview-edit .pe-block:hover { background: rgba(255,255,255,0.07); }
 .pe-inline-editor { display: block; width: 100%; box-sizing: border-box; font-family: "Cascadia Code","Fira Code",Consolas,monospace; font-size: 12px; line-height: 1.5; padding: 4px 8px; border: 1px solid var(--border); border-bottom: none; border-radius: 3px 3px 0 0; background: var(--bg-input); color: var(--text-mute); resize: none; overflow: hidden; outline: none; min-height: 28px; }
 .pe-live-preview { border: 2px solid var(--accent); border-radius: 0 0 3px 3px; padding: 6px 10px; background: var(--bg-editor); min-height: 24px; }
 .pe-live-preview > *:last-child { margin-bottom: 0; }
@@ -429,7 +495,7 @@ body {
 <div id="auth-screen">
   <div class="auth-box">
     <h1>thornotes</h1>
-    <p class="tagline">Your notes. Your files. Your server.</p>
+    <p class="tagline">Its the tits</p>
     <div id="auth-form-login">
       <label>Username</label>
       <input id="login-username" type="text" autocomplete="username" />
@@ -456,12 +522,7 @@ body {
   <div class="topbar">
     <button class="topbar-menu-btn" aria-label="Toggle sidebar">&#9776;</button>
     <span class="logo"><img src="/static/icons/icon-192.svg" width="20" height="20" alt="">thornotes</span>
-    <select id="theme-select" title="Theme" aria-label="Select theme">
-      <option value="auto">Auto</option>
-      <option value="light">Light</option>
-      <option value="dark">Dark</option>
-      <option value="catppuccin">Catppuccin</option>
-    </select>
+    <button id="settings-btn" title="Settings" aria-label="Settings">&#9881;</button>
     <span class="user">
       <span id="topbar-username"></span>&nbsp;·&nbsp;
       <button id="account-btn">Account</button>&nbsp;·&nbsp;
@@ -688,6 +749,40 @@ body {
     <div class="modal-actions">
       <button id="import-cancel-btn">Cancel</button>
       <button id="import-confirm-btn" class="primary">Import</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="settings-modal">
+  <div class="modal settings-modal">
+    <h2>Settings</h2>
+    <div class="settings-section">
+      <h3>Appearance</h3>
+      <div class="settings-row">
+        <label for="theme-select">Theme</label>
+        <select id="theme-select" aria-label="Select theme">
+          <option value="auto">Auto</option>
+          <option value="light">Light</option>
+          <option value="dark">Dark</option>
+          <option value="catppuccin">Catppuccin</option>
+          <option value="nord">Nord</option>
+          <option value="tokyonight">Tokyo Night</option>
+          <option value="solarized">Solarized Light</option>
+        </select>
+      </div>
+    </div>
+    <div class="settings-section">
+      <h3>Sidebar</h3>
+      <div class="settings-row">
+        <label>Auto-collapse folders after 30s of inactivity</label>
+        <label class="toggle">
+          <input type="checkbox" id="auto-collapse-toggle">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button id="settings-done-btn" class="primary">Done</button>
     </div>
   </div>
 </div>

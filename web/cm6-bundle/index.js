@@ -144,7 +144,60 @@ function insertLink(view) {
 
 // ── Public factory ───────────────────────────────────────────────────────────
 
-const themes = { light: lightTheme, dark: darkTheme, catppuccin: catppuccinTheme };
+const nordTheme = EditorView.theme({
+  '&': { height: '100%', backgroundColor: '#2e3440', color: '#eceff4' },
+  '.cm-scroller': {
+    fontFamily: '"Cascadia Code", "Fira Code", "Consolas", monospace',
+    fontSize: '13px',
+    lineHeight: '1.6',
+  },
+  '.cm-content': { padding: '12px 16px', caretColor: '#eceff4', minHeight: '100%' },
+  '.cm-cursor, .cm-dropCursor': { borderLeftColor: '#eceff4' },
+  '&.cm-focused .cm-selectionBackground, .cm-selectionBackground': {
+    backgroundColor: '#4c566a',
+  },
+  '&.cm-focused': { outline: 'none' },
+  '.cm-activeLine': { backgroundColor: 'rgba(136,192,208,0.06)' },
+  '.cm-gutters': { display: 'none', backgroundColor: '#2e3440', borderRight: '1px solid #4c566a', color: '#616e88' },
+  '.cm-lineNumbers .cm-gutterElement': { padding: '0 10px 0 8px', minWidth: '2.5em', textAlign: 'right' },
+}, { dark: true });
+
+const tokyonightTheme = EditorView.theme({
+  '&': { height: '100%', backgroundColor: '#1a1b26', color: '#a9b1d6' },
+  '.cm-scroller': {
+    fontFamily: '"Cascadia Code", "Fira Code", "Consolas", monospace',
+    fontSize: '13px',
+    lineHeight: '1.6',
+  },
+  '.cm-content': { padding: '12px 16px', caretColor: '#a9b1d6', minHeight: '100%' },
+  '.cm-cursor, .cm-dropCursor': { borderLeftColor: '#a9b1d6' },
+  '&.cm-focused .cm-selectionBackground, .cm-selectionBackground': {
+    backgroundColor: '#283457',
+  },
+  '&.cm-focused': { outline: 'none' },
+  '.cm-activeLine': { backgroundColor: 'rgba(122,162,247,0.06)' },
+  '.cm-gutters': { display: 'none', backgroundColor: '#1a1b26', borderRight: '1px solid #292e42', color: '#565f89' },
+  '.cm-lineNumbers .cm-gutterElement': { padding: '0 10px 0 8px', minWidth: '2.5em', textAlign: 'right' },
+}, { dark: true });
+
+const solarizedTheme = EditorView.theme({
+  '&': { height: '100%', backgroundColor: '#fdf6e3', color: '#657b83' },
+  '.cm-scroller': {
+    fontFamily: '"Cascadia Code", "Fira Code", "Consolas", monospace',
+    fontSize: '13px',
+    lineHeight: '1.6',
+  },
+  '.cm-content': { padding: '12px 16px', caretColor: '#657b83', minHeight: '100%' },
+  '&.cm-focused .cm-selectionBackground, .cm-selectionBackground': {
+    backgroundColor: '#cce0f5',
+  },
+  '&.cm-focused': { outline: 'none' },
+  '.cm-activeLine': { backgroundColor: 'rgba(38,139,210,0.04)' },
+  '.cm-gutters': { display: 'none', backgroundColor: '#fdf6e3', borderRight: '1px solid #c7bca0', color: '#93a1a1' },
+  '.cm-lineNumbers .cm-gutterElement': { padding: '0 10px 0 8px', minWidth: '2.5em', textAlign: 'right' },
+}, { dark: false });
+
+const themes = { light: lightTheme, dark: darkTheme, catppuccin: catppuccinTheme, nord: nordTheme, tokyonight: tokyonightTheme, solarized: solarizedTheme };
 
 function createEditor(parent, { onChange, theme } = {}) {
   const themeComp = new Compartment();
