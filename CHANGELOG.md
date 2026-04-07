@@ -2,6 +2,20 @@
 
 All notable changes to thornotes are documented here.
 
+## [1.5.6.0] - 2026-04-07
+
+### Added
+- **Settings modal** — a gear icon in the topbar opens a dedicated Settings panel. Theme selection moves here, giving the topbar a cleaner look and making room for future settings.
+- **Auto-collapse sidebar** — folders automatically collapse after 30 seconds of inactivity. Toggleable in Settings > Sidebar. Resets on any mouse, keyboard, or touch activity.
+- **Three new themes** — Nord, Tokyo Night, and Solarized Light. All three have full CSS variable coverage including editor, sidebar, modals, code blocks, and notifications.
+
+### Changed
+- Theme selector removed from topbar; now lives in the Settings modal under Appearance.
+
+### Added (developer)
+- MySQL integration test suite (`internal/repository/mysql/repos_test.go`) — run against a real MySQL server by setting `THORNOTES_MYSQL_TEST_DSN`. All tests skip gracefully without the env var.
+- Comprehensive test coverage improvements across `db`, `handler`, `notes`, `apperror`, and `repository/sqlite` packages.
+
 ## [1.5.5.1] - 2026-04-05
 
 ### Changed
