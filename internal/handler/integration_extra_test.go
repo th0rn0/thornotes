@@ -371,6 +371,16 @@ func TestHandler_Import_Unauthenticated(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
 }
 
+func TestHandler_Import_InvalidZip(t *testing.T) {
+	c := newTestClient(t)
+	c.registerAndLogin(t)
+
+	// Send a .zip file with invalid/corrupt zip bytes — the service should return an error.
+	resp := c.doMultipart(t, "/api/v1/import", "file", "corrupt.zip", []byte("not a zip file"))
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+}
+
 // ── Patch note returns slug + title ──────────────────────────────────────────
 
 func TestHandler_PatchNote_Metadata_ReturnsSlug(t *testing.T) {
@@ -470,4 +480,42 @@ func TestHandler_Tokens_Unauthenticated(t *testing.T) {
 	resp := c.do(t, http.MethodGet, "/api/v1/account/tokens", nil)
 	defer resp.Body.Close()
 	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+}
+
+func TestHandler_Tokens_InvalidScope(t *testing.T) {
+	c := newTestClient(t)
+	c.registerAndLogin(t)
+
+	resp := c.do(t, http.MethodPost, "/api/v1/account/tokens", map[string]interface{}{
+		"name":  "Bad Scope Token",
+		"scope": "admin",
+	})
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+}
+
+func TestHandler_Tokens_BadJSON(t *testing.T) {
+	c := newTestClient(t)
+	c.registerAndLogin(t)
+
+	req, _ := http.NewRequest(http.MethodPost, c.server.URL+"/api/v1/account/tokens",
+		bytes.NewReader([]byte("{bad json")))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-CSRF-Token", c.csrfToken)
+	for _, cookie := range c.cookies {
+		req.AddCookie(cookie)
+	}
+	resp, err := c.httpClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+}
+
+func TestHandler_Tokens_DeleteInvalidID(t *testing.T) {
+	c := newTestClient(t)
+	c.registerAndLogin(t)
+
+	resp := c.do(t, http.MethodDelete, "/api/v1/account/tokens/notanumber", nil)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
 }

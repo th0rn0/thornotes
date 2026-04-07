@@ -127,6 +127,23 @@ func TestWriteJSON_EncodeError(t *testing.T) {
 	})
 }
 
+// ─── mustJSON unit tests ──────────────────────────────────────────────────────
+
+func TestMustJSON_Map(t *testing.T) {
+	result := mustJSON(map[string]string{"key": "val"})
+	assert.Equal(t, `{"key":"val"}`, result)
+}
+
+func TestMustJSON_Nil(t *testing.T) {
+	result := mustJSON(nil)
+	assert.Equal(t, "null", result)
+}
+
+func TestMustJSON_Slice(t *testing.T) {
+	result := mustJSON([]string{"a", "b"})
+	assert.Equal(t, `["a","b"]`, result)
+}
+
 // ─── MCP utility function unit tests ─────────────────────────────────────────
 
 func TestItoa_Zero(t *testing.T) {

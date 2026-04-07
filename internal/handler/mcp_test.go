@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -1027,4 +1028,569 @@ func TestMCP_ToolsCall_ListTags_EmptyWhenNoNotes(t *testing.T) {
 	text := result["result"].(map[string]interface{})["content"].([]interface{})[0].(map[string]interface{})["text"].(string)
 	// No notes → empty array or null.
 	assert.True(t, text == "[]" || text == "null", "expected empty list, got: %s", text)
+}
+
+// ─── resources/list with tagged notes ─────────────────────────────────────────
+
+func TestMCP_ResourcesList_WithTaggedNote(t *testing.T) {
+	m := newMCPClient(t)
+	sessionID := m.initialize(t)
+
+	// Create a note with tags so the description branch is exercised.
+	cResp := m.post(t, rpc(60, "tools/call", map[string]interface{}{
+		"name":      "create_note",
+		"arguments": map[string]interface{}{"title": "Tagged Note", "tags": []string{"foo", "bar"}},
+	}), sessionID)
+	cResp.Body.Close()
+
+	resp := m.post(t, rpc(61, "resources/list", nil), sessionID)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var result map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+	assert.Nil(t, result["error"])
+	resources := result["result"].(map[string]interface{})["resources"].([]interface{})
+	// At least the tagged note must appear; auto-created notes may also be present.
+	found := false
+	for _, r := range resources {
+		desc, _ := r.(map[string]interface{})["description"].(string)
+		if strings.Contains(desc, "foo") {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "expected a resource with tag 'foo' in description")
+}
+
+// ─── Read-only scope blocks write tools ───────────────────────────────────────
+
+func newReadOnlyMCPClient(t *testing.T) *mcpClient {
+	t.Helper()
+	tc := newTestClient(t)
+	tc.registerAndLogin(t)
+
+	resp := tc.do(t, http.MethodPost, "/api/v1/account/tokens", map[string]string{"name": "ro-mcp", "scope": "read"})
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusCreated, resp.StatusCode)
+
+	var result map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+	raw, ok := result["token"].(string)
+	require.True(t, ok)
+	return &mcpClient{testClient: tc, bearerToken: raw}
+}
+
+func TestMCP_ToolsCall_ReadOnly_BlocksWriteTool(t *testing.T) {
+	m := newReadOnlyMCPClient(t)
+	sessionID := m.initialize(t)
+
+	resp := m.post(t, rpc(62, "tools/call", map[string]interface{}{
+		"name":      "create_note",
+		"arguments": map[string]interface{}{"title": "Blocked"},
+	}), sessionID)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var result map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+	errObj := result["error"].(map[string]interface{})
+	assert.Equal(t, float64(-32001), errObj["code"])
+	assert.Contains(t, errObj["message"].(string), "read-only")
+}
+
+// ─── rename_note ──────────────────────────────────────────────────────────────
+
+func TestMCP_ToolsCall_RenameNote_Success(t *testing.T) {
+	m := newMCPClient(t)
+	sessionID := m.initialize(t)
+
+	cResp := m.post(t, rpc(63, "tools/call", map[string]interface{}{
+		"name":      "create_note",
+		"arguments": map[string]interface{}{"title": "Old Title"},
+	}), sessionID)
+	defer cResp.Body.Close()
+	var cResult map[string]interface{}
+	require.NoError(t, json.NewDecoder(cResp.Body).Decode(&cResult))
+	noteID := extractNoteID(t, cResult)
+
+	newTitle := "New Title"
+	resp := m.post(t, rpc(64, "tools/call", map[string]interface{}{
+		"name": "rename_note",
+		"arguments": map[string]interface{}{
+			"id":    noteID,
+			"title": newTitle,
+		},
+	}), sessionID)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var result map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+	assert.Nil(t, result["error"])
+	text := result["result"].(map[string]interface{})["content"].([]interface{})[0].(map[string]interface{})["text"].(string)
+	assert.Contains(t, text, "New Title")
+}
+
+func TestMCP_ToolsCall_RenameNote_MissingID(t *testing.T) {
+	m := newMCPClient(t)
+	sessionID := m.initialize(t)
+
+	resp := m.post(t, rpc(65, "tools/call", map[string]interface{}{
+		"name":      "rename_note",
+		"arguments": map[string]interface{}{"title": "X"},
+	}), sessionID)
+	defer resp.Body.Close()
+
+	var result map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+	errObj := result["error"].(map[string]interface{})
+	assert.Equal(t, float64(-32602), errObj["code"])
+}
+
+func TestMCP_ToolsCall_RenameNote_NoTitleOrTags(t *testing.T) {
+	m := newMCPClient(t)
+	sessionID := m.initialize(t)
+
+	cResp := m.post(t, rpc(66, "tools/call", map[string]interface{}{
+		"name":      "create_note",
+		"arguments": map[string]interface{}{"title": "Note"},
+	}), sessionID)
+	defer cResp.Body.Close()
+	var cResult map[string]interface{}
+	require.NoError(t, json.NewDecoder(cResp.Body).Decode(&cResult))
+	noteID := extractNoteID(t, cResult)
+
+	resp := m.post(t, rpc(67, "tools/call", map[string]interface{}{
+		"name":      "rename_note",
+		"arguments": map[string]interface{}{"id": noteID},
+	}), sessionID)
+	defer resp.Body.Close()
+
+	var result map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+	errObj := result["error"].(map[string]interface{})
+	assert.Equal(t, float64(-32602), errObj["code"])
+	assert.Contains(t, errObj["message"].(string), "title or tags")
+}
+
+// ─── move_note ────────────────────────────────────────────────────────────────
+
+func TestMCP_ToolsCall_MoveNote_ToRoot(t *testing.T) {
+	m := newMCPClient(t)
+	sessionID := m.initialize(t)
+
+	// Create folder via REST.
+	folderResp := m.do(t, http.MethodPost, "/api/v1/folders",
+		map[string]interface{}{"name": "MCP Dest"})
+	defer folderResp.Body.Close()
+	var folder map[string]interface{}
+	require.NoError(t, json.NewDecoder(folderResp.Body).Decode(&folder))
+	folderID := int64(folder["id"].(float64))
+
+	cResp := m.post(t, rpc(68, "tools/call", map[string]interface{}{
+		"name":      "create_note",
+		"arguments": map[string]interface{}{"title": "MoveMe", "folder_id": folderID},
+	}), sessionID)
+	defer cResp.Body.Close()
+	var cResult map[string]interface{}
+	require.NoError(t, json.NewDecoder(cResp.Body).Decode(&cResult))
+	noteID := extractNoteID(t, cResult)
+
+	resp := m.post(t, rpc(69, "tools/call", map[string]interface{}{
+		"name":      "move_note",
+		"arguments": map[string]interface{}{"id": noteID},
+	}), sessionID)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var result map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+	assert.Nil(t, result["error"])
+	text := result["result"].(map[string]interface{})["content"].([]interface{})[0].(map[string]interface{})["text"].(string)
+	assert.Contains(t, text, "root")
+}
+
+func TestMCP_ToolsCall_MoveNote_MissingID(t *testing.T) {
+	m := newMCPClient(t)
+	sessionID := m.initialize(t)
+
+	resp := m.post(t, rpc(70, "tools/call", map[string]interface{}{
+		"name":      "move_note",
+		"arguments": map[string]interface{}{},
+	}), sessionID)
+	defer resp.Body.Close()
+
+	var result map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+	errObj := result["error"].(map[string]interface{})
+	assert.Equal(t, float64(-32602), errObj["code"])
+}
+
+// ─── delete_note ──────────────────────────────────────────────────────────────
+
+func TestMCP_ToolsCall_DeleteNote_Success(t *testing.T) {
+	m := newMCPClient(t)
+	sessionID := m.initialize(t)
+
+	cResp := m.post(t, rpc(71, "tools/call", map[string]interface{}{
+		"name":      "create_note",
+		"arguments": map[string]interface{}{"title": "ToDelete"},
+	}), sessionID)
+	defer cResp.Body.Close()
+	var cResult map[string]interface{}
+	require.NoError(t, json.NewDecoder(cResp.Body).Decode(&cResult))
+	noteID := extractNoteID(t, cResult)
+
+	resp := m.post(t, rpc(72, "tools/call", map[string]interface{}{
+		"name":      "delete_note",
+		"arguments": map[string]interface{}{"id": noteID},
+	}), sessionID)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var result map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+	assert.Nil(t, result["error"])
+	text := result["result"].(map[string]interface{})["content"].([]interface{})[0].(map[string]interface{})["text"].(string)
+	assert.Contains(t, text, "deleted")
+}
+
+func TestMCP_ToolsCall_DeleteNote_MissingID(t *testing.T) {
+	m := newMCPClient(t)
+	sessionID := m.initialize(t)
+
+	resp := m.post(t, rpc(73, "tools/call", map[string]interface{}{
+		"name":      "delete_note",
+		"arguments": map[string]interface{}{},
+	}), sessionID)
+	defer resp.Body.Close()
+
+	var result map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+	errObj := result["error"].(map[string]interface{})
+	assert.Equal(t, float64(-32602), errObj["code"])
+}
+
+// ─── create_folder ────────────────────────────────────────────────────────────
+
+func TestMCP_ToolsCall_CreateFolder_Success(t *testing.T) {
+	m := newMCPClient(t)
+	sessionID := m.initialize(t)
+
+	resp := m.post(t, rpc(74, "tools/call", map[string]interface{}{
+		"name":      "create_folder",
+		"arguments": map[string]interface{}{"name": "MCP Folder"},
+	}), sessionID)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var result map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+	assert.Nil(t, result["error"])
+	text := result["result"].(map[string]interface{})["content"].([]interface{})[0].(map[string]interface{})["text"].(string)
+	assert.Contains(t, text, "MCP Folder")
+}
+
+func TestMCP_ToolsCall_CreateFolder_MissingName(t *testing.T) {
+	m := newMCPClient(t)
+	sessionID := m.initialize(t)
+
+	resp := m.post(t, rpc(75, "tools/call", map[string]interface{}{
+		"name":      "create_folder",
+		"arguments": map[string]interface{}{},
+	}), sessionID)
+	defer resp.Body.Close()
+
+	var result map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+	errObj := result["error"].(map[string]interface{})
+	assert.Equal(t, float64(-32602), errObj["code"])
+}
+
+// ─── rename_folder ────────────────────────────────────────────────────────────
+
+func TestMCP_ToolsCall_RenameFolder_Success(t *testing.T) {
+	m := newMCPClient(t)
+	sessionID := m.initialize(t)
+
+	fResp := m.post(t, rpc(76, "tools/call", map[string]interface{}{
+		"name":      "create_folder",
+		"arguments": map[string]interface{}{"name": "OldFolder"},
+	}), sessionID)
+	defer fResp.Body.Close()
+	var fResult map[string]interface{}
+	require.NoError(t, json.NewDecoder(fResp.Body).Decode(&fResult))
+	folderText := fResult["result"].(map[string]interface{})["content"].([]interface{})[0].(map[string]interface{})["text"].(string)
+	var folderData map[string]interface{}
+	require.NoError(t, json.Unmarshal([]byte(folderText), &folderData))
+	folderID := int64(folderData["id"].(float64))
+
+	resp := m.post(t, rpc(77, "tools/call", map[string]interface{}{
+		"name":      "rename_folder",
+		"arguments": map[string]interface{}{"id": folderID, "name": "NewFolder"},
+	}), sessionID)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var result map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+	assert.Nil(t, result["error"])
+	text := result["result"].(map[string]interface{})["content"].([]interface{})[0].(map[string]interface{})["text"].(string)
+	assert.Contains(t, text, "NewFolder")
+}
+
+func TestMCP_ToolsCall_RenameFolder_MissingParams(t *testing.T) {
+	m := newMCPClient(t)
+	sessionID := m.initialize(t)
+
+	resp := m.post(t, rpc(78, "tools/call", map[string]interface{}{
+		"name":      "rename_folder",
+		"arguments": map[string]interface{}{"id": 0, "name": ""},
+	}), sessionID)
+	defer resp.Body.Close()
+
+	var result map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+	errObj := result["error"].(map[string]interface{})
+	assert.Equal(t, float64(-32602), errObj["code"])
+}
+
+// ─── move_folder ──────────────────────────────────────────────────────────────
+
+func TestMCP_ToolsCall_MoveFolder_ToParent(t *testing.T) {
+	m := newMCPClient(t)
+	sessionID := m.initialize(t)
+
+	parentResp := m.post(t, rpc(79, "tools/call", map[string]interface{}{
+		"name":      "create_folder",
+		"arguments": map[string]interface{}{"name": "Parent"},
+	}), sessionID)
+	defer parentResp.Body.Close()
+	var parentResult map[string]interface{}
+	require.NoError(t, json.NewDecoder(parentResp.Body).Decode(&parentResult))
+	parentText := parentResult["result"].(map[string]interface{})["content"].([]interface{})[0].(map[string]interface{})["text"].(string)
+	var parentData map[string]interface{}
+	require.NoError(t, json.Unmarshal([]byte(parentText), &parentData))
+	parentID := int64(parentData["id"].(float64))
+
+	childResp := m.post(t, rpc(80, "tools/call", map[string]interface{}{
+		"name":      "create_folder",
+		"arguments": map[string]interface{}{"name": "Child"},
+	}), sessionID)
+	defer childResp.Body.Close()
+	var childResult map[string]interface{}
+	require.NoError(t, json.NewDecoder(childResp.Body).Decode(&childResult))
+	childText := childResult["result"].(map[string]interface{})["content"].([]interface{})[0].(map[string]interface{})["text"].(string)
+	var childData map[string]interface{}
+	require.NoError(t, json.Unmarshal([]byte(childText), &childData))
+	childID := int64(childData["id"].(float64))
+
+	resp := m.post(t, rpc(81, "tools/call", map[string]interface{}{
+		"name":      "move_folder",
+		"arguments": map[string]interface{}{"id": childID, "parent_id": parentID},
+	}), sessionID)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var result map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+	assert.Nil(t, result["error"])
+	text := result["result"].(map[string]interface{})["content"].([]interface{})[0].(map[string]interface{})["text"].(string)
+	assert.Contains(t, text, "moved")
+}
+
+func TestMCP_ToolsCall_MoveFolder_MissingID(t *testing.T) {
+	m := newMCPClient(t)
+	sessionID := m.initialize(t)
+
+	resp := m.post(t, rpc(82, "tools/call", map[string]interface{}{
+		"name":      "move_folder",
+		"arguments": map[string]interface{}{},
+	}), sessionID)
+	defer resp.Body.Close()
+
+	var result map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+	errObj := result["error"].(map[string]interface{})
+	assert.Equal(t, float64(-32602), errObj["code"])
+}
+
+// ─── delete_folder ────────────────────────────────────────────────────────────
+
+func TestMCP_ToolsCall_DeleteFolder_Success(t *testing.T) {
+	m := newMCPClient(t)
+	sessionID := m.initialize(t)
+
+	fResp := m.post(t, rpc(83, "tools/call", map[string]interface{}{
+		"name":      "create_folder",
+		"arguments": map[string]interface{}{"name": "ToDeleteFolder"},
+	}), sessionID)
+	defer fResp.Body.Close()
+	var fResult map[string]interface{}
+	require.NoError(t, json.NewDecoder(fResp.Body).Decode(&fResult))
+	folderText := fResult["result"].(map[string]interface{})["content"].([]interface{})[0].(map[string]interface{})["text"].(string)
+	var folderData map[string]interface{}
+	require.NoError(t, json.Unmarshal([]byte(folderText), &folderData))
+	folderID := int64(folderData["id"].(float64))
+
+	resp := m.post(t, rpc(84, "tools/call", map[string]interface{}{
+		"name":      "delete_folder",
+		"arguments": map[string]interface{}{"id": folderID},
+	}), sessionID)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var result map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+	assert.Nil(t, result["error"])
+	text := result["result"].(map[string]interface{})["content"].([]interface{})[0].(map[string]interface{})["text"].(string)
+	assert.Contains(t, text, "deleted")
+}
+
+func TestMCP_ToolsCall_DeleteFolder_MissingID(t *testing.T) {
+	m := newMCPClient(t)
+	sessionID := m.initialize(t)
+
+	resp := m.post(t, rpc(85, "tools/call", map[string]interface{}{
+		"name":      "delete_folder",
+		"arguments": map[string]interface{}{},
+	}), sessionID)
+	defer resp.Body.Close()
+
+	var result map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+	errObj := result["error"].(map[string]interface{})
+	assert.Equal(t, float64(-32602), errObj["code"])
+}
+
+// ─── service error paths via MCP ──────────────────────────────────────────────
+
+func TestMCP_ToolsCall_DeleteNote_NotFound(t *testing.T) {
+	m := newMCPClient(t)
+	sessionID := m.initialize(t)
+
+	resp := m.post(t, rpc(86, "tools/call", map[string]interface{}{
+		"name":      "delete_note",
+		"arguments": map[string]interface{}{"id": 999999},
+	}), sessionID)
+	defer resp.Body.Close()
+
+	var result map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+	assert.NotNil(t, result["error"])
+}
+
+func TestMCP_ToolsCall_DeleteFolder_NotFound(t *testing.T) {
+	m := newMCPClient(t)
+	sessionID := m.initialize(t)
+
+	resp := m.post(t, rpc(87, "tools/call", map[string]interface{}{
+		"name":      "delete_folder",
+		"arguments": map[string]interface{}{"id": 999999},
+	}), sessionID)
+	defer resp.Body.Close()
+
+	var result map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+	assert.NotNil(t, result["error"])
+}
+
+func TestMCP_ToolsCall_RenameNote_NotFound(t *testing.T) {
+	m := newMCPClient(t)
+	sessionID := m.initialize(t)
+
+	newTitle := "New"
+	resp := m.post(t, rpc(88, "tools/call", map[string]interface{}{
+		"name":      "rename_note",
+		"arguments": map[string]interface{}{"id": 999999, "title": &newTitle},
+	}), sessionID)
+	defer resp.Body.Close()
+
+	var result map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+	assert.NotNil(t, result["error"])
+}
+
+func TestMCP_ToolsCall_MoveNote_NotFound(t *testing.T) {
+	m := newMCPClient(t)
+	sessionID := m.initialize(t)
+
+	resp := m.post(t, rpc(89, "tools/call", map[string]interface{}{
+		"name":      "move_note",
+		"arguments": map[string]interface{}{"id": 999999},
+	}), sessionID)
+	defer resp.Body.Close()
+
+	var result map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+	assert.NotNil(t, result["error"])
+}
+
+func TestMCP_ToolsCall_RenameFolder_NotFound(t *testing.T) {
+	m := newMCPClient(t)
+	sessionID := m.initialize(t)
+
+	resp := m.post(t, rpc(90, "tools/call", map[string]interface{}{
+		"name":      "rename_folder",
+		"arguments": map[string]interface{}{"id": 999999, "name": "X"},
+	}), sessionID)
+	defer resp.Body.Close()
+
+	var result map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+	assert.NotNil(t, result["error"])
+}
+
+func TestMCP_ToolsCall_MoveFolder_NotFound(t *testing.T) {
+	m := newMCPClient(t)
+	sessionID := m.initialize(t)
+
+	resp := m.post(t, rpc(91, "tools/call", map[string]interface{}{
+		"name":      "move_folder",
+		"arguments": map[string]interface{}{"id": 999999},
+	}), sessionID)
+	defer resp.Body.Close()
+
+	var result map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+	assert.NotNil(t, result["error"])
+}
+
+func TestMCP_ToolsCall_UpdateNote_NotFoundError(t *testing.T) {
+	m := newMCPClient(t)
+	sessionID := m.initialize(t)
+
+	// update_note GetNote path for non-existent note.
+	resp := m.post(t, rpc(92, "tools/call", map[string]interface{}{
+		"name":      "update_note",
+		"arguments": map[string]interface{}{"id": 999999, "content": "# x"},
+	}), sessionID)
+	defer resp.Body.Close()
+
+	var result map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+	assert.NotNil(t, result["error"])
+}
+
+func TestMCP_ToolsCall_CreateNote_WithContent_ContentUpdateError(t *testing.T) {
+	m := newMCPClient(t)
+	sessionID := m.initialize(t)
+
+	// Create a note with content — exercises the UpdateNoteContent path inside create_note.
+	resp := m.post(t, rpc(93, "tools/call", map[string]interface{}{
+		"name": "create_note",
+		"arguments": map[string]interface{}{
+			"title":   "With Content",
+			"content": "# Hello World",
+		},
+	}), sessionID)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var result map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+	assert.Nil(t, result["error"])
+	text := result["result"].(map[string]interface{})["content"].([]interface{})[0].(map[string]interface{})["text"].(string)
+	assert.Contains(t, text, "With Content")
 }

@@ -110,3 +110,22 @@ func TestNotImplemented(t *testing.T) {
 	assert.Equal(t, "not yet", e.Message)
 	assert.Nil(t, e.Err)
 }
+
+func TestIsConflict_True(t *testing.T) {
+	e := Conflict("already exists")
+	assert.True(t, IsConflict(e))
+}
+
+func TestIsConflict_False_NotFound(t *testing.T) {
+	e := NotFound("missing")
+	assert.False(t, IsConflict(e))
+}
+
+func TestIsConflict_False_PlainError(t *testing.T) {
+	e := errors.New("plain error")
+	assert.False(t, IsConflict(e))
+}
+
+func TestIsConflict_False_Nil(t *testing.T) {
+	assert.False(t, IsConflict(nil))
+}

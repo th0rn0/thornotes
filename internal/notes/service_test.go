@@ -75,3 +75,27 @@ func TestFolderDiskPath_NoParent(t *testing.T) {
 	path := folderDiskPath("abc-uuid", "", "Work")
 	assert.Equal(t, "abc-uuid/Work", path)
 }
+
+func TestPtrEq_BothNil(t *testing.T) {
+	assert.True(t, ptrEq(nil, nil))
+}
+
+func TestPtrEq_FirstNil(t *testing.T) {
+	v := int64(1)
+	assert.False(t, ptrEq(nil, &v))
+}
+
+func TestPtrEq_SecondNil(t *testing.T) {
+	v := int64(1)
+	assert.False(t, ptrEq(&v, nil))
+}
+
+func TestPtrEq_BothNonNilEqual(t *testing.T) {
+	a, b := int64(42), int64(42)
+	assert.True(t, ptrEq(&a, &b))
+}
+
+func TestPtrEq_BothNonNilDifferent(t *testing.T) {
+	a, b := int64(1), int64(2)
+	assert.False(t, ptrEq(&a, &b))
+}

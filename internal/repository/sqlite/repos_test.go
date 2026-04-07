@@ -1228,3 +1228,221 @@ func TestHashToken_DifferentInputs(t *testing.T) {
 	h2 := hashToken("tn_othertoken")
 	assert.NotEqual(t, h1, h2)
 }
+
+// ─── UserRepo additional coverage ─────────────────────────────────────────────
+
+func TestUserRepo_SetUUID(t *testing.T) {
+	pool := openTestDB(t)
+	repo := NewUserRepo(pool.WriteDB)
+
+	user, err := repo.Create(context.Background(), "uuid-user", "hash", "")
+	require.NoError(t, err)
+
+	err = repo.SetUUID(context.Background(), user.ID, "new-uuid-abc")
+	require.NoError(t, err)
+
+	got, err := repo.GetByID(context.Background(), user.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "new-uuid-abc", got.UUID)
+}
+
+func TestUserRepo_ListWithoutUUID(t *testing.T) {
+	pool := openTestDB(t)
+	repo := NewUserRepo(pool.WriteDB)
+
+	// Create user without UUID.
+	_, err := pool.WriteDB.ExecContext(context.Background(),
+		`INSERT INTO users (username, password_hash, uuid) VALUES ('noid', 'hash', '')`)
+	require.NoError(t, err)
+
+	// Create user with UUID (should not appear).
+	_, err = repo.Create(context.Background(), "withid", "hash", "some-uuid")
+	require.NoError(t, err)
+
+	ids, err := repo.ListWithoutUUID(context.Background())
+	require.NoError(t, err)
+	assert.Len(t, ids, 1)
+}
+
+func TestUserRepo_IDs_Empty(t *testing.T) {
+	pool := openTestDB(t)
+	repo := NewUserRepo(pool.WriteDB)
+
+	ids, err := repo.IDs(context.Background())
+	require.NoError(t, err)
+	assert.Empty(t, ids)
+}
+
+func TestUserRepo_IDs_Multiple(t *testing.T) {
+	pool := openTestDB(t)
+	repo := NewUserRepo(pool.WriteDB)
+
+	_, err := repo.Create(context.Background(), "ida", "h", "uuid-ida")
+	require.NoError(t, err)
+	_, err = repo.Create(context.Background(), "idb", "h", "uuid-idb")
+	require.NoError(t, err)
+
+	ids, err := repo.IDs(context.Background())
+	require.NoError(t, err)
+	assert.Len(t, ids, 2)
+}
+
+// ─── FolderRepo.Move ──────────────────────────────────────────────────────────
+
+func TestFolderRepo_Move(t *testing.T) {
+	pool := openTestDB(t)
+	user := createUser(t, pool)
+	ctx := context.Background()
+	repo := NewFolderRepo(pool.ReadDB, pool.WriteDB)
+
+	parent, err := repo.Create(ctx, user.ID, nil, "Parent", "test-uuid-1/Parent")
+	require.NoError(t, err)
+	child, err := repo.Create(ctx, user.ID, nil, "Child", "test-uuid-1/Child")
+	require.NoError(t, err)
+
+	// Move child into parent.
+	err = repo.Move(ctx, user.ID, child.ID, &parent.ID, "test-uuid-1/Parent/Child")
+	require.NoError(t, err)
+
+	got, err := repo.GetByID(ctx, user.ID, child.ID)
+	require.NoError(t, err)
+	require.NotNil(t, got.ParentID)
+	assert.Equal(t, parent.ID, *got.ParentID)
+}
+
+func TestFolderRepo_Move_NotFound(t *testing.T) {
+	pool := openTestDB(t)
+	user := createUser(t, pool)
+	ctx := context.Background()
+	repo := NewFolderRepo(pool.ReadDB, pool.WriteDB)
+
+	err := repo.Move(ctx, user.ID, 99999, nil, "test-uuid-1/NoFolder")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, apperror.ErrNotFound)
+}
+
+func TestFolderRepo_Move_Conflict(t *testing.T) {
+	pool := openTestDB(t)
+	user := createUser(t, pool)
+	ctx := context.Background()
+	repo := NewFolderRepo(pool.ReadDB, pool.WriteDB)
+
+	parent, err := repo.Create(ctx, user.ID, nil, "Parent", "test-uuid-1/Parent")
+	require.NoError(t, err)
+	_, err = repo.Create(ctx, user.ID, &parent.ID, "Dupe", "test-uuid-1/Parent/Dupe")
+	require.NoError(t, err)
+	f2, err := repo.Create(ctx, user.ID, nil, "Other", "test-uuid-1/Other")
+	require.NoError(t, err)
+
+	// Force a unique conflict by setting disk_path equal to f1's.
+	err = repo.Move(ctx, user.ID, f2.ID, &parent.ID, "test-uuid-1/Parent/Dupe")
+	require.Error(t, err)
+	var appErr *apperror.AppError
+	require.ErrorAs(t, err, &appErr)
+	assert.Equal(t, 409, appErr.Code)
+}
+
+// ─── NoteRepo.Move ────────────────────────────────────────────────────────────
+
+func createTestFolder(t *testing.T, pool *db.Pool, user *model.User, name string) *model.Folder {
+	t.Helper()
+	repo := NewFolderRepo(pool.ReadDB, pool.WriteDB)
+	f, err := repo.Create(context.Background(), user.ID, nil, name, "test-uuid-1/"+name)
+	require.NoError(t, err)
+	return f
+}
+
+func createNoteInFolder(t *testing.T, pool *db.Pool, userID int64, folderID *int64, title, slug, diskPath string) *model.Note {
+	t.Helper()
+	repo := NewNoteRepo(pool.ReadDB, pool.WriteDB)
+	n, err := repo.Create(context.Background(), &model.Note{
+		UserID:      userID,
+		FolderID:    folderID,
+		Title:       title,
+		Slug:        slug,
+		DiskPath:    diskPath,
+		Tags:        []string{},
+		ContentHash: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+	})
+	require.NoError(t, err)
+	return n
+}
+
+func TestNoteRepo_Move(t *testing.T) {
+	pool := openTestDB(t)
+	user := createUser(t, pool)
+	ctx := context.Background()
+	noteRepo := NewNoteRepo(pool.ReadDB, pool.WriteDB)
+	folder := createTestFolder(t, pool, user, "Dest")
+
+	note := createNoteInFolder(t, pool, user.ID, nil, "Move Me", "move-me", "test-uuid-1/move-me.md")
+
+	err := noteRepo.Move(ctx, user.ID, note.ID, &folder.ID, "test-uuid-1/Dest/move-me.md")
+	require.NoError(t, err)
+
+	got, err := noteRepo.GetByID(ctx, user.ID, note.ID)
+	require.NoError(t, err)
+	require.NotNil(t, got.FolderID)
+	assert.Equal(t, folder.ID, *got.FolderID)
+}
+
+func TestNoteRepo_Move_NotFound(t *testing.T) {
+	pool := openTestDB(t)
+	user := createUser(t, pool)
+	ctx := context.Background()
+	noteRepo := NewNoteRepo(pool.ReadDB, pool.WriteDB)
+
+	err := noteRepo.Move(ctx, user.ID, 99999, nil, "test-uuid-1/nowhere.md")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, apperror.ErrNotFound)
+}
+
+func TestNoteRepo_Move_Conflict(t *testing.T) {
+	pool := openTestDB(t)
+	user := createUser(t, pool)
+	ctx := context.Background()
+	noteRepo := NewNoteRepo(pool.ReadDB, pool.WriteDB)
+	folder := createTestFolder(t, pool, user, "CF")
+
+	createNoteInFolder(t, pool, user.ID, &folder.ID, "ConfNote", "confnote", "test-uuid-1/CF/confnote.md")
+	note2 := createNoteInFolder(t, pool, user.ID, nil, "Other", "other", "test-uuid-1/other.md")
+
+	// Move note2 to the same disk path as note1 — should conflict.
+	err := noteRepo.Move(ctx, user.ID, note2.ID, &folder.ID, "test-uuid-1/CF/confnote.md")
+	require.Error(t, err)
+	var appErr *apperror.AppError
+	require.ErrorAs(t, err, &appErr)
+	assert.Equal(t, 409, appErr.Code)
+}
+
+// ─── NoteRepo.ListForContext ──────────────────────────────────────────────────
+
+func TestNoteRepo_ListForContext_NilFolder(t *testing.T) {
+	pool := openTestDB(t)
+	user := createUser(t, pool)
+	ctx := context.Background()
+	noteRepo := NewNoteRepo(pool.ReadDB, pool.WriteDB)
+
+	createNoteInFolder(t, pool, user.ID, nil, "Root Note", "root-note", "test-uuid-1/root-note.md")
+
+	got, err := noteRepo.ListForContext(ctx, user.ID, nil)
+	require.NoError(t, err)
+	assert.Len(t, got, 1)
+	assert.Equal(t, "Root Note", got[0].Title)
+}
+
+func TestNoteRepo_ListForContext_WithFolder(t *testing.T) {
+	pool := openTestDB(t)
+	user := createUser(t, pool)
+	ctx := context.Background()
+	noteRepo := NewNoteRepo(pool.ReadDB, pool.WriteDB)
+	folder := createTestFolder(t, pool, user, "CTX")
+
+	createNoteInFolder(t, pool, user.ID, &folder.ID, "Folder Note", "folder-note", "test-uuid-1/CTX/folder-note.md")
+	createNoteInFolder(t, pool, user.ID, nil, "Root Note", "root-note", "test-uuid-1/root-note.md")
+
+	got, err := noteRepo.ListForContext(ctx, user.ID, &folder.ID)
+	require.NoError(t, err)
+	assert.Len(t, got, 1)
+	assert.Equal(t, "Folder Note", got[0].Title)
+}

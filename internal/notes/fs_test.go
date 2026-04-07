@@ -385,6 +385,104 @@ func TestFileStore_RenameDir_TraversalNewPath(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestFileStore_RenameFile_Success(t *testing.T) {
+	root := t.TempDir()
+	fs, err := NewFileStore(root)
+	require.NoError(t, err)
+
+	require.NoError(t, fs.Write("old.md", "content"))
+	require.NoError(t, fs.RenameFile("old.md", "new.md"))
+
+	content, err := fs.Read("new.md")
+	require.NoError(t, err)
+	assert.Equal(t, "content", content)
+
+	_, err = fs.Read("old.md")
+	assert.Error(t, err)
+}
+
+func TestFileStore_RenameFile_OldPathTraversal(t *testing.T) {
+	root := t.TempDir()
+	fs, err := NewFileStore(root)
+	require.NoError(t, err)
+
+	err = fs.RenameFile("../../etc/passwd", "dest.md")
+	assert.Error(t, err)
+}
+
+func TestFileStore_RenameFile_NewPathTraversal(t *testing.T) {
+	root := t.TempDir()
+	fs, err := NewFileStore(root)
+	require.NoError(t, err)
+
+	require.NoError(t, fs.Write("src.md", "content"))
+	err = fs.RenameFile("src.md", "../../malicious.md")
+	assert.Error(t, err)
+}
+
+func TestFileStore_RenameFile_RenameError(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("skipping permission test when running as root")
+	}
+	root := t.TempDir()
+	fs, err := NewFileStore(root)
+	require.NoError(t, err)
+
+	// Source file doesn't exist — os.Rename should fail.
+	err = fs.RenameFile("nonexistent.md", "dest.md")
+	require.Error(t, err)
+}
+
+func TestFileStore_GitLogFile_NoGit(t *testing.T) {
+	root := t.TempDir()
+	fs, err := NewFileStore(root)
+	require.NoError(t, err)
+
+	// GitLogFile without git returns nil, nil (no error, no entries).
+	entries, err := fs.GitLogFile("note.md", 10)
+	require.NoError(t, err)
+	assert.Nil(t, entries)
+}
+
+func TestFileStore_GitFileAt_NoGit(t *testing.T) {
+	root := t.TempDir()
+	fs, err := NewFileStore(root)
+	require.NoError(t, err)
+
+	// GitFileAt without git returns empty strings and no error.
+	content, _, err := fs.GitFileAt("abc1234", "note.md")
+	require.NoError(t, err)
+	assert.Empty(t, content)
+}
+
+func TestEnableGitHistory_FailsOnBadDir(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("skipping permission test when running as root")
+	}
+	root := t.TempDir()
+	fs, err := NewFileStore(root)
+	require.NoError(t, err)
+
+	// Make the notesRoot non-writable so PlainInit cannot write the .git dir.
+	require.NoError(t, os.Chmod(root, 0500))
+	t.Cleanup(func() { _ = os.Chmod(root, 0700) })
+
+	err = fs.EnableGitHistory()
+	require.Error(t, err)
+}
+
+func TestOpenOrInitGitRepo_ExistingCorruptedGit(t *testing.T) {
+	// Create a directory where .git is a file (not a dir) — PlainOpen fails
+	// with a non-ErrRepositoryNotExists error.
+	dir := t.TempDir()
+	gitFile := filepath.Join(dir, ".git")
+	require.NoError(t, os.WriteFile(gitFile, []byte("not a git repo"), 0600))
+
+	_, err := openOrInitGitRepo(dir)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "git open")
+}
+
 func TestIsENOSPC(t *testing.T) {
 	assert.True(t, isENOSPC(syscall.ENOSPC))
 	assert.True(t, isENOSPC(fmt.Errorf("wrapped: %w", syscall.ENOSPC)))

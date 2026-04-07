@@ -1674,3 +1674,102 @@ func TestHandler_History_Unauthenticated(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
 }
 
+func TestHandler_History_At_Disabled(t *testing.T) {
+	// Without git history enabled, At must return 501.
+	c := newTestClient(t)
+	c.registerAndLogin(t)
+
+	resp := c.do(t, http.MethodPost, "/api/v1/notes", map[string]interface{}{"title": "no-git"})
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusCreated, resp.StatusCode)
+	var note map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&note))
+	noteID := i64str(int64(note["id"].(float64)))
+
+	atResp := c.do(t, http.MethodGet, "/api/v1/notes/"+noteID+"/history/abc1234", nil)
+	defer atResp.Body.Close()
+	assert.Equal(t, http.StatusNotImplemented, atResp.StatusCode)
+}
+
+func TestHandler_History_Restore_Disabled(t *testing.T) {
+	// Without git history enabled, Restore must return 501.
+	c := newTestClient(t)
+	c.registerAndLogin(t)
+
+	resp := c.do(t, http.MethodPost, "/api/v1/notes", map[string]interface{}{"title": "no-git-restore"})
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusCreated, resp.StatusCode)
+	var note map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&note))
+	noteID := i64str(int64(note["id"].(float64)))
+	hash := note["content_hash"].(string)
+
+	restoreResp := c.do(t, http.MethodPost, "/api/v1/notes/"+noteID+"/history/abc1234/restore",
+		map[string]string{"content_hash": hash})
+	defer restoreResp.Body.Close()
+	assert.Equal(t, http.StatusNotImplemented, restoreResp.StatusCode)
+}
+
+func TestHandler_Notes_ListAll_Returns200(t *testing.T) {
+	c := newTestClient(t)
+	c.registerAndLogin(t)
+
+	createNoteHelper(t, c, "Note 1")
+	createNoteHelper(t, c, "Note 2")
+
+	resp := c.do(t, http.MethodGet, "/api/v1/notes/all", nil)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var items []map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&items))
+	assert.GreaterOrEqual(t, len(items), 2)
+}
+
+func TestHandler_Notes_Share_InvalidID(t *testing.T) {
+	c := newTestClient(t)
+	c.registerAndLogin(t)
+
+	resp := c.do(t, http.MethodPost, "/api/v1/notes/notanumber/share", nil)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+}
+
+func TestHandler_Notes_Share_Clear(t *testing.T) {
+	c := newTestClient(t)
+	c.registerAndLogin(t)
+
+	noteID := createNoteHelper(t, c, "Shareable Note")
+
+	// Share it first.
+	shareResp := c.do(t, http.MethodPost, "/api/v1/notes/"+i64str(noteID)+"/share", nil)
+	defer shareResp.Body.Close()
+	require.Equal(t, http.StatusOK, shareResp.StatusCode)
+
+	// Then clear the share token.
+	clearResp := c.do(t, http.MethodPost, "/api/v1/notes/"+i64str(noteID)+"/share",
+		map[string]bool{"clear": true})
+	defer clearResp.Body.Close()
+	require.Equal(t, http.StatusOK, clearResp.StatusCode)
+	var result map[string]interface{}
+	require.NoError(t, json.NewDecoder(clearResp.Body).Decode(&result))
+	assert.Nil(t, result["share_token"])
+}
+
+func TestHandler_Notes_Search_NoQuery(t *testing.T) {
+	c := newTestClient(t)
+	c.registerAndLogin(t)
+
+	resp := c.do(t, http.MethodGet, "/api/v1/notes/search", nil)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+}
+
+func TestHandler_Journals_List_Unauthenticated(t *testing.T) {
+	c := newTestClient(t)
+	// Not logged in.
+	resp := c.do(t, http.MethodGet, "/api/v1/journals", nil)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+}
+
