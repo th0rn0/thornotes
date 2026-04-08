@@ -21,7 +21,9 @@ A self-hosted Markdown note-taking app with file-as-canonical storage. Every not
 - MCP server — full CRUD over notes and folders via 14 tools; read-only or read-write token scopes; works with Claude Desktop, Open WebUI, Cursor, and any MCP-compatible client
 - API tokens for programmatic access with scope control
 - Live sync — edits made directly to `.md` files on disk are detected and pushed to open browser tabs via SSE
-- Multi-theme: Auto, Light, Dark, and Catppuccin
+- Multi-theme: Light, Dark, Catppuccin, Nord, Tokyo Night, Solarized — each with per-theme syntax highlighting tuned for that palette
+- **Markdown formatting toolbar** — bold, italic, heading, blockquote, ordered and unordered lists, link, table (with column-alignment formatter), undo/redo
+- **Right-click context menu** in the editor — bold, italic, blockquote, list, link, and table formatting available on selection
 - Line numbers toggle in the editor toolbar; character and line count in the status bar
 - Daily journal with multi-journal support
 - Import `.md` files or `.zip` archives (folder structure preserved)

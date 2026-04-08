@@ -2,13 +2,25 @@
 
 All notable changes to thornotes are documented here.
 
-## [1.5.7.0] - 2026-04-07
+## [1.5.7.0] - 2026-04-08
 
 ### Added
+- **User account dropdown** — Settings, Account, and Sign out are now tucked inside a collapsible username menu in the topbar. Keeps the toolbar clean; click the username to expand.
+- **Tags row below title** — the tags input moves under the note title into its own row with smaller, dimmer text. Less visual noise while editing.
+- **Format Table button** — a new `Fmt` toolbar button (and right-click context menu entry) aligns all columns in a Markdown table by padding cells with whitespace. Works on the table block your cursor is in.
+- **Rich right-click context menu** — the editor context menu now includes Bold, Italic, Blockquote, Bullet list, Link, and Format Table alongside the existing Make into table option. Formatting items appear only when text is selected.
+- **Table styling in preview** — Markdown tables in the preview pane now render with visible borders, alternating row shading, and a distinct header row.
+- **GitHub link in sidebar** — a GitHub icon and link appear in the sidebar footer for quick access to the repo.
+- **Per-theme CM6 syntax highlighting** — each of the six themes (Light, Dark, Catppuccin, Nord, Tokyo Night, Solarized) now has its own `HighlightStyle` tuned for readability on that background. Headings, links, keywords, strings, comments, and types all use theme-appropriate colors.
+- **Semantic color variables** — all hardcoded error/warning/success/error-bg colors replaced with CSS custom properties (`--color-error`, `--color-warning`, `--color-success`, `--color-error-bg`) defined per theme.
 - **Enter to sign in** — pressing Enter in the username or password field submits the sign-in form. Same behaviour on the register form.
 - **Interactive checkboxes in preview** — clicking a checkbox in Preview or Split mode toggles `[ ]` / `[x]` in the markdown source and auto-saves.
 - **Auto-lint markdown** — a new toggle in Settings > Editor enables a persistent lint panel below the toolbar. Checks for trailing whitespace, hard tabs, multiple blank lines, heading level jumps, missing blank lines before headings, and bare URLs. Each issue is clickable to jump to the offending line. Updates live as you type.
 - **Android APK** — new `android/` project (Kotlin, WebView wrapper) that connects to any self-hosted thornotes server. Setup screen stores the server URL; back-navigates within the WebView; sessions persist via cookies. Mirrors the Electron desktop app pattern.
+
+### Changed
+- Border radius unified to 3px across context menus, table picker, notifications, and dropdowns.
+- Theme list updated in README and features list to reflect all six available themes.
 
 ### Added (developer)
 - `make android` / `make android-release` targets for building debug and release APKs.

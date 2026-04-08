@@ -496,20 +496,21 @@ async function openNote(noteId, { historyMode = 'push' } = {}) {
       '<button data-cmd="italic" title="Italic"><i>I</i></button>' +
       '<button data-cmd="heading" title="Heading">H#</button>' +
       '<span class="cm6-sep"></span>' +
-      '<button data-cmd="quote" title="Blockquote">&ldquo;&rdquo;</button>' +
+      '<button data-cmd="quote" title="Blockquote">Quote</button>' +
       '<button data-cmd="unorderedList" title="Bullet list">• List</button>' +
       '<button data-cmd="orderedList" title="Numbered list">1. List</button>' +
       '<span class="cm6-sep"></span>' +
       '<button data-cmd="link" title="Insert link">Link</button>' +
       '<button data-cmd="table" title="Insert table" id="cm6-table-btn">Table</button>' +
+      '<button data-cmd="formatTable" title="Format table columns">Fmt</button>' +
       '<span class="cm6-sep"></span>' +
       '<button data-cmd="preview" title="Toggle preview" id="cm6-preview-btn">Preview</button>' +
-      '<button data-cmd="previewedit" title="Preview Edit — click any block to edit inline" id="cm6-previewedit-btn">Pedit</button>' +
+      '<button data-cmd="previewedit" title="Preview Edit — click any block to edit inline" id="cm6-previewedit-btn">P.Edit</button>' +
       '<button data-cmd="split" title="Split editor / preview" id="cm6-split-btn">Split</button>' +
-      '<button data-cmd="lineNumbers" title="Toggle line numbers" id="cm6-linenumbers-btn">&#x23;</button>' +
+      '<button data-cmd="lineNumbers" title="Toggle line numbers" id="cm6-linenumbers-btn">Ln#</button>' +
       '<span class="cm6-sep"></span>' +
-      '<button data-cmd="undo" title="Undo">↩</button>' +
-      '<button data-cmd="redo" title="Redo">↪</button>';
+      '<button data-cmd="undo" title="Undo">Undo</button>' +
+      '<button data-cmd="redo" title="Redo">Redo</button>';
     editorArea.appendChild(toolbar);
 
     // Table paste conversion bar (hidden until tabular content is detected)
@@ -595,6 +596,8 @@ async function openNote(noteId, { historyMode = 'push' } = {}) {
         toggleLineNumbers();
       } else if (cmd === 'table') {
         handleTableBtn(e, btn);
+      } else if (cmd === 'formatTable') {
+        formatTableAtCursor();
       } else if (CM6.commands[cmd]) {
         CM6.commands[cmd](editor);
       }
@@ -625,14 +628,17 @@ async function openNote(noteId, { historyMode = 'push' } = {}) {
       });
     });
 
-    // Editor context menu — show "Make into table" when text is selected.
+    // Editor context menu (right-click).
     mount.addEventListener('contextmenu', function(e) {
       if (!editor) return;
-      const sel = editor._view.state.selection.main;
-      if (sel.empty) return; // no selection — let browser show its default menu
       e.preventDefault();
       const menu = document.getElementById('editor-ctx-menu');
-      const mw = 180, mh = 44;
+      const sel = editor._view.state.selection.main;
+      const hasSelection = !sel.empty;
+      // Show formatting actions only when text is selected; always show table actions
+      menu.querySelectorAll('[data-editor-ctx-action="bold"],[data-editor-ctx-action="italic"],[data-editor-ctx-action="quote"],[data-editor-ctx-action="unorderedList"],[data-editor-ctx-action="link"],[data-editor-ctx-action="to-table"]')
+        .forEach(btn => { btn.style.display = hasSelection ? '' : 'none'; });
+      const mw = 180, mh = menu.querySelectorAll('button:not([style*="none"])').length * 36 + 16;
       menu.style.left = Math.min(e.clientX, window.innerWidth - mw) + 'px';
       menu.style.top  = Math.min(e.clientY, window.innerHeight - mh) + 'px';
       menu.style.display = 'block';
@@ -1098,6 +1104,65 @@ function toggleEditorPreviewEdit() {
     localStorage.setItem('editorViewMode', 'editor');
     editor.focus();
   }
+}
+
+// ── Markdown table formatter ──────────────────────────────────────────────
+
+function _tableParseRow(text) {
+  const inner = text.trim().replace(/^\|/, '').replace(/\|$/, '');
+  return inner.split('|').map(c => c.trim());
+}
+function _tableSepRow(cells) {
+  return cells.length > 0 && cells.every(c => /^[-: ]+$/.test(c) || c === '');
+}
+function _tableFormat(lines) {
+  const rows = lines.map(_tableParseRow);
+  const maxCols = Math.max(...rows.map(r => r.length));
+  rows.forEach(r => { while (r.length < maxCols) r.push(''); });
+  const widths = Array.from({ length: maxCols }, (_, c) =>
+    Math.max(3, ...rows.map(r => (r[c] || '').length))
+  );
+  const formatted = rows.map(row => {
+    const sep = _tableSepRow(row);
+    return '| ' + row.map((c, i) => sep ? '-'.repeat(widths[i]) : c.padEnd(widths[i])).join(' | ') + ' |';
+  });
+  return { formatted, widths };
+}
+
+function formatTableAtCursor() {
+  const view = editor._view;
+  const state = view.state;
+  const pos = state.selection.main.head;
+  const line = state.doc.lineAt(pos);
+
+  if (!line.text.trim().startsWith('|')) {
+    showNotification('Cursor is not inside a markdown table');
+    return;
+  }
+
+  let startLn = line.number, endLn = line.number;
+  while (startLn > 1 && state.doc.line(startLn - 1).text.trim().startsWith('|')) startLn--;
+  while (endLn < state.doc.lines && state.doc.line(endLn + 1).text.trim().startsWith('|')) endLn++;
+
+  const tableLines = [];
+  for (let i = startLn; i <= endLn; i++) tableLines.push(state.doc.line(i).text);
+
+  const { formatted } = _tableFormat(tableLines);
+  const tableFrom = state.doc.line(startLn).from;
+  const tableTo = state.doc.line(endLn).to;
+  const newText = formatted.join('\n');
+
+  if (newText === tableLines.join('\n')) return; // already formatted
+
+  // Keep cursor on same row, col 0
+  const curRow = line.number - startLn;
+  const rowOffset = formatted.slice(0, curRow).join('\n').length + (curRow > 0 ? 1 : 0);
+
+  view.dispatch({
+    changes: { from: tableFrom, to: tableTo, insert: newText },
+    selection: { anchor: tableFrom + rowOffset + Math.min(pos - line.from, formatted[curRow].length) },
+  });
+  view.focus();
 }
 
 function onEditorChange() {
@@ -1723,6 +1788,29 @@ document.getElementById('show-login-link').addEventListener('click', showLogin);
 
 // Topbar
 document.querySelector('.topbar-menu-btn').addEventListener('click', toggleSidebar);
+
+// User menu dropdown
+(function() {
+  const menu = document.getElementById('user-menu');
+  const trigger = document.getElementById('user-menu-trigger');
+  const dropdown = document.getElementById('user-menu-dropdown');
+  function closeMenu() {
+    dropdown.classList.remove('open');
+    trigger.setAttribute('aria-expanded', 'false');
+  }
+  trigger.addEventListener('click', function() {
+    const isOpen = dropdown.classList.contains('open');
+    dropdown.classList.toggle('open', !isOpen);
+    trigger.setAttribute('aria-expanded', String(!isOpen));
+  });
+  // Close after any menu item is activated
+  dropdown.addEventListener('click', closeMenu);
+  // Close when clicking outside the whole menu
+  document.addEventListener('click', function(e) {
+    if (!menu.contains(e.target)) closeMenu();
+  });
+})();
+
 document.getElementById('settings-btn').addEventListener('click', openSettings);
 document.getElementById('account-btn').addEventListener('click', showAccountModal);
 document.getElementById('logout-btn').addEventListener('click', logout);
@@ -2155,7 +2243,10 @@ document.getElementById('editor-ctx-menu').addEventListener('click', function(e)
   const btn = e.target.closest('[data-editor-ctx-action]');
   if (!btn) return;
   hideEditorCtxMenu();
-  if (btn.dataset.editorCtxAction === 'to-table') selectionToTable();
+  const action = btn.dataset.editorCtxAction;
+  if (action === 'to-table') { selectionToTable(); return; }
+  if (action === 'formatTable') { formatTableAtCursor(); return; }
+  if (CM6.commands[action]) { CM6.commands[action](editor); return; }
 });
 
 document.addEventListener('click', hideEditorCtxMenu);
