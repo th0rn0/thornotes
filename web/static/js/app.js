@@ -496,7 +496,7 @@ async function openNote(noteId, { historyMode = 'push' } = {}) {
       '<button data-cmd="italic" title="Italic"><i>I</i></button>' +
       '<button data-cmd="heading" title="Heading">H#</button>' +
       '<span class="cm6-sep"></span>' +
-      '<button data-cmd="quote" title="Blockquote">&ldquo;&rdquo;</button>' +
+      '<button data-cmd="quote" title="Blockquote">Quote</button>' +
       '<button data-cmd="unorderedList" title="Bullet list">• List</button>' +
       '<button data-cmd="orderedList" title="Numbered list">1. List</button>' +
       '<span class="cm6-sep"></span>' +
@@ -504,12 +504,12 @@ async function openNote(noteId, { historyMode = 'push' } = {}) {
       '<button data-cmd="table" title="Insert table" id="cm6-table-btn">Table</button>' +
       '<span class="cm6-sep"></span>' +
       '<button data-cmd="preview" title="Toggle preview" id="cm6-preview-btn">Preview</button>' +
-      '<button data-cmd="previewedit" title="Preview Edit — click any block to edit inline" id="cm6-previewedit-btn">Pedit</button>' +
+      '<button data-cmd="previewedit" title="Preview Edit — click any block to edit inline" id="cm6-previewedit-btn">P.Edit</button>' +
       '<button data-cmd="split" title="Split editor / preview" id="cm6-split-btn">Split</button>' +
-      '<button data-cmd="lineNumbers" title="Toggle line numbers" id="cm6-linenumbers-btn">&#x23;</button>' +
+      '<button data-cmd="lineNumbers" title="Toggle line numbers" id="cm6-linenumbers-btn">Ln#</button>' +
       '<span class="cm6-sep"></span>' +
-      '<button data-cmd="undo" title="Undo">↩</button>' +
-      '<button data-cmd="redo" title="Redo">↪</button>';
+      '<button data-cmd="undo" title="Undo">Undo</button>' +
+      '<button data-cmd="redo" title="Redo">Redo</button>';
     editorArea.appendChild(toolbar);
 
     // Table paste conversion bar (hidden until tabular content is detected)
