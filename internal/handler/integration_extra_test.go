@@ -548,8 +548,12 @@ func TestHandler_AccountModal_TokensLoadedForExistingUser(t *testing.T) {
 	c.registerAndLogin(t)
 
 	// Create two tokens before opening the modal.
-	c.do(t, http.MethodPost, "/api/v1/account/tokens", map[string]interface{}{"name": "Claude Desktop", "scope": "readwrite"}).Body.Close()
-	c.do(t, http.MethodPost, "/api/v1/account/tokens", map[string]interface{}{"name": "Read Token", "scope": "read"}).Body.Close()
+	r1 := c.do(t, http.MethodPost, "/api/v1/account/tokens", map[string]interface{}{"name": "Claude Desktop", "scope": "readwrite"})
+	require.Equal(t, http.StatusCreated, r1.StatusCode, "token creation must succeed before testing list")
+	r1.Body.Close()
+	r2 := c.do(t, http.MethodPost, "/api/v1/account/tokens", map[string]interface{}{"name": "Read Token", "scope": "read"})
+	require.Equal(t, http.StatusCreated, r2.StatusCode, "token creation must succeed before testing list")
+	r2.Body.Close()
 
 	resp := c.do(t, http.MethodGet, "/api/v1/account/tokens", nil)
 	defer resp.Body.Close()
