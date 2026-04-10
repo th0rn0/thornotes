@@ -2,6 +2,11 @@
 
 All notable changes to thornotes are documented here.
 
+## [1.5.8.0] - 2026-04-10
+
+### Fixed
+- **Account button now opens immediately** — clicking the account icon in the top-right corner now shows the modal instantly. Previously the modal waited for the token list API call to complete before appearing, making the button feel broken on slow connections.
+
 ## [1.5.7.0] - 2026-04-08
 
 ### Added

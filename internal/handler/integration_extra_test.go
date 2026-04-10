@@ -519,3 +519,54 @@ func TestHandler_Tokens_DeleteInvalidID(t *testing.T) {
 	defer resp.Body.Close()
 	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
 }
+
+// TestHandler_AccountModal_OpenReturnsJSON verifies that the token list endpoint
+// used when the Account modal opens returns a JSON array immediately (no content
+// that would cause a display delay). This is the API call that was blocking the
+// modal from appearing — it must return 200+JSON for a fresh user with no tokens.
+func TestHandler_AccountModal_OpenReturnsJSON(t *testing.T) {
+	c := newTestClient(t)
+	c.registerAndLogin(t)
+
+	resp := c.do(t, http.MethodGet, "/api/v1/account/tokens", nil)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	// Must return a JSON array (not null), so the frontend can display "No tokens yet."
+	// without an error. This is what showAccountModal() calls before rendering.
+	var tokens []interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&tokens), "response must be a JSON array")
+	assert.NotNil(t, tokens, "token list must be a non-null array even when empty")
+	assert.Empty(t, tokens, "fresh account should have no tokens")
+}
+
+// TestHandler_AccountModal_TokensLoadedForExistingUser verifies that when a user
+// already has tokens, the list endpoint returns them correctly — this is the same
+// call the Account modal makes on open to populate the token list.
+func TestHandler_AccountModal_TokensLoadedForExistingUser(t *testing.T) {
+	c := newTestClient(t)
+	c.registerAndLogin(t)
+
+	// Create two tokens before opening the modal.
+	r1 := c.do(t, http.MethodPost, "/api/v1/account/tokens", map[string]interface{}{"name": "Claude Desktop", "scope": "readwrite"})
+	require.Equal(t, http.StatusCreated, r1.StatusCode, "token creation must succeed before testing list")
+	r1.Body.Close()
+	r2 := c.do(t, http.MethodPost, "/api/v1/account/tokens", map[string]interface{}{"name": "Read Token", "scope": "read"})
+	require.Equal(t, http.StatusCreated, r2.StatusCode, "token creation must succeed before testing list")
+	r2.Body.Close()
+
+	resp := c.do(t, http.MethodGet, "/api/v1/account/tokens", nil)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var tokens []map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&tokens))
+	assert.Len(t, tokens, 2, "both tokens must be visible in the Account modal")
+
+	for _, tok := range tokens {
+		assert.Empty(t, tok["token"], "raw token value must not be exposed in list")
+		assert.NotEmpty(t, tok["name"])
+		assert.NotEmpty(t, tok["prefix"])
+		assert.NotEmpty(t, tok["scope"])
+	}
+}
