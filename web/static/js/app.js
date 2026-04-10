@@ -1426,8 +1426,9 @@ async function showAccountModal() {
   document.getElementById('token-reveal-area').style.display = 'none';
   document.getElementById('new-token-name').value = '';
   _newTokenValue = '';
-  await refreshTokenList();
+  // Show the modal immediately for instant feedback; tokens load async below.
   document.getElementById('account-modal').style.display = 'flex';
+  await refreshTokenList();
 }
 
 function closeAccountModal() {
