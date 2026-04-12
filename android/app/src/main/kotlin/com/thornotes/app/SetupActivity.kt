@@ -33,12 +33,7 @@ class SetupActivity : AppCompatActivity() {
             binding.errorText.visibility = View.GONE
             val url = binding.urlInput.text.toString().trim()
 
-            val error = when {
-                url.isBlank() -> "Please enter a server URL."
-                !url.startsWith("http://") && !url.startsWith("https://") ->
-                    "URL must start with http:// or https://"
-                else -> null
-            }
+            val error = UrlValidator.validate(url)
             if (error != null) {
                 binding.errorText.text = error
                 binding.errorText.visibility = View.VISIBLE
