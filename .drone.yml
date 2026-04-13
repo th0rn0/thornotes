@@ -256,11 +256,9 @@ steps:
           2>/dev/null | awk '{print $1}')
         echo "Step network: ${STEP_NET:-bridge}"
         docker rm -f thornotes-smoke 2>/dev/null || true
-        mkdir -p /tmp/smoke-data/notes
-        chmod -R 777 /tmp/smoke-data
         docker run -d --name thornotes-smoke \
           ${STEP_NET:+--network "$STEP_NET"} \
-          -v /tmp/smoke-data:/data \
+          --tmpfs /data \
           th0rn0/thornotes:latest
         IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' thornotes-smoke)
         echo "Container IP: $IP"
