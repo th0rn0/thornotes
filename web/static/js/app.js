@@ -502,7 +502,7 @@ async function openNote(noteId, { historyMode = 'push' } = {}) {
       '<button data-cmd="quote" title="Blockquote">Quote</button>' +
       '<button data-cmd="unorderedList" title="Bullet list">• List</button>' +
       '<button data-cmd="orderedList" title="Numbered list">1. List</button>' +
-      '<button data-cmd="taskList" title="Task list item">&#x2610; Task</button>' +
+      '<button data-cmd="taskList" title="Task list item">[ ] Task</button>' +
       '<span class="cm6-sep"></span>' +
       '<button data-cmd="link" title="Insert link">Link</button>' +
       '<button data-cmd="table" title="Insert table" id="cm6-table-btn">Table</button>' +
