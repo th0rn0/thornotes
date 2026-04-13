@@ -17,6 +17,14 @@ linters:
       exclude-functions:
         # HTTP response writes: if the connection is broken the error is not actionable.
         - (net/http.ResponseWriter).Write
+        - fmt.Fprintf
+        - fmt.Fprint
         # Deferred resource closes: the error is secondary to the primary operation.
         - (*os.File).Close
         - (io.Closer).Close
+        - (*io.PipeWriter).Close
+        - (*database/sql.DB).Close
+        - (*database/sql.Rows).Close
+        # Cleanup operations where failure doesn't affect program correctness.
+        - os.Remove
+        - os.Unsetenv
