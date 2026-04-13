@@ -668,7 +668,7 @@ async function openNote(noteId, { historyMode = 'push' } = {}) {
   } else if (historyMode === 'replace') {
     history.replaceState({ noteId: note.id }, '', deepLink);
   }
-  document.title = 'thornotes \u2014 ' + note.title;
+  document.title = note.title + ' \u2014 thornotes';
 
   renderTree(); // refresh active state
 }
@@ -1936,7 +1936,7 @@ document.getElementById('note-ctx-menu').addEventListener('click', async functio
       if (currentNote && currentNote.id === ctxNoteId) {
         currentNote.title = newTitle.trim();
         document.getElementById('note-title').value = newTitle.trim();
-        document.title = 'thornotes \u2014 ' + newTitle.trim();
+        document.title = newTitle.trim() + ' \u2014 thornotes';
       }
       await loadFolderTree();
     } catch (err) {
