@@ -1,12 +1,10 @@
-# golangci-lint v1 configuration for thornotes.
-# Explicit linter set — prevents surprise failures when golangci-lint updates defaults.
-# https://golangci-lint.run/usage/linters/
+version: "2"
 
 run:
   timeout: 5m
 
 linters:
-  disable-all: true
+  default: none
   enable:
     - errcheck     # unchecked error return values
     - govet        # reports suspicious Go constructs
@@ -14,13 +12,12 @@ linters:
     - gosimple     # suggests simplifications to code
     - ineffassign  # detects assignments to variables that are never used after
     - unused       # checks for unused constants, variables, functions, and types
-
-linters-settings:
-  errcheck:
-    # Ignore common idiomatic patterns where the caller cannot usefully act on the error.
-    exclude-functions:
-      # HTTP response writes: if the connection is broken the error is not actionable.
-      - (net/http.ResponseWriter).Write
-      # Deferred resource closes: the error is secondary to the primary operation.
-      - (*os.File).Close
-      - (io.Closer).Close
+  settings:
+    errcheck:
+      # Ignore common idiomatic patterns where the caller cannot usefully act on the error.
+      exclude-functions:
+        # HTTP response writes: if the connection is broken the error is not actionable.
+        - (net/http.ResponseWriter).Write
+        # Deferred resource closes: the error is secondary to the primary operation.
+        - (*os.File).Close
+        - (io.Closer).Close
