@@ -9,7 +9,6 @@ linters:
     - errcheck     # unchecked error return values
     - govet        # reports suspicious Go constructs
     - staticcheck  # comprehensive static analysis (SA*, QF*, S*, ST* checks)
-    - gosimple     # suggests simplifications to code
     - ineffassign  # detects assignments to variables that are never used after
     - unused       # checks for unused constants, variables, functions, and types
   settings:
