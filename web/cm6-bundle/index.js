@@ -290,23 +290,29 @@ const themes = { light: lightTheme, dark: darkTheme, catppuccin: catppuccinTheme
 function createEditor(parent, { onChange, theme } = {}) {
   const themeComp = new Compartment();
   const hlComp    = new Compartment();
-  const resolvedTheme = theme ?? 'light';
-  const state = EditorState.create({
-    doc: '',
-    extensions: [
+  let currentTheme = theme ?? 'light';
+
+  function makeExtensions() {
+    return [
       ...baseExtensions(onChange),
-      themeComp.of(themes[resolvedTheme] ?? lightTheme),
-      hlComp.of(syntaxHighlighting(highlightStyles[resolvedTheme] ?? highlightStyles.light)),
-    ],
-  });
+      themeComp.of(themes[currentTheme] ?? lightTheme),
+      hlComp.of(syntaxHighlighting(highlightStyles[currentTheme] ?? highlightStyles.light)),
+    ];
+  }
+
+  const state = EditorState.create({ doc: '', extensions: makeExtensions() });
   const view = new EditorView({ state, parent });
 
   return {
     getValue() { return view.state.doc.toString(); },
     setValue(text) {
-      view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } });
+      // Replace the entire state so the undo history is cleared. Using a plain
+      // dispatch would record the note-switch as an undoable transaction, letting
+      // Ctrl+Z bleed content from the previous note into the current one.
+      view.setState(EditorState.create({ doc: text, extensions: makeExtensions() }));
     },
     setTheme(name) {
+      currentTheme = name;
       view.dispatch({ effects: [
         themeComp.reconfigure(themes[name] ?? lightTheme),
         hlComp.reconfigure(syntaxHighlighting(highlightStyles[name] ?? highlightStyles.light)),
