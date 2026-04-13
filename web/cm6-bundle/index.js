@@ -198,6 +198,25 @@ function toggleLinePrefix(view, prefix) {
   view.focus();
 }
 
+function wrapInline(view, open, close) {
+  const { state } = view;
+  const changes = [];
+  for (const range of state.selection.ranges) {
+    if (range.empty) {
+      changes.push({ from: range.from, insert: open + close });
+    } else {
+      const text = state.sliceDoc(range.from, range.to);
+      if (text.startsWith(open) && text.endsWith(close) && text.length > open.length + close.length) {
+        changes.push({ from: range.from, to: range.to, insert: text.slice(open.length, -close.length) });
+      } else {
+        changes.push({ from: range.from, to: range.to, insert: open + text + close });
+      }
+    }
+  }
+  view.dispatch({ changes });
+  view.focus();
+}
+
 function insertLink(view) {
   const { state } = view;
   const range = state.selection.main;
@@ -304,10 +323,14 @@ function createEditor(parent, { onChange, theme } = {}) {
 const commands = {
   bold(ed)          { toggleInline(ed._view, '**'); },
   italic(ed)        { toggleInline(ed._view, '_'); },
+  strikethrough(ed) { toggleInline(ed._view, '~~'); },
+  underline(ed)     { wrapInline(ed._view, '<u>', '</u>'); },
+  inlineCode(ed)    { toggleInline(ed._view, '`'); },
   heading(ed)       { toggleLinePrefix(ed._view, '## '); },
   quote(ed)         { toggleLinePrefix(ed._view, '> '); },
   unorderedList(ed) { toggleLinePrefix(ed._view, '- '); },
   orderedList(ed)   { toggleLinePrefix(ed._view, '1. '); },
+  taskList(ed)      { toggleLinePrefix(ed._view, '- [ ] '); },
   link(ed)          { insertLink(ed._view); },
   undo(ed)          { cmUndo(ed._view); },
   redo(ed)          { cmRedo(ed._view); },

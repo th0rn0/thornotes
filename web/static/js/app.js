@@ -492,13 +492,17 @@ async function openNote(noteId, { historyMode = 'push' } = {}) {
     const toolbar = document.createElement('div');
     toolbar.className = 'cm6-toolbar';
     toolbar.innerHTML =
-      '<button data-cmd="bold" title="Bold"><b>B</b></button>' +
-      '<button data-cmd="italic" title="Italic"><i>I</i></button>' +
+      '<button data-cmd="bold" title="Bold (Ctrl+B)"><b>B</b></button>' +
+      '<button data-cmd="italic" title="Italic (Ctrl+I)"><i>I</i></button>' +
+      '<button data-cmd="strikethrough" title="Strikethrough"><s>S</s></button>' +
+      '<button data-cmd="underline" title="Underline"><u>U</u></button>' +
+      '<button data-cmd="inlineCode" title="Inline code"><code>`</code></button>' +
       '<button data-cmd="heading" title="Heading">H#</button>' +
       '<span class="cm6-sep"></span>' +
       '<button data-cmd="quote" title="Blockquote">Quote</button>' +
       '<button data-cmd="unorderedList" title="Bullet list">• List</button>' +
       '<button data-cmd="orderedList" title="Numbered list">1. List</button>' +
+      '<button data-cmd="taskList" title="Task list item">&#x2610; Task</button>' +
       '<span class="cm6-sep"></span>' +
       '<button data-cmd="link" title="Insert link">Link</button>' +
       '<button data-cmd="table" title="Insert table" id="cm6-table-btn">Table</button>' +
