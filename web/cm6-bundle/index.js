@@ -198,6 +198,25 @@ function toggleLinePrefix(view, prefix) {
   view.focus();
 }
 
+function wrapInline(view, open, close) {
+  const { state } = view;
+  const changes = [];
+  for (const range of state.selection.ranges) {
+    if (range.empty) {
+      changes.push({ from: range.from, insert: open + close });
+    } else {
+      const text = state.sliceDoc(range.from, range.to);
+      if (text.startsWith(open) && text.endsWith(close) && text.length > open.length + close.length) {
+        changes.push({ from: range.from, to: range.to, insert: text.slice(open.length, -close.length) });
+      } else {
+        changes.push({ from: range.from, to: range.to, insert: open + text + close });
+      }
+    }
+  }
+  view.dispatch({ changes });
+  view.focus();
+}
+
 function insertLink(view) {
   const { state } = view;
   const range = state.selection.main;
@@ -271,23 +290,29 @@ const themes = { light: lightTheme, dark: darkTheme, catppuccin: catppuccinTheme
 function createEditor(parent, { onChange, theme } = {}) {
   const themeComp = new Compartment();
   const hlComp    = new Compartment();
-  const resolvedTheme = theme ?? 'light';
-  const state = EditorState.create({
-    doc: '',
-    extensions: [
+  let currentTheme = theme ?? 'light';
+
+  function makeExtensions() {
+    return [
       ...baseExtensions(onChange),
-      themeComp.of(themes[resolvedTheme] ?? lightTheme),
-      hlComp.of(syntaxHighlighting(highlightStyles[resolvedTheme] ?? highlightStyles.light)),
-    ],
-  });
+      themeComp.of(themes[currentTheme] ?? lightTheme),
+      hlComp.of(syntaxHighlighting(highlightStyles[currentTheme] ?? highlightStyles.light)),
+    ];
+  }
+
+  const state = EditorState.create({ doc: '', extensions: makeExtensions() });
   const view = new EditorView({ state, parent });
 
   return {
     getValue() { return view.state.doc.toString(); },
     setValue(text) {
-      view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } });
+      // Replace the entire state so the undo history is cleared. Using a plain
+      // dispatch would record the note-switch as an undoable transaction, letting
+      // Ctrl+Z bleed content from the previous note into the current one.
+      view.setState(EditorState.create({ doc: text, extensions: makeExtensions() }));
     },
     setTheme(name) {
+      currentTheme = name;
       view.dispatch({ effects: [
         themeComp.reconfigure(themes[name] ?? lightTheme),
         hlComp.reconfigure(syntaxHighlighting(highlightStyles[name] ?? highlightStyles.light)),
@@ -304,10 +329,14 @@ function createEditor(parent, { onChange, theme } = {}) {
 const commands = {
   bold(ed)          { toggleInline(ed._view, '**'); },
   italic(ed)        { toggleInline(ed._view, '_'); },
+  strikethrough(ed) { toggleInline(ed._view, '~~'); },
+  underline(ed)     { wrapInline(ed._view, '<u>', '</u>'); },
+  inlineCode(ed)    { toggleInline(ed._view, '`'); },
   heading(ed)       { toggleLinePrefix(ed._view, '## '); },
   quote(ed)         { toggleLinePrefix(ed._view, '> '); },
   unorderedList(ed) { toggleLinePrefix(ed._view, '- '); },
   orderedList(ed)   { toggleLinePrefix(ed._view, '1. '); },
+  taskList(ed)      { toggleLinePrefix(ed._view, '- [ ] '); },
   link(ed)          { insertLink(ed._view); },
   undo(ed)          { cmUndo(ed._view); },
   redo(ed)          { cmRedo(ed._view); },
