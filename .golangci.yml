@@ -23,6 +23,7 @@ linters:
         - (*os.File).Close
         - (io.Closer).Close
         - (*io.PipeWriter).Close
+        - (*mime/multipart.Writer).Close
         - (*database/sql.DB).Close
         - (*database/sql.Rows).Close
         # Cleanup operations where failure doesn't affect program correctness.
