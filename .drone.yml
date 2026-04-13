@@ -169,9 +169,12 @@ steps:
 
   - name: build-android
     image: mingc/android-build-box:latest
+    timeout: 30
     environment:
       GRADLE_OPTS: "-Dorg.gradle.daemon=false -Xmx1024m -Dfile.encoding=UTF-8"
     commands:
+      - java -version
+      - cd android && ./gradlew --no-daemon --version
       - cd android && ./gradlew --no-daemon test
       - cd android && ./gradlew --no-daemon assembleDebug
       - |
