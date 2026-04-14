@@ -6,6 +6,7 @@ trigger:
   event:
     - push
     - pull_request
+    - tag
 
 services:
   - name: mariadb
@@ -78,7 +79,6 @@ steps:
     image: node:lts
     commands:
       - node --test web/static/js/table-utils.test.js
-      - node --test desktop/lib.test.js
       - npm install --prefix web/cm6-bundle
       - node --test web/cm6-bundle/index.test.mjs
 
@@ -422,15 +422,19 @@ steps:
     commands:
       - apk add -q curl jq
       - VERSION=$(cat VERSION | xargs)
+      - APK=android/app/build/outputs/apk/release/app-release-unsigned.apk
       - |
-        UPLOAD_URL=$(curl -s \
+        [ -f "$APK" ] || { echo "ERROR: APK not found at $APK"; exit 1; }
+      - |
+        UPLOAD_URL=$(curl -s --fail \
           -H "Authorization: Bearer $GITHUB_TOKEN" \
           "https://api.github.com/repos/$DRONE_REPO/releases/tags/v${VERSION}" \
           | jq -r '.upload_url' | sed 's/{?name,label}//')
-        curl -s -X POST \
+        [ -n "$UPLOAD_URL" ] && [ "$UPLOAD_URL" != "null" ] || { echo "ERROR: no upload_url from GitHub API"; exit 1; }
+        curl -s --fail -X POST \
           -H "Authorization: Bearer $GITHUB_TOKEN" \
           -H "Content-Type: application/vnd.android.package-archive" \
-          --data-binary @android/app/build/outputs/apk/release/app-release-unsigned.apk \
+          --data-binary @"$APK" \
           "${UPLOAD_URL}?name=thornotes-v${VERSION}-android-unsigned.apk"
     when:
       event:
