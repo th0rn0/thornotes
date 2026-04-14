@@ -166,6 +166,9 @@ steps:
     commands:
       - |
         curl -s -X POST "$DISCORD_WEBHOOK_URL" -H "Content-Type: application/json" -d "{\"embeds\":[{\"title\":\"$DRONE_REPO - $DRONE_SOURCE_BRANCH - Android Build Started!\",\"url\":\"$DRONE_BUILD_LINK\"}]}"
+    when:
+      branch:
+        - disabled
 
   - name: build-android
     image: mingc/android-build-box:latest
@@ -184,6 +187,9 @@ steps:
         else
           ./gradlew --no-daemon test assembleDebug
         fi
+    when:
+      branch:
+        - disabled
 
   - name: discord-android-success
     image: curlimages/curl:8.7.1
@@ -195,6 +201,8 @@ steps:
       - |
         curl -s -X POST "$DISCORD_WEBHOOK_URL" -H "Content-Type: application/json" -d "{\"embeds\":[{\"title\":\"$DRONE_REPO - $DRONE_SOURCE_BRANCH - Android Build Success!\",\"url\":\"$DRONE_BUILD_LINK\"}]}"
     when:
+      branch:
+        - disabled
       status:
         - success
 
@@ -208,6 +216,8 @@ steps:
       - |
         curl -s -X POST "$DISCORD_WEBHOOK_URL" -H "Content-Type: application/json" -d "{\"embeds\":[{\"title\":\"$DRONE_REPO - $DRONE_SOURCE_BRANCH - Android Build Failure!\",\"url\":\"$DRONE_BUILD_LINK\"}]}"
     when:
+      branch:
+        - disabled
       status:
         - failure
 
