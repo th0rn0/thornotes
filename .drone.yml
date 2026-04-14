@@ -178,11 +178,11 @@ steps:
       - java -version
       - cd android
       - ./gradlew --no-daemon --version
-      - ./gradlew --no-daemon test
-      - ./gradlew --no-daemon assembleDebug
       - |
         if [ -n "$DRONE_TAG" ]; then
-          ./gradlew --no-daemon assembleRelease
+          ./gradlew --no-daemon test assembleDebug assembleRelease
+        else
+          ./gradlew --no-daemon test assembleDebug
         fi
 
   - name: discord-android-success
