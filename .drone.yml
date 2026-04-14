@@ -453,6 +453,8 @@ steps:
     when:
       event:
         - tag
+      branch:
+        - disabled
 
   - name: discord-android-released
     image: curlimages/curl:8.7.1
