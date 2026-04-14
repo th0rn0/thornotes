@@ -56,6 +56,31 @@ class UrlValidatorTest {
         assertNull(UrlValidator.validate("https://notes.example.com/thornotes"))
     }
 
+    @Test
+    fun `bare http scheme returns error`() {
+        assertEquals("Please enter a complete server URL.", UrlValidator.validate("http://"))
+    }
+
+    @Test
+    fun `bare https scheme returns error`() {
+        assertEquals("Please enter a complete server URL.", UrlValidator.validate("https://"))
+    }
+
+    @Test
+    fun `uppercase HTTP scheme is accepted`() {
+        assertNull(UrlValidator.validate("HTTP://192.168.1.1:8080"))
+    }
+
+    @Test
+    fun `uppercase HTTPS scheme is accepted`() {
+        assertNull(UrlValidator.validate("HTTPS://notes.example.com"))
+    }
+
+    @Test
+    fun `mixed case Http scheme is accepted`() {
+        assertNull(UrlValidator.validate("Http://localhost:8080"))
+    }
+
     // --- isValid() ---
 
     @Test

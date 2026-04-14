@@ -421,15 +421,19 @@ steps:
     commands:
       - apk add -q curl jq
       - VERSION=$(cat VERSION | xargs)
+      - APK=android/app/build/outputs/apk/release/app-release-unsigned.apk
       - |
-        UPLOAD_URL=$(curl -s \
+        [ -f "$APK" ] || { echo "ERROR: APK not found at $APK"; exit 1; }
+      - |
+        UPLOAD_URL=$(curl -s --fail \
           -H "Authorization: Bearer $GITHUB_TOKEN" \
           "https://api.github.com/repos/$DRONE_REPO/releases/tags/v${VERSION}" \
           | jq -r '.upload_url' | sed 's/{?name,label}//')
-        curl -s -X POST \
+        [ -n "$UPLOAD_URL" ] && [ "$UPLOAD_URL" != "null" ] || { echo "ERROR: no upload_url from GitHub API"; exit 1; }
+        curl -s --fail -X POST \
           -H "Authorization: Bearer $GITHUB_TOKEN" \
           -H "Content-Type: application/vnd.android.package-archive" \
-          --data-binary @android/app/build/outputs/apk/release/app-release-unsigned.apk \
+          --data-binary @"$APK" \
           "${UPLOAD_URL}?name=thornotes-v${VERSION}-android-unsigned.apk"
     when:
       event:

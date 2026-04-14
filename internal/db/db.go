@@ -1,10 +1,12 @@
 package db
 
 import (
+	"context"
 	"database/sql"
 	"embed"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/golang-migrate/migrate/v4"
 	migratesqlite "github.com/golang-migrate/migrate/v4/database/sqlite"
@@ -56,17 +58,20 @@ func Open(dsn string) (*Pool, error) {
 }
 
 // HealthCheck pings the read and write database connections and returns a map
-// of check name to "ok" or an error message. Used by the /healthz endpoint.
+// of check name to "ok" or "unavailable". Raw driver errors are logged
+// server-side; the public response never exposes internal paths or messages.
 func (p *Pool) HealthCheck() map[string]string {
-	checks := make(map[string]string, 2)
-	if err := p.ReadDB.Ping(); err != nil {
-		checks["db_read"] = err.Error()
-	} else {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	checks := map[string]string{
+		"db_read":  "unavailable",
+		"db_write": "unavailable",
+	}
+	if err := p.ReadDB.PingContext(ctx); err == nil {
 		checks["db_read"] = "ok"
 	}
-	if err := p.WriteDB.Ping(); err != nil {
-		checks["db_write"] = err.Error()
-	} else {
+	if err := p.WriteDB.PingContext(ctx); err == nil {
 		checks["db_write"] = "ok"
 	}
 	return checks

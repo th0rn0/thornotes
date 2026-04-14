@@ -24,6 +24,9 @@ func NewHealthHandler(db DBHealthChecker) *HealthHandler {
 func (h *HealthHandler) Check(c *gin.Context) {
 	checks := h.db.HealthCheck()
 	status := "ok"
+	if len(checks) == 0 {
+		status = "error"
+	}
 	for _, v := range checks {
 		if v != "ok" {
 			status = "error"
