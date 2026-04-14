@@ -26,6 +26,12 @@ import (
 	"html/template"
 )
 
+type stubDBHealth struct{}
+
+func (s *stubDBHealth) HealthCheck() map[string]string {
+	return map[string]string{"db_read": "ok", "db_write": "ok"}
+}
+
 type testClient struct {
 	server     *httptest.Server
 	httpClient *http.Client
@@ -63,7 +69,7 @@ func newTestClient(t *testing.T) *testClient {
 	staticSub, err := iofs.Sub(thornotes.StaticFS, "web/static")
 	require.NoError(t, err)
 
-	h := router.New(authSvc, notesSvc, apiTokenRepo, userRepo, rateLimiter, tmpl, http.FS(staticSub), hub.New(), false, false)
+	h := router.New(authSvc, notesSvc, apiTokenRepo, userRepo, rateLimiter, tmpl, http.FS(staticSub), hub.New(), false, false, &stubDBHealth{})
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
 
@@ -1459,7 +1465,7 @@ func newTestClientGit(t *testing.T) *testClient {
 	staticSub, err := iofs.Sub(thornotes.StaticFS, "web/static")
 	require.NoError(t, err)
 
-	h := router.New(authSvc, notesSvc, apiTokenRepo, userRepo, rateLimiter, tmpl, http.FS(staticSub), hub.New(), false, true)
+	h := router.New(authSvc, notesSvc, apiTokenRepo, userRepo, rateLimiter, tmpl, http.FS(staticSub), hub.New(), false, true, &stubDBHealth{})
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
 

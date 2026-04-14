@@ -27,6 +27,7 @@ func New(
 	h *hub.Hub,
 	secureCookies bool,
 	enableGitHistory bool,
+	dbHealth handler.DBHealthChecker,
 ) http.Handler {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
@@ -65,6 +66,10 @@ func New(
 	sessionMW := authSvc.SessionMiddleware()
 	csrfMW := security.CSRFGinMiddleware()
 	rateMW := rateLimiter.GinMiddleware()
+
+	// Health check — unauthenticated, used by load balancers and monitoring.
+	healthH := handler.NewHealthHandler(dbHealth)
+	r.GET("/healthz", healthH.Check)
 
 	// Static files.
 	r.StaticFS("/static", staticFS)

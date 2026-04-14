@@ -51,7 +51,17 @@ func buildHandler(t *testing.T) http.Handler {
 	staticSub, err := iofs.Sub(thornotes.StaticFS, "web/static")
 	require.NoError(t, err)
 
-	return router.New(authSvc, notesSvc, apiTokenRepo, userRepo, rateLimiter, tmpl, http.FS(staticSub), hub.New(), false, false)
+	return router.New(authSvc, notesSvc, apiTokenRepo, userRepo, rateLimiter, tmpl, http.FS(staticSub), hub.New(), false, false, &stubDBHealth{})
+}
+
+// stubDBHealth satisfies handler.DBHealthChecker for router tests.
+type stubDBHealth struct{ err string }
+
+func (s *stubDBHealth) HealthCheck() map[string]string {
+	if s.err != "" {
+		return map[string]string{"db_read": s.err, "db_write": s.err}
+	}
+	return map[string]string{"db_read": "ok", "db_write": "ok"}
 }
 
 func TestRouter_New(t *testing.T) {
@@ -111,6 +121,52 @@ func TestRouter_ServesServiceWorker(t *testing.T) {
 	assert.Contains(t, rr.Header().Get("Content-Type"), "javascript")
 	assert.Equal(t, "no-cache", rr.Header().Get("Cache-Control"))
 	assert.Equal(t, "/", rr.Header().Get("Service-Worker-Allowed"))
+}
+
+func TestRouter_Healthz_OK(t *testing.T) {
+	h := buildHandler(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+	assert.Contains(t, rr.Header().Get("Content-Type"), "json")
+	assert.Contains(t, rr.Body.String(), `"status":"ok"`)
+}
+
+func TestRouter_Healthz_DBError(t *testing.T) {
+	dir := t.TempDir()
+	pool, err := db.Open(filepath.Join(dir, "test.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { pool.Close() })
+
+	userRepo := sqlite.NewUserRepo(pool.WriteDB)
+	sessionRepo := sqlite.NewSessionRepo(pool.WriteDB)
+	folderRepo := sqlite.NewFolderRepo(pool.ReadDB, pool.WriteDB)
+	noteRepo := sqlite.NewNoteRepo(pool.ReadDB, pool.WriteDB)
+	searchRepo := sqlite.NewSearchRepo(pool.ReadDB, pool.WriteDB)
+	apiTokenRepo := sqlite.NewAPITokenRepo(pool.ReadDB, pool.WriteDB)
+	journalRepo := sqlite.NewJournalRepo(pool.ReadDB, pool.WriteDB)
+	authSvc := auth.NewService(userRepo, sessionRepo, false)
+	fs, err := notes.NewFileStore(t.TempDir())
+	require.NoError(t, err)
+	notesSvc := notes.NewService(noteRepo, folderRepo, searchRepo, journalRepo, fs)
+	tmpl, err := template.ParseFS(thornotes.TemplatesFS, "web/templates/*.html")
+	require.NoError(t, err)
+	rateLimiter := security.NewAuthRateLimiter(nil)
+	staticSub, err := iofs.Sub(thornotes.StaticFS, "web/static")
+	require.NoError(t, err)
+
+	h := router.New(authSvc, notesSvc, apiTokenRepo, userRepo, rateLimiter, tmpl, http.FS(staticSub), hub.New(), false, false,
+		&stubDBHealth{err: "connection refused"})
+
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusServiceUnavailable, rr.Code)
+	assert.Contains(t, rr.Body.String(), `"status":"error"`)
 }
 
 func TestRouter_ServesManifest(t *testing.T) {

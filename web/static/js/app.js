@@ -502,7 +502,7 @@ async function openNote(noteId, { historyMode = 'push' } = {}) {
       '<button data-cmd="quote" title="Blockquote">Quote</button>' +
       '<button data-cmd="unorderedList" title="Bullet list">• List</button>' +
       '<button data-cmd="orderedList" title="Numbered list">1. List</button>' +
-      '<button data-cmd="taskList" title="Task list item">&#x2610; Task</button>' +
+      '<button data-cmd="taskList" title="Task list item">[ ] Task</button>' +
       '<span class="cm6-sep"></span>' +
       '<button data-cmd="link" title="Insert link">Link</button>' +
       '<button data-cmd="table" title="Insert table" id="cm6-table-btn">Table</button>' +
@@ -668,7 +668,7 @@ async function openNote(noteId, { historyMode = 'push' } = {}) {
   } else if (historyMode === 'replace') {
     history.replaceState({ noteId: note.id }, '', deepLink);
   }
-  document.title = 'thornotes \u2014 ' + note.title;
+  document.title = note.title + ' \u2014 thornotes';
 
   renderTree(); // refresh active state
 }
@@ -1936,7 +1936,7 @@ document.getElementById('note-ctx-menu').addEventListener('click', async functio
       if (currentNote && currentNote.id === ctxNoteId) {
         currentNote.title = newTitle.trim();
         document.getElementById('note-title').value = newTitle.trim();
-        document.title = 'thornotes \u2014 ' + newTitle.trim();
+        document.title = newTitle.trim() + ' \u2014 thornotes';
       }
       await loadFolderTree();
     } catch (err) {

@@ -154,6 +154,62 @@ steps:
       status:
         - failure
 
+# ── Android APK ──────────────────────────────────────────────────────────────
+# Runs on every push/PR. Release APK is built only on v* tags.
+
+  - name: discord-android-start
+    image: curlimages/curl:8.7.1
+    failure: ignore
+    environment:
+      DISCORD_WEBHOOK_URL:
+        from_secret: discord_webhook_url
+    commands:
+      - |
+        curl -s -X POST "$DISCORD_WEBHOOK_URL" -H "Content-Type: application/json" -d "{\"embeds\":[{\"title\":\"$DRONE_REPO - $DRONE_SOURCE_BRANCH - Android Build Started!\",\"url\":\"$DRONE_BUILD_LINK\"}]}"
+
+  - name: build-android
+    image: mingc/android-build-box:latest
+    volumes:
+      - name: gradle-home
+        path: /root/.gradle
+    environment:
+      GRADLE_OPTS: "-Dorg.gradle.daemon=false -Xmx1024m -Dfile.encoding=UTF-8"
+    commands:
+      - java -version
+      - cd android && ./gradlew --no-daemon --version
+      - cd android && ./gradlew --no-daemon test
+      - cd android && ./gradlew --no-daemon assembleDebug
+      - |
+        if [ -n "$DRONE_TAG" ]; then
+          cd android && ./gradlew --no-daemon assembleRelease
+        fi
+
+  - name: discord-android-success
+    image: curlimages/curl:8.7.1
+    failure: ignore
+    environment:
+      DISCORD_WEBHOOK_URL:
+        from_secret: discord_webhook_url
+    commands:
+      - |
+        curl -s -X POST "$DISCORD_WEBHOOK_URL" -H "Content-Type: application/json" -d "{\"embeds\":[{\"title\":\"$DRONE_REPO - $DRONE_SOURCE_BRANCH - Android Build Success!\",\"url\":\"$DRONE_BUILD_LINK\"}]}"
+    when:
+      status:
+        - success
+
+  - name: discord-android-failure
+    image: curlimages/curl:8.7.1
+    failure: ignore
+    environment:
+      DISCORD_WEBHOOK_URL:
+        from_secret: discord_webhook_url
+    commands:
+      - |
+        curl -s -X POST "$DISCORD_WEBHOOK_URL" -H "Content-Type: application/json" -d "{\"embeds\":[{\"title\":\"$DRONE_REPO - $DRONE_SOURCE_BRANCH - Android Build Failure!\",\"url\":\"$DRONE_BUILD_LINK\"}]}"
+    when:
+      status:
+        - failure
+
 # ── Docker Build & Push ───────────────────────────────────────────────────────
 # Only runs on push to main or v* tags.
 
@@ -355,9 +411,53 @@ steps:
       status:
         - success
 
+# ── Android Release ──────────────────────────────────────────────────────────
+# Attaches the unsigned release APK to the GitHub release. Only runs on v* tags.
+
+  - name: release-android
+    image: alpine:latest
+    environment:
+      GITHUB_TOKEN:
+        from_secret: github_token
+    commands:
+      - apk add -q curl jq
+      - VERSION=$(cat VERSION | xargs)
+      - |
+        UPLOAD_URL=$(curl -s \
+          -H "Authorization: Bearer $GITHUB_TOKEN" \
+          "https://api.github.com/repos/$DRONE_REPO/releases/tags/v${VERSION}" \
+          | jq -r '.upload_url' | sed 's/{?name,label}//')
+        curl -s -X POST \
+          -H "Authorization: Bearer $GITHUB_TOKEN" \
+          -H "Content-Type: application/vnd.android.package-archive" \
+          --data-binary @android/app/build/outputs/apk/release/app-release-unsigned.apk \
+          "${UPLOAD_URL}?name=thornotes-v${VERSION}-android-unsigned.apk"
+    when:
+      event:
+        - tag
+
+  - name: discord-android-released
+    image: curlimages/curl:8.7.1
+    failure: ignore
+    environment:
+      DISCORD_WEBHOOK_URL:
+        from_secret: discord_webhook_url
+    commands:
+      - |
+        VERSION=$(cat VERSION | xargs)
+        curl -s -X POST "$DISCORD_WEBHOOK_URL" -H "Content-Type: application/json" -d "{\"embeds\":[{\"title\":\"$DRONE_REPO - v${VERSION} - Android APK attached!\",\"url\":\"https://github.com/$DRONE_REPO/releases/tag/v${VERSION}\"}]}"
+    when:
+      event:
+        - tag
+      status:
+        - success
+
 # ── Volumes ───────────────────────────────────────────────────────────────────
 
 volumes:
   - name: docker-sock
     host:
       path: /var/run/docker.sock
+  - name: gradle-home
+    host:
+      path: /var/cache/drone/gradle-home

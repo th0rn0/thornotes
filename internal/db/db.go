@@ -55,6 +55,23 @@ func Open(dsn string) (*Pool, error) {
 	return p, nil
 }
 
+// HealthCheck pings the read and write database connections and returns a map
+// of check name to "ok" or an error message. Used by the /healthz endpoint.
+func (p *Pool) HealthCheck() map[string]string {
+	checks := make(map[string]string, 2)
+	if err := p.ReadDB.Ping(); err != nil {
+		checks["db_read"] = err.Error()
+	} else {
+		checks["db_read"] = "ok"
+	}
+	if err := p.WriteDB.Ping(); err != nil {
+		checks["db_write"] = err.Error()
+	} else {
+		checks["db_write"] = "ok"
+	}
+	return checks
+}
+
 func (p *Pool) Close() {
 	if p.ReadDB != nil {
 		p.ReadDB.Close()
