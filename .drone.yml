@@ -176,12 +176,13 @@ steps:
       GRADLE_OPTS: "-Dorg.gradle.daemon=false -Xmx1024m -Dfile.encoding=UTF-8"
     commands:
       - java -version
-      - cd android && ./gradlew --no-daemon --version
-      - cd android && ./gradlew --no-daemon test
-      - cd android && ./gradlew --no-daemon assembleDebug
+      - cd android
+      - ./gradlew --no-daemon --version
+      - ./gradlew --no-daemon test
+      - ./gradlew --no-daemon assembleDebug
       - |
         if [ -n "$DRONE_TAG" ]; then
-          cd android && ./gradlew --no-daemon assembleRelease
+          ./gradlew --no-daemon assembleRelease
         fi
 
   - name: discord-android-success
