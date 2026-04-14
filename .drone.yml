@@ -169,7 +169,6 @@ steps:
 
   - name: build-android
     image: mingc/android-build-box:latest
-    timeout: 30
     volumes:
       - name: gradle-home
         path: /root/.gradle
@@ -177,25 +176,6 @@ steps:
       GRADLE_OPTS: "-Dorg.gradle.daemon=false -Xmx1024m -Dfile.encoding=UTF-8"
     commands:
       - java -version
-      - |
-        # If the Gradle 8.7 distribution is not already cached on the runner host,
-        # download it explicitly with curl (shows transfer stats, supports retries,
-        # and honours --max-time so we never hang silently).
-        # Then redirect the wrapper to the local zip so it skips the network entirely.
-        GRADLE_VERSION=8.7
-        GRADLE_ZIP=/root/.gradle/wrapper-downloads/gradle-${GRADLE_VERSION}-bin.zip
-        if [ ! -f "$GRADLE_ZIP" ]; then
-          mkdir -p "$(dirname "$GRADLE_ZIP")"
-          echo "Downloading Gradle ${GRADLE_VERSION}..."
-          curl -L --fail --show-error --max-time 300 --retry 3 --retry-delay 10 \
-            "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip" \
-            -o "$GRADLE_ZIP"
-          echo "Gradle ${GRADLE_VERSION} download complete."
-        else
-          echo "Gradle ${GRADLE_VERSION} already cached, skipping download."
-        fi
-        sed -i "s|^distributionUrl=.*|distributionUrl=file://${GRADLE_ZIP}|" \
-          android/gradle/wrapper/gradle-wrapper.properties
       - cd android && ./gradlew --no-daemon --version
       - cd android && ./gradlew --no-daemon test
       - cd android && ./gradlew --no-daemon assembleDebug
