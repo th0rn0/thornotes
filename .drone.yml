@@ -238,14 +238,27 @@ steps:
         from_secret: dockerhub_username
       password:
         from_secret: dockerhub_token
-      auto_tag: true
-      auto_tag_aliases:
+      tags:
         - latest
     when:
       branch:
         - main
       event:
         - push
+
+  - name: build-push-release
+    image: plugins/docker
+    settings:
+      repo: th0rn0/thornotes
+      username:
+        from_secret: dockerhub_username
+      password:
+        from_secret: dockerhub_token
+      tags:
+        - latest
+        - ${DRONE_TAG}
+    when:
+      event:
         - tag
 
   - name: discord-build-success
