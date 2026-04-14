@@ -6,6 +6,7 @@ trigger:
   event:
     - push
     - pull_request
+    - tag
 
 services:
   - name: mariadb
