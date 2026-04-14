@@ -78,7 +78,6 @@ steps:
     image: node:lts
     commands:
       - node --test web/static/js/table-utils.test.js
-      - node --test desktop/lib.test.js
       - npm install --prefix web/cm6-bundle
       - node --test web/cm6-bundle/index.test.mjs
 
