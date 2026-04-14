@@ -2,6 +2,19 @@
 
 All notable changes to thornotes are documented here.
 
+## [1.5.9.0] - 2026-04-14
+
+### Added
+- **Health check endpoint** — `GET /healthz` returns live database status for load balancers and monitoring. Returns `{"status":"ok"}` when both DB connections are healthy, `{"status":"error"}` with a 503 when either is down. Unauthenticated and safe to ping at any rate.
+- **Android app** — the Android APK now builds in CI on every push and attaches to GitHub releases on tagged versions. URL validation (scheme check, case-insensitive, rejects bare `http://`) is extracted into a tested `UrlValidator` class.
+
+### Removed
+- **Desktop apps removed** — the Electron (`desktop/`) and Wails (`desktop-wails/`) app stubs have been deleted. Neither was production-ready or maintained.
+
+### Fixed
+- **Favicon and page title** — pages now show the thornotes favicon, and note names appear before "thornotes" in the browser tab title.
+- **Task list toolbar button** — the ballot-box character is replaced with plain `[ ]` to fix alignment in the formatting toolbar.
+
 ## [1.5.8.0] - 2026-04-10
 
 ### Fixed
