@@ -2,6 +2,12 @@
 
 All notable changes to thornotes are documented here.
 
+## [1.5.10.0] - 2026-04-18
+
+### Added
+- **Fine-grained folder permissions for API tokens** — API tokens can now be scoped to specific folders with per-folder `read` or `write` grants on top of the existing global scope. A token with any folder permissions becomes a whitelist: the MCP handler walks each target's ancestor chain and allows operations only when a grant covers it, with the nearest ancestor winning. Tokens with no folder permissions keep the legacy global-scope behavior. Notes inherit from their parent folder — there is no per-note control. Manage via the **Permissions** button in the Account modal or `PUT /api/v1/account/tokens/:id/permissions`. See the README for the full rule set.
+- **Journals setup guide in the README** — documents the journal feature, on-disk layout, the auto-applied `journal entry` tag, the UI flow, and the full `/api/v1/journals` endpoint surface.
+
 ## [1.5.9.0] - 2026-04-14
 
 ### Added
