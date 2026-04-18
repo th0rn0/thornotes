@@ -268,6 +268,50 @@ Maximum upload size: **10 MB**.
 
 Requires an active session (same auth as the browser app) and a valid CSRF token (`X-CSRF-Token` header, obtained from `GET /api/v1/csrf`).
 
+## Journals
+
+Journals turn thornotes into a daily writing tool. A journal is a named container (e.g. `Personal`, `Work`) that owns a predictable folder tree and a one-click shortcut to today's entry. Journals are a zero-config feature — no env vars or flags required.
+
+### What a journal is
+
+- A journal is just a name plus a root folder on disk with the same name.
+- Each entry is a normal `.md` note filed under `{journalName}/{year}/{month}/YYYY-MM-DD.md` — e.g. `Personal/2026/04/2026-04-18.md`.
+- Today's entry is auto-tagged with `journal entry` and the journal name, so you can find all entries with `find_notes_by_tag` or the tag filter in the UI.
+- The folder tree is materialised on first use, so entries remain accessible through the normal folder sidebar even without the journals UI.
+
+### Creating a journal (UI)
+
+1. In the sidebar, click the **⚙** (manage) button in the Journal section. If you have no journals yet, clicking **Today** opens the same modal.
+2. Type a name (e.g. `Personal`) and click **+ Add**. The root folder is created immediately.
+3. You can add as many journals as you like. When you have more than one, a dropdown appears next to the **Today** button so you can pick which journal the shortcut targets.
+
+### Opening today's entry
+
+Click **Today** in the sidebar. thornotes:
+
+1. Ensures the `{journal}/{year}/{month}/` folders exist.
+2. Looks up today's date in the user's local timezone (the browser sends its IANA timezone via the `tz` query param).
+3. Returns the existing entry if there is one, or creates a fresh `YYYY-MM-DD.md` note with the `journal entry` + journal-name tags.
+
+Clicking **Today** repeatedly on the same day always returns the same note — it is idempotent.
+
+### Removing a journal
+
+Removing a journal from the manage modal deletes only the journal *record*. The root folder, year/month folders, and every entry you have written are kept — they remain available in the normal folder tree, and you can re-create a journal with the same name later to reattach the shortcut.
+
+### API
+
+All endpoints require a session cookie (or a bearer token) and return JSON.
+
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| `GET`  | `/api/v1/journals` | List journals for the current user. |
+| `POST` | `/api/v1/journals` | Create a journal. Body: `{"name": "Personal"}`. Also creates the root folder. |
+| `DELETE` | `/api/v1/journals/:id` | Remove the journal record. Folder and notes are preserved. |
+| `GET`  | `/api/v1/journals/:id/today` | Return today's entry for the given journal, creating it if needed. Accepts optional `?tz=<IANA name>` (e.g. `Europe/London`); defaults to UTC. |
+
+`POST` and `DELETE` also require a CSRF token (`X-CSRF-Token` header, obtained from `GET /api/v1/csrf`) when called from the browser.
+
 ## LLM context endpoint
 
 `GET /api/v1/notes/context` returns all of your notes concatenated into a single markdown string — ready to paste into an LLM prompt as context.
