@@ -21,6 +21,7 @@ A self-hosted Markdown note-taking app with file-as-canonical storage. Every not
 - MCP server — full CRUD over notes and folders via 14 tools; read-only or read-write token scopes; works with Claude Desktop, Open WebUI, Cursor, and any MCP-compatible client
 - API tokens for programmatic access with read/write scope and optional per-folder permissions
 - Live sync — edits made directly to `.md` files on disk are detected and pushed to open browser tabs via SSE
+- Git-backed version history — opt-in; every save, delete, and folder rename becomes a commit so you can preview and restore any previous version
 - Multi-theme: Light, Dark, Catppuccin, Nord, Tokyo Night, Solarized — each with per-theme syntax highlighting tuned for that palette
 - **Markdown formatting toolbar** — bold, italic, heading, blockquote, ordered and unordered lists, link, table (with column-alignment formatter), undo/redo
 - **Right-click context menu** in the editor — bold, italic, blockquote, list, link, and table formatting available on selection
@@ -60,6 +61,7 @@ services:
       THORNOTES_NOTES_ROOT: "/data/notes"
       THORNOTES_ALLOW_REGISTRATION: "true"   # set to "false" after first user
       # THORNOTES_TRUSTED_PROXY: "172.16.0.0/12"  # uncomment if behind a proxy
+      # THORNOTES_ENABLE_GIT_HISTORY: "true"      # uncomment to record every save as a git commit
 
 volumes:
   thornotes-data:
@@ -339,6 +341,70 @@ All endpoints require a session cookie (or a bearer token) and return JSON.
 | `GET`  | `/api/v1/journals/:id/today` | Return today's entry for the given journal, creating it if needed. Accepts optional `?tz=<IANA name>` (e.g. `Europe/London`); defaults to UTC. |
 
 `POST` and `DELETE` also require a CSRF token (`X-CSRF-Token` header, obtained from `GET /api/v1/csrf`) when called from the browser.
+
+## Version history (git-backed)
+
+Every note save, every delete, and every folder rename becomes a git commit inside your notes directory. Open the **History** button in the editor to browse prior versions, preview any commit's content, and restore one with a single click.
+
+This feature is **off by default** — thornotes will not touch your notes directory with git unless you opt in.
+
+### Turn it on
+
+Set one of these at startup (not a runtime toggle — pick it up on boot):
+
+```sh
+# Docker
+docker run -d \
+  -v thornotes-data:/data \
+  -e THORNOTES_ENABLE_GIT_HISTORY=true \
+  -p 8080:8080 \
+  th0rn0/thornotes
+
+# docker-compose.yml
+environment:
+  THORNOTES_ENABLE_GIT_HISTORY: "true"
+
+# Bare binary
+./thornotes --enable-git-history
+```
+
+On first boot thornotes runs `git init` in `THORNOTES_NOTES_ROOT` (or opens an existing repo if one is already there), writes a minimal `.gitignore` for its own temp files, and sets a local `user.name=thornotes` / `user.email=thornotes@localhost` so commits work in a container with no global git config. The [`go-git`](https://github.com/go-git/go-git) library does all the work, so **you do not need the `git` CLI installed** on the host.
+
+### What gets committed
+
+| Action | Commit message |
+|--------|----------------|
+| Save a note (any content change) | `save: <path/to/note.md>` |
+| Delete a note | `delete: <path/to/note.md>` |
+| Rename a folder | `rename: <old> -> <new>` (moves every affected file) |
+
+Empty saves (same content as last commit) are skipped automatically. All commit operations are serialised by a mutex, so concurrent edits from multiple tabs can't race each other into a corrupted index.
+
+### Using it from the UI
+
+1. Open any note in the editor.
+2. Click **History** in the editor toolbar (top-right, next to Share).
+3. The left pane lists every commit touching this note, newest first.
+4. Click a commit — the right pane shows the note's content at that point in time.
+5. Click **Restore this version** to write it back as a new commit. The restore itself is recorded in history, so it's reversible.
+
+If you open the history modal without the feature enabled you'll see "Version history is not enabled on this server" — the button is always rendered so you know the hook exists.
+
+### Using it from the API
+
+```
+GET  /api/v1/notes/:id/history           # list commits (?limit=N, default 50)
+GET  /api/v1/notes/:id/history/:sha      # note content at that commit
+POST /api/v1/notes/:id/history/:sha/restore  # restore that version (CSRF-protected)
+```
+
+All three require a session cookie and return `501 Not Implemented` when the feature is off.
+
+### Caveats
+
+- **Disk growth.** Every save is a commit. Heavy editing over months adds up — a periodic `git gc` inside the notes directory keeps the repo compact. thornotes doesn't run gc for you.
+- **Bring-your-own repo.** If `THORNOTES_NOTES_ROOT` is already a git repository, thornotes reuses it — it won't re-init or touch your existing `user.name`/`user.email`. You can push it to a remote with the host's `git` CLI if you want off-box backups; thornotes itself never pushes.
+- **One linear history.** No branching, no merging, no rebases. Restoring an old version is a normal forward commit, not a `git reset`.
 
 ## LLM context endpoint
 

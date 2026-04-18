@@ -2,6 +2,11 @@
 
 All notable changes to thornotes are documented here.
 
+## [1.5.10.2] - 2026-04-18
+
+### Documentation
+- **Version history setup guide** — new README section covering how to enable `THORNOTES_ENABLE_GIT_HISTORY`, what happens on first boot (`git init`, `.gitignore`, local identity), what each action commits, the editor UI flow, the `/api/v1/notes/:id/history` endpoints, and disk/bring-your-own-repo caveats. The feature is also surfaced in the Features list and as a commented-out env var in the Docker Compose example.
+
 ## [1.5.10.1] - 2026-04-18
 
 ### Fixed
