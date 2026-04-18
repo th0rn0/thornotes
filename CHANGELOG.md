@@ -2,6 +2,11 @@
 
 All notable changes to thornotes are documented here.
 
+## [1.5.10.1] - 2026-04-18
+
+### Fixed
+- **Folder permissions picker was unusable** — the global `.modal select` rule was forcing the picker's per-folder permission dropdown to 100% width, collapsing the folder-name label to zero width and hiding every row's text. Folder names now render correctly, clicking a label toggles its checkbox, and the dropdown sits at its intrinsic width.
+
 ## [1.5.10.0] - 2026-04-18
 
 ### Added
