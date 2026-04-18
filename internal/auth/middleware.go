@@ -12,7 +12,10 @@ import (
 
 type contextKey string
 
-const userContextKey contextKey = "user"
+const (
+	userContextKey  contextKey = "user"
+	authzContextKey contextKey = "authz"
+)
 
 // SessionMiddleware validates the session cookie and injects the authenticated user into context.
 func (s *Service) SessionMiddleware() gin.HandlerFunc {
@@ -35,8 +38,10 @@ func (s *Service) SessionMiddleware() gin.HandlerFunc {
 			return
 		}
 
-		// Set user both ways so auth.UserFromContext still works.
+		// Set user both ways so auth.UserFromContext still works. Session
+		// auth has no per-folder scoping, so attach a session authz marker.
 		ctx := context.WithValue(c.Request.Context(), userContextKey, user)
+		ctx = context.WithValue(ctx, authzContextKey, SessionAuthz())
 		c.Request = c.Request.WithContext(ctx)
 		c.Set("user", user)
 		c.Next()
@@ -47,6 +52,13 @@ func (s *Service) SessionMiddleware() gin.HandlerFunc {
 func UserFromContext(ctx context.Context) *model.User {
 	u, _ := ctx.Value(userContextKey).(*model.User)
 	return u
+}
+
+// AuthzFromContext returns the TokenAuthz attached by the auth middleware,
+// or nil if none was attached (unauthenticated request).
+func AuthzFromContext(ctx context.Context) *TokenAuthz {
+	a, _ := ctx.Value(authzContextKey).(*TokenAuthz)
+	return a
 }
 
 // BearerMiddleware validates an Authorization: Bearer <token> header using the
@@ -76,6 +88,13 @@ func BearerMiddleware(tokens repository.APITokenRepository, users repository.Use
 			return
 		}
 
+		// Load folder-level permissions; empty = token runs under global scope.
+		perms, err := tokens.ListPermissions(c.Request.Context(), apiToken.ID)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "authz load failed"})
+			return
+		}
+
 		// Update last_used_at asynchronously — don't block the request.
 		go func() {
 			_ = tokens.TouchLastUsed(context.Background(), apiToken.ID)
@@ -86,6 +105,7 @@ func BearerMiddleware(tokens repository.APITokenRepository, users repository.Use
 
 		// Set user both ways so auth.UserFromContext still works.
 		ctx := context.WithValue(c.Request.Context(), userContextKey, user)
+		ctx = context.WithValue(ctx, authzContextKey, NewTokenAuthz(apiToken, perms))
 		c.Request = c.Request.WithContext(ctx)
 		c.Set("user", user)
 		c.Next()

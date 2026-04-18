@@ -107,6 +107,99 @@ func (r *APITokenRepo) TouchLastUsed(ctx context.Context, tokenID int64) error {
 	return nil
 }
 
+func (r *APITokenRepo) ListPermissions(ctx context.Context, tokenID int64) ([]model.TokenFolderPermission, error) {
+	const q = `
+		SELECT folder_id, permission
+		FROM api_token_folder_permissions
+		WHERE token_id = ?
+		ORDER BY folder_id IS NULL DESC, folder_id`
+	rows, err := r.readDB.QueryContext(ctx, q, tokenID)
+	if err != nil {
+		return nil, apperror.Internal("list token permissions", err)
+	}
+	defer rows.Close()
+
+	var out []model.TokenFolderPermission
+	for rows.Next() {
+		var p model.TokenFolderPermission
+		if err := rows.Scan(&p.FolderID, &p.Permission); err != nil {
+			return nil, apperror.Internal("scan token permission", err)
+		}
+		out = append(out, p)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, apperror.Internal("rows token permissions", err)
+	}
+	return out, nil
+}
+
+func (r *APITokenRepo) SetPermissions(ctx context.Context, userID, tokenID int64, perms []model.TokenFolderPermission) error {
+	for _, p := range perms {
+		if p.Permission != "read" && p.Permission != "write" {
+			return apperror.BadRequest("permission must be \"read\" or \"write\"")
+		}
+	}
+
+	tx, err := r.writeDB.BeginTx(ctx, nil)
+	if err != nil {
+		return apperror.Internal("begin set permissions", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// Confirm the token belongs to userID before mutating anything.
+	var ownerID int64
+	if err := tx.QueryRowContext(ctx,
+		`SELECT user_id FROM api_tokens WHERE id = ?`, tokenID,
+	).Scan(&ownerID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return apperror.ErrNotFound
+		}
+		return apperror.Internal("lookup token owner", err)
+	}
+	if ownerID != userID {
+		return apperror.ErrNotFound
+	}
+
+	// Verify every non-nil folder_id belongs to the same user.
+	for _, p := range perms {
+		if p.FolderID == nil {
+			continue
+		}
+		var folderOwner int64
+		if err := tx.QueryRowContext(ctx,
+			`SELECT user_id FROM folders WHERE id = ?`, *p.FolderID,
+		).Scan(&folderOwner); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return apperror.BadRequest("folder does not exist")
+			}
+			return apperror.Internal("lookup folder owner", err)
+		}
+		if folderOwner != userID {
+			return apperror.BadRequest("folder does not belong to user")
+		}
+	}
+
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM api_token_folder_permissions WHERE token_id = ?`, tokenID,
+	); err != nil {
+		return apperror.Internal("clear token permissions", err)
+	}
+
+	for _, p := range perms {
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO api_token_folder_permissions (token_id, folder_id, permission) VALUES (?, ?, ?)`,
+			tokenID, p.FolderID, p.Permission,
+		); err != nil {
+			return apperror.Internal("insert token permission", err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return apperror.Internal("commit set permissions", err)
+	}
+	return nil
+}
+
 // hashToken returns the hex-encoded SHA-256 hash of the raw token.
 func hashToken(raw string) string {
 	h := sha256.Sum256([]byte(raw))

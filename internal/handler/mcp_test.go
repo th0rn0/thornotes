@@ -1594,3 +1594,281 @@ func TestMCP_ToolsCall_CreateNote_WithContent_ContentUpdateError(t *testing.T) {
 	text := result["result"].(map[string]interface{})["content"].([]interface{})[0].(map[string]interface{})["text"].(string)
 	assert.Contains(t, text, "With Content")
 }
+
+// ─── Folder-scoped permissions ────────────────────────────────────────────────
+
+func TestMCP_Scoped_WriteInsideGrantedFolder(t *testing.T) {
+	// Build a folder, grant write, and verify create_note succeeds inside it.
+	tc := newTestClient(t)
+	tc.registerAndLogin(t)
+	workID := createFolderHelper(t, tc, "Work")
+
+	// Create a token and scope it to Work:write.
+	resp := tc.do(t, http.MethodPost, "/api/v1/account/tokens", map[string]interface{}{
+		"name":  "scoped",
+		"scope": "readwrite",
+	})
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusCreated, resp.StatusCode)
+	var created map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&created))
+	tokenID := int64(created["id"].(float64))
+	raw := created["token"].(string)
+
+	permResp := tc.do(t, http.MethodPut, fmt.Sprintf("/api/v1/account/tokens/%d/permissions", tokenID), map[string]interface{}{
+		"folder_permissions": []map[string]interface{}{
+			{"folder_id": workID, "permission": "write"},
+		},
+	})
+	defer permResp.Body.Close()
+	require.Equal(t, http.StatusOK, permResp.StatusCode)
+
+	m := &mcpClient{testClient: tc, bearerToken: raw}
+	sessionID := m.initialize(t)
+
+	// Write inside Work should succeed.
+	cr := m.post(t, rpc(1, "tools/call", map[string]interface{}{
+		"name": "create_note",
+		"arguments": map[string]interface{}{
+			"title":     "inside",
+			"folder_id": workID,
+		},
+	}), sessionID)
+	defer cr.Body.Close()
+	var cres map[string]interface{}
+	require.NoError(t, json.NewDecoder(cr.Body).Decode(&cres))
+	assert.Nil(t, cres["error"], "expected create inside scoped folder to succeed: %v", cres["error"])
+}
+
+func TestMCP_Scoped_WriteOutsideGrantedFolderIsDenied(t *testing.T) {
+	tc := newTestClient(t)
+	tc.registerAndLogin(t)
+	workID := createFolderHelper(t, tc, "Work")
+	privateID := createFolderHelper(t, tc, "Private")
+
+	resp := tc.do(t, http.MethodPost, "/api/v1/account/tokens", map[string]interface{}{
+		"name":  "scoped",
+		"scope": "readwrite",
+	})
+	defer resp.Body.Close()
+	var created map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&created))
+	tokenID := int64(created["id"].(float64))
+	raw := created["token"].(string)
+
+	permResp := tc.do(t, http.MethodPut, fmt.Sprintf("/api/v1/account/tokens/%d/permissions", tokenID), map[string]interface{}{
+		"folder_permissions": []map[string]interface{}{
+			{"folder_id": workID, "permission": "write"},
+		},
+	})
+	defer permResp.Body.Close()
+	require.Equal(t, http.StatusOK, permResp.StatusCode)
+
+	m := &mcpClient{testClient: tc, bearerToken: raw}
+	sessionID := m.initialize(t)
+
+	// Creating in Private must be rejected.
+	cr := m.post(t, rpc(1, "tools/call", map[string]interface{}{
+		"name": "create_note",
+		"arguments": map[string]interface{}{
+			"title":     "nope",
+			"folder_id": privateID,
+		},
+	}), sessionID)
+	defer cr.Body.Close()
+	var cres map[string]interface{}
+	require.NoError(t, json.NewDecoder(cr.Body).Decode(&cres))
+	errObj, _ := cres["error"].(map[string]interface{})
+	require.NotNil(t, errObj, "expected error when writing outside scope")
+	assert.Equal(t, float64(-32001), errObj["code"])
+	assert.Contains(t, errObj["message"].(string), "write access")
+
+	// Creating at root must also be rejected (no root grant).
+	rr := m.post(t, rpc(2, "tools/call", map[string]interface{}{
+		"name": "create_note",
+		"arguments": map[string]interface{}{
+			"title": "root-nope",
+		},
+	}), sessionID)
+	defer rr.Body.Close()
+	var rres map[string]interface{}
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&rres))
+	assert.NotNil(t, rres["error"])
+}
+
+func TestMCP_Scoped_ReadGrant_BlocksWriteButAllowsRead(t *testing.T) {
+	tc := newTestClient(t)
+	tc.registerAndLogin(t)
+	workID := createFolderHelper(t, tc, "Work")
+
+	// Seed a note in Work via session auth.
+	nResp := tc.do(t, http.MethodPost, "/api/v1/notes", map[string]interface{}{
+		"title":     "seed",
+		"folder_id": workID,
+	})
+	defer nResp.Body.Close()
+	require.Equal(t, http.StatusCreated, nResp.StatusCode)
+	var seed map[string]interface{}
+	require.NoError(t, json.NewDecoder(nResp.Body).Decode(&seed))
+	noteID := int64(seed["id"].(float64))
+
+	// Create a read-scoped token and grant read on Work.
+	resp := tc.do(t, http.MethodPost, "/api/v1/account/tokens", map[string]interface{}{
+		"name":  "ro",
+		"scope": "readwrite",
+	})
+	defer resp.Body.Close()
+	var created map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&created))
+	tokenID := int64(created["id"].(float64))
+	raw := created["token"].(string)
+
+	permResp := tc.do(t, http.MethodPut, fmt.Sprintf("/api/v1/account/tokens/%d/permissions", tokenID), map[string]interface{}{
+		"folder_permissions": []map[string]interface{}{
+			{"folder_id": workID, "permission": "read"},
+		},
+	})
+	defer permResp.Body.Close()
+	require.Equal(t, http.StatusOK, permResp.StatusCode)
+
+	m := &mcpClient{testClient: tc, bearerToken: raw}
+	sessionID := m.initialize(t)
+
+	// get_note must succeed.
+	gr := m.post(t, rpc(1, "tools/call", map[string]interface{}{
+		"name":      "get_note",
+		"arguments": map[string]interface{}{"id": noteID},
+	}), sessionID)
+	defer gr.Body.Close()
+	var gres map[string]interface{}
+	require.NoError(t, json.NewDecoder(gr.Body).Decode(&gres))
+	assert.Nil(t, gres["error"], "read-granted folder should allow get_note")
+
+	// update_note must be denied.
+	ur := m.post(t, rpc(2, "tools/call", map[string]interface{}{
+		"name": "update_note",
+		"arguments": map[string]interface{}{
+			"id":      noteID,
+			"content": "banned",
+		},
+	}), sessionID)
+	defer ur.Body.Close()
+	var ures map[string]interface{}
+	require.NoError(t, json.NewDecoder(ur.Body).Decode(&ures))
+	errObj, _ := ures["error"].(map[string]interface{})
+	require.NotNil(t, errObj)
+	assert.Equal(t, float64(-32001), errObj["code"])
+}
+
+func TestMCP_Scoped_ListNotesFilteredByGrant(t *testing.T) {
+	tc := newTestClient(t)
+	tc.registerAndLogin(t)
+	workID := createFolderHelper(t, tc, "Work")
+	privateID := createFolderHelper(t, tc, "Private")
+
+	// Seed one note per folder.
+	for _, fid := range []int64{workID, privateID} {
+		r := tc.do(t, http.MethodPost, "/api/v1/notes", map[string]interface{}{
+			"title":     fmt.Sprintf("note-%d", fid),
+			"folder_id": fid,
+		})
+		require.Equal(t, http.StatusCreated, r.StatusCode)
+		r.Body.Close()
+	}
+
+	// Token scoped to Work:read.
+	resp := tc.do(t, http.MethodPost, "/api/v1/account/tokens", map[string]interface{}{
+		"name":  "ro",
+		"scope": "readwrite",
+	})
+	defer resp.Body.Close()
+	var created map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&created))
+	tokenID := int64(created["id"].(float64))
+	raw := created["token"].(string)
+
+	permResp := tc.do(t, http.MethodPut, fmt.Sprintf("/api/v1/account/tokens/%d/permissions", tokenID), map[string]interface{}{
+		"folder_permissions": []map[string]interface{}{
+			{"folder_id": workID, "permission": "read"},
+		},
+	})
+	defer permResp.Body.Close()
+	require.Equal(t, http.StatusOK, permResp.StatusCode)
+
+	m := &mcpClient{testClient: tc, bearerToken: raw}
+	sessionID := m.initialize(t)
+
+	// list_notes without folder_id should return only the Work note.
+	lr := m.post(t, rpc(1, "tools/call", map[string]interface{}{
+		"name":      "list_notes",
+		"arguments": map[string]interface{}{},
+	}), sessionID)
+	defer lr.Body.Close()
+	var lres map[string]interface{}
+	require.NoError(t, json.NewDecoder(lr.Body).Decode(&lres))
+	require.Nil(t, lres["error"])
+	text := lres["result"].(map[string]interface{})["content"].([]interface{})[0].(map[string]interface{})["text"].(string)
+	assert.Contains(t, text, fmt.Sprintf("note-%d", workID))
+	assert.NotContains(t, text, fmt.Sprintf("note-%d", privateID), "private note must be hidden from scoped token")
+
+	// list_notes inside Private should be denied outright.
+	dr := m.post(t, rpc(2, "tools/call", map[string]interface{}{
+		"name":      "list_notes",
+		"arguments": map[string]interface{}{"folder_id": privateID},
+	}), sessionID)
+	defer dr.Body.Close()
+	var dres map[string]interface{}
+	require.NoError(t, json.NewDecoder(dr.Body).Decode(&dres))
+	assert.NotNil(t, dres["error"])
+}
+
+func TestMCP_Scoped_AncestorGrantCascades(t *testing.T) {
+	tc := newTestClient(t)
+	tc.registerAndLogin(t)
+
+	// Build Work/Projects and grant write on Work only.
+	workID := createFolderHelper(t, tc, "Work")
+	projResp := tc.do(t, http.MethodPost, "/api/v1/folders", map[string]interface{}{
+		"name":      "Projects",
+		"parent_id": workID,
+	})
+	require.Equal(t, http.StatusCreated, projResp.StatusCode)
+	var proj map[string]interface{}
+	require.NoError(t, json.NewDecoder(projResp.Body).Decode(&proj))
+	projResp.Body.Close()
+	projID := int64(proj["id"].(float64))
+
+	resp := tc.do(t, http.MethodPost, "/api/v1/account/tokens", map[string]interface{}{
+		"name":  "cascade",
+		"scope": "readwrite",
+	})
+	defer resp.Body.Close()
+	var created map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&created))
+	tokenID := int64(created["id"].(float64))
+	raw := created["token"].(string)
+
+	permResp := tc.do(t, http.MethodPut, fmt.Sprintf("/api/v1/account/tokens/%d/permissions", tokenID), map[string]interface{}{
+		"folder_permissions": []map[string]interface{}{
+			{"folder_id": workID, "permission": "write"},
+		},
+	})
+	defer permResp.Body.Close()
+	require.Equal(t, http.StatusOK, permResp.StatusCode)
+
+	m := &mcpClient{testClient: tc, bearerToken: raw}
+	sessionID := m.initialize(t)
+
+	// Writing inside the nested Projects folder must succeed via ancestor grant.
+	cr := m.post(t, rpc(1, "tools/call", map[string]interface{}{
+		"name": "create_note",
+		"arguments": map[string]interface{}{
+			"title":     "nested",
+			"folder_id": projID,
+		},
+	}), sessionID)
+	defer cr.Body.Close()
+	var cres map[string]interface{}
+	require.NoError(t, json.NewDecoder(cr.Body).Decode(&cres))
+	assert.Nil(t, cres["error"], "ancestor write grant should cascade to children")
+}

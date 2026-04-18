@@ -1200,6 +1200,118 @@ func TestAPITokenRepo_Delete_WrongUser(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestAPITokenRepo_SetAndListPermissions(t *testing.T) {
+	pool := openTestDB(t)
+	user := createUser(t, pool)
+	ctx := context.Background()
+	tokenRepo := NewAPITokenRepo(pool.ReadDB, pool.WriteDB)
+	folderRepo := NewFolderRepo(pool.ReadDB, pool.WriteDB)
+
+	token, err := tokenRepo.Create(ctx, user.ID, "scoped", "tn_scopedperms123456", "readwrite")
+	require.NoError(t, err)
+
+	f1, err := folderRepo.Create(ctx, user.ID, nil, "Work", "test-uuid-1/Work")
+	require.NoError(t, err)
+	f2, err := folderRepo.Create(ctx, user.ID, nil, "Journal", "test-uuid-1/Journal")
+	require.NoError(t, err)
+
+	// Initially empty.
+	perms, err := tokenRepo.ListPermissions(ctx, token.ID)
+	require.NoError(t, err)
+	assert.Empty(t, perms)
+
+	// Grant write on Work, read on Journal, and read on root.
+	err = tokenRepo.SetPermissions(ctx, user.ID, token.ID, []model.TokenFolderPermission{
+		{FolderID: &f1.ID, Permission: "write"},
+		{FolderID: &f2.ID, Permission: "read"},
+		{FolderID: nil, Permission: "read"},
+	})
+	require.NoError(t, err)
+
+	got, err := tokenRepo.ListPermissions(ctx, token.ID)
+	require.NoError(t, err)
+	require.Len(t, got, 3)
+
+	// Replace: keep only one entry; old rows must be gone.
+	err = tokenRepo.SetPermissions(ctx, user.ID, token.ID, []model.TokenFolderPermission{
+		{FolderID: &f1.ID, Permission: "read"},
+	})
+	require.NoError(t, err)
+	got, err = tokenRepo.ListPermissions(ctx, token.ID)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, "read", got[0].Permission)
+	require.NotNil(t, got[0].FolderID)
+	assert.Equal(t, f1.ID, *got[0].FolderID)
+
+	// Clear.
+	err = tokenRepo.SetPermissions(ctx, user.ID, token.ID, nil)
+	require.NoError(t, err)
+	got, err = tokenRepo.ListPermissions(ctx, token.ID)
+	require.NoError(t, err)
+	assert.Empty(t, got)
+}
+
+func TestAPITokenRepo_SetPermissions_RejectsInvalidPermission(t *testing.T) {
+	pool := openTestDB(t)
+	user := createUser(t, pool)
+	ctx := context.Background()
+	tokenRepo := NewAPITokenRepo(pool.ReadDB, pool.WriteDB)
+
+	token, err := tokenRepo.Create(ctx, user.ID, "scoped", "tn_badpermstok123abcd", "readwrite")
+	require.NoError(t, err)
+
+	err = tokenRepo.SetPermissions(ctx, user.ID, token.ID, []model.TokenFolderPermission{
+		{FolderID: nil, Permission: "admin"},
+	})
+	require.Error(t, err)
+	var appErr *apperror.AppError
+	require.ErrorAs(t, err, &appErr)
+	assert.Equal(t, 400, appErr.Code)
+}
+
+func TestAPITokenRepo_SetPermissions_RejectsCrossUserFolder(t *testing.T) {
+	pool := openTestDB(t)
+	user1 := createUser(t, pool)
+	userRepo := NewUserRepo(pool.WriteDB)
+	user2, err := userRepo.Create(context.Background(), "user2", "hash", "test-uuid-2")
+	require.NoError(t, err)
+	ctx := context.Background()
+
+	tokenRepo := NewAPITokenRepo(pool.ReadDB, pool.WriteDB)
+	folderRepo := NewFolderRepo(pool.ReadDB, pool.WriteDB)
+
+	token, err := tokenRepo.Create(ctx, user1.ID, "scoped", "tn_crossfoldertokenx1", "readwrite")
+	require.NoError(t, err)
+	theirFolder, err := folderRepo.Create(ctx, user2.ID, nil, "Theirs", "test-uuid-2/Theirs")
+	require.NoError(t, err)
+
+	err = tokenRepo.SetPermissions(ctx, user1.ID, token.ID, []model.TokenFolderPermission{
+		{FolderID: &theirFolder.ID, Permission: "read"},
+	})
+	require.Error(t, err)
+	var appErr *apperror.AppError
+	require.ErrorAs(t, err, &appErr)
+	assert.Equal(t, 400, appErr.Code)
+}
+
+func TestAPITokenRepo_SetPermissions_RejectsWrongOwner(t *testing.T) {
+	pool := openTestDB(t)
+	user1 := createUser(t, pool)
+	userRepo := NewUserRepo(pool.WriteDB)
+	user2, err := userRepo.Create(context.Background(), "user2", "hash", "test-uuid-2")
+	require.NoError(t, err)
+	ctx := context.Background()
+
+	tokenRepo := NewAPITokenRepo(pool.ReadDB, pool.WriteDB)
+	token, err := tokenRepo.Create(ctx, user1.ID, "theirs", "tn_ownerchecktokenabcd", "readwrite")
+	require.NoError(t, err)
+
+	err = tokenRepo.SetPermissions(ctx, user2.ID, token.ID, nil)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, apperror.ErrNotFound)
+}
+
 func TestAPITokenRepo_TouchLastUsed(t *testing.T) {
 	pool := openTestDB(t)
 	user := createUser(t, pool)

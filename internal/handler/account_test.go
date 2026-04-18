@@ -22,13 +22,17 @@ import (
 
 type fakeAPITokenRepo struct {
 	tokens []*model.APIToken
-	byRaw  map[string]*model.APIToken // raw token → stored token
+	byRaw  map[string]*model.APIToken                // raw token → stored token
+	perms  map[int64][]model.TokenFolderPermission   // token ID → permissions
 	nextID int64
 	err    error // if set, all mutating calls return this
 }
 
 func newFakeAPITokenRepo() *fakeAPITokenRepo {
-	return &fakeAPITokenRepo{byRaw: make(map[string]*model.APIToken)}
+	return &fakeAPITokenRepo{
+		byRaw: make(map[string]*model.APIToken),
+		perms: make(map[int64][]model.TokenFolderPermission),
+	}
 }
 
 func (r *fakeAPITokenRepo) Create(_ context.Context, userID int64, name, token, scope string) (*model.APIToken, error) {
@@ -89,6 +93,29 @@ func (r *fakeAPITokenRepo) Delete(_ context.Context, userID, tokenID int64) erro
 
 func (r *fakeAPITokenRepo) TouchLastUsed(_ context.Context, _ int64) error { return nil }
 
+func (r *fakeAPITokenRepo) ListPermissions(_ context.Context, tokenID int64) ([]model.TokenFolderPermission, error) {
+	if r.err != nil {
+		return nil, r.err
+	}
+	return append([]model.TokenFolderPermission(nil), r.perms[tokenID]...), nil
+}
+
+func (r *fakeAPITokenRepo) SetPermissions(_ context.Context, userID, tokenID int64, perms []model.TokenFolderPermission) error {
+	if r.err != nil {
+		return r.err
+	}
+	for _, t := range r.tokens {
+		if t.ID == tokenID && t.UserID == userID {
+			if r.perms == nil {
+				r.perms = make(map[int64][]model.TokenFolderPermission)
+			}
+			r.perms[tokenID] = append([]model.TokenFolderPermission(nil), perms...)
+			return nil
+		}
+	}
+	return apperror.NotFound("token not found")
+}
+
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 // newAccountRouter builds a gin router with the account handler wired up
@@ -106,6 +133,7 @@ func newAccountRouter(user *model.User, repo *fakeAPITokenRepo) *gin.Engine {
 	r.GET("/tokens", h.ListTokens)
 	r.POST("/tokens", h.CreateToken)
 	r.DELETE("/tokens/:id", h.DeleteToken)
+	r.PUT("/tokens/:id/permissions", h.UpdateTokenPermissions)
 	return r
 }
 
@@ -257,6 +285,119 @@ func TestDeleteToken_NotFound(t *testing.T) {
 	r.ServeHTTP(rr, req)
 
 	assert.Equal(t, http.StatusNotFound, rr.Code)
+}
+
+// ── Folder permissions ────────────────────────────────────────────────────────
+
+func TestCreateToken_WithFolderPermissions(t *testing.T) {
+	user := &model.User{ID: 1, Username: "alice"}
+	repo := newFakeAPITokenRepo()
+	r := newAccountRouter(user, repo)
+
+	// Note: fake repo's SetPermissions does not validate folder ownership —
+	// this test only checks that the handler plumbs the permissions through.
+	body := strings.NewReader(`{"name":"scoped","scope":"readwrite","folder_permissions":[{"folder_id":7,"permission":"write"}]}`)
+	req := httptest.NewRequest(http.MethodPost, "/tokens", body)
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	require.Equal(t, http.StatusCreated, rr.Code)
+	var resp map[string]interface{}
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &resp))
+	assert.Equal(t, "scoped", resp["name"])
+
+	perms := resp["folder_permissions"].([]interface{})
+	require.Len(t, perms, 1)
+}
+
+func TestCreateToken_ReadScopeRejectsWritePermission(t *testing.T) {
+	user := &model.User{ID: 1, Username: "alice"}
+	repo := newFakeAPITokenRepo()
+	r := newAccountRouter(user, repo)
+
+	body := strings.NewReader(`{"name":"x","scope":"read","folder_permissions":[{"folder_id":7,"permission":"write"}]}`)
+	req := httptest.NewRequest(http.MethodPost, "/tokens", body)
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+func TestCreateToken_InvalidPermissionString(t *testing.T) {
+	user := &model.User{ID: 1, Username: "alice"}
+	repo := newFakeAPITokenRepo()
+	r := newAccountRouter(user, repo)
+
+	body := strings.NewReader(`{"name":"x","scope":"readwrite","folder_permissions":[{"folder_id":7,"permission":"owner"}]}`)
+	req := httptest.NewRequest(http.MethodPost, "/tokens", body)
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+func TestUpdateTokenPermissions_Success(t *testing.T) {
+	user := &model.User{ID: 1, Username: "alice"}
+	repo := newFakeAPITokenRepo()
+	tok, err := repo.Create(context.Background(), 1, "t", "tn_permstest", "readwrite")
+	require.NoError(t, err)
+
+	r := newAccountRouter(user, repo)
+	body := strings.NewReader(`{"folder_permissions":[{"folder_id":null,"permission":"read"}]}`)
+	req := httptest.NewRequest(http.MethodPut, fmt.Sprintf("/tokens/%d/permissions", tok.ID), body)
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+	// Confirm the fake repo was actually mutated.
+	perms, err := repo.ListPermissions(context.Background(), tok.ID)
+	require.NoError(t, err)
+	require.Len(t, perms, 1)
+	assert.Nil(t, perms[0].FolderID)
+	assert.Equal(t, "read", perms[0].Permission)
+}
+
+func TestUpdateTokenPermissions_ClearsWhenEmpty(t *testing.T) {
+	user := &model.User{ID: 1, Username: "alice"}
+	repo := newFakeAPITokenRepo()
+	tok, err := repo.Create(context.Background(), 1, "t", "tn_clearperms", "readwrite")
+	require.NoError(t, err)
+	// Seed one permission.
+	_ = repo.perms
+	require.NoError(t, repo.SetPermissions(context.Background(), 1, tok.ID, []model.TokenFolderPermission{
+		{FolderID: nil, Permission: "read"},
+	}))
+
+	r := newAccountRouter(user, repo)
+	req := httptest.NewRequest(http.MethodPut, fmt.Sprintf("/tokens/%d/permissions", tok.ID), strings.NewReader(`{"folder_permissions":[]}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+	perms, err := repo.ListPermissions(context.Background(), tok.ID)
+	require.NoError(t, err)
+	assert.Empty(t, perms)
+}
+
+func TestUpdateTokenPermissions_InvalidPermission(t *testing.T) {
+	user := &model.User{ID: 1, Username: "alice"}
+	repo := newFakeAPITokenRepo()
+	tok, err := repo.Create(context.Background(), 1, "t", "tn_badperm", "readwrite")
+	require.NoError(t, err)
+
+	r := newAccountRouter(user, repo)
+	body := strings.NewReader(`{"folder_permissions":[{"folder_id":null,"permission":"admin"}]}`)
+	req := httptest.NewRequest(http.MethodPut, fmt.Sprintf("/tokens/%d/permissions", tok.ID), body)
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
 }
 
 func TestDeleteToken_RepoError(t *testing.T) {

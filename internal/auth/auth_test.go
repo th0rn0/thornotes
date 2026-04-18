@@ -472,6 +472,14 @@ func (r *fakeAPITokenRepo) Delete(_ context.Context, _, _ int64) error { return 
 
 func (r *fakeAPITokenRepo) TouchLastUsed(_ context.Context, _ int64) error { return nil }
 
+func (r *fakeAPITokenRepo) ListPermissions(_ context.Context, _ int64) ([]model.TokenFolderPermission, error) {
+	return nil, nil
+}
+
+func (r *fakeAPITokenRepo) SetPermissions(_ context.Context, _, _ int64, _ []model.TokenFolderPermission) error {
+	return nil
+}
+
 func TestBearerMiddleware_Valid(t *testing.T) {
 	userRepo := newFakeUserRepo()
 	tokenRepo := newFakeAPITokenRepo()

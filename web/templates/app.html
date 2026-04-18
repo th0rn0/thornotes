@@ -471,6 +471,15 @@ body {
 .token-scope-badge { font-size: 10px; padding: 2px 6px; border-radius: 3px; font-weight: 600; margin-left: 4px; }
 .token-scope-badge.read { background: #e8f4fd; color: #1a6fa8; }
 .token-scope-badge.readwrite { background: #e8f5e9; color: #2e7d32; }
+.token-scope-badge.scoped { background: #fff4e5; color: #a65d00; }
+.token-perms-details { margin-bottom: 12px; border: 1px solid var(--border-light); padding: 6px 10px; border-radius: 3px; }
+.token-perms-details summary { cursor: pointer; font-size: 12px; font-weight: 600; color: var(--text-mute); }
+.token-perms-hint { font-size: 11px; color: var(--text-mute); margin: 6px 0 8px; }
+.token-perms-list { max-height: 220px; overflow-y: auto; border: 1px solid var(--border-light); padding: 6px 8px; border-radius: 3px; font-size: 12px; }
+.token-perms-list .token-perms-row { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
+.token-perms-list .token-perms-row label { flex: 1; cursor: pointer; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.token-perms-list select { font-size: 11px; padding: 2px 4px; border: 1px solid var(--border); background: var(--bg-input); color: var(--text); }
+.token-perms-list .token-perms-row.disabled label { color: var(--text-dim); }
 .token-create-row { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
 .token-create-input { flex: 1; min-width: 140px; border: 1px solid var(--border); background: var(--bg-input); color: var(--text); padding: 7px 8px; font-size: 12px; }
 .token-create-select { border: 1px solid var(--border); background: var(--bg-input); color: var(--text); padding: 7px 8px; font-size: 12px; cursor: pointer; }
@@ -729,8 +738,33 @@ body {
       </select>
       <button id="create-token-btn" class="token-create-btn">+ New token</button>
     </div>
+    <details id="new-token-perms-details" class="token-perms-details">
+      <summary>Limit to specific folders (optional)</summary>
+      <p class="token-perms-hint">
+        When enabled the token can only access the folders you pick. Write access implies read.
+        Leave empty to use the global scope above across every folder.
+      </p>
+      <div class="token-perms-list" id="new-token-perms-list"></div>
+    </details>
     <div class="modal-actions">
       <button id="account-done-btn" class="primary">Done</button>
+    </div>
+  </div>
+</div>
+
+<!-- TOKEN PERMISSIONS MODAL -->
+<div class="modal-overlay" id="token-perms-modal">
+  <div class="modal" style="max-width:520px">
+    <h2>Edit token permissions</h2>
+    <p class="token-perms-hint">
+      Leave every folder unchecked to remove all folder-level permissions and fall back to the global scope.
+      Write access implies read.
+    </p>
+    <div class="token-perms-list" id="edit-token-perms-list"></div>
+    <div class="error" id="token-perms-error"></div>
+    <div class="modal-actions">
+      <button id="token-perms-cancel-btn">Cancel</button>
+      <button id="token-perms-save-btn" class="primary">Save</button>
     </div>
   </div>
 </div>

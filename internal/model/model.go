@@ -100,12 +100,25 @@ type HistoryEntryContent struct {
 }
 
 type APIToken struct {
-	ID          int64      `json:"id"`
-	UserID      int64      `json:"-"`
-	Name        string     `json:"name"`
-	Token       string     `json:"token,omitempty"` // only set on creation
-	Prefix      string     `json:"prefix"`          // first 8 chars for display
-	Scope       string     `json:"scope"`           // "readwrite" or "read"
-	CreatedAt   time.Time  `json:"created_at"`
-	LastUsedAt  *time.Time `json:"last_used_at"`
+	ID         int64      `json:"id"`
+	UserID     int64      `json:"-"`
+	Name       string     `json:"name"`
+	Token      string     `json:"token,omitempty"` // only set on creation
+	Prefix     string     `json:"prefix"`          // first 8 chars for display
+	Scope      string     `json:"scope"`           // "readwrite" or "read" — global fallback when no folder permissions exist
+	CreatedAt  time.Time  `json:"created_at"`
+	LastUsedAt *time.Time `json:"last_used_at"`
+	// FolderPermissions, when non-empty, constrains the token to the listed
+	// folders (whitelist mode). When empty, the token uses Scope globally.
+	// A nil FolderID represents a permission on the root (unfiled) area.
+	FolderPermissions []TokenFolderPermission `json:"folder_permissions,omitempty"`
+}
+
+// TokenFolderPermission grants a single API token permission on one folder.
+// FolderID is nil when the permission covers the root (unfiled) area.
+// Permission is "read" or "write"; "write" implies read. Permission on a
+// folder cascades to its descendants at enforcement time.
+type TokenFolderPermission struct {
+	FolderID   *int64 `json:"folder_id"`
+	Permission string `json:"permission"`
 }

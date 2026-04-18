@@ -1,0 +1,4 @@
+DROP INDEX IF EXISTS idx_api_token_folder_permissions_token;
+DROP INDEX IF EXISTS api_token_folder_permissions_root_unique;
+DROP INDEX IF EXISTS api_token_folder_permissions_folder_unique;
+DROP TABLE IF EXISTS api_token_folder_permissions;

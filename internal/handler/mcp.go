@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
@@ -15,6 +16,7 @@ import (
 	"github.com/th0rn0/thornotes/internal/auth"
 	"github.com/th0rn0/thornotes/internal/model"
 	"github.com/th0rn0/thornotes/internal/notes"
+	"github.com/th0rn0/thornotes/internal/repository"
 )
 
 const mcpProtocolVersion = "2025-03-26"
@@ -523,7 +525,7 @@ func (h *MCPHandler) handleToolsList(req rpcRequest) rpcResponse {
 	return rpcOK(req.ID, map[string]any{"tools": tools})
 }
 
-// writeTools is the set of tool names that require readwrite scope.
+// writeTools is the set of tool names that require write permission.
 var writeTools = map[string]bool{
 	"create_note":   true,
 	"update_note":   true,
@@ -536,6 +538,8 @@ var writeTools = map[string]bool{
 	"delete_folder": true,
 }
 
+const rpcErrForbidden = -32001
+
 func (h *MCPHandler) handleToolsCall(r *http.Request, req rpcRequest, user *model.User) rpcResponse {
 	var params struct {
 		Name      string          `json:"name"`
@@ -545,14 +549,54 @@ func (h *MCPHandler) handleToolsCall(r *http.Request, req rpcRequest, user *mode
 		return rpcErr(req.ID, rpcInvalidParams, "invalid params")
 	}
 
-	// Enforce scope: read-only tokens cannot call write tools.
+	authz := auth.AuthzFromContext(r.Context())
+	// Enforce global scope: read-only tokens can never call write tools,
+	// regardless of folder-level permissions. A token's Scope is the coarse
+	// gate; folder permissions narrow it further.
 	if writeTools[params.Name] && user.TokenScope == "read" {
-		return rpcErr(req.ID, -32001, "this API token is read-only — create a readwrite token to use "+params.Name)
+		return rpcErr(req.ID, rpcErrForbidden, "this API token is read-only — create a readwrite token to use "+params.Name)
 	}
 
 	userID := user.ID
 	userUUID := user.UUID
 	ctx := r.Context()
+	folders := h.notes.Folders()
+
+	// checkRead and checkWrite resolve the token's permission for a given
+	// folder id (nil = root). They return a rpcResponse error on deny, or
+	// an empty rpcResponse (zero value) on allow.
+	checkRead := func(folderID *int64) *rpcResponse {
+		if authz == nil {
+			return nil
+		}
+		ok, err := authz.CanRead(ctx, folders, userID, folderID)
+		if err != nil {
+			resp := rpcErr(req.ID, rpcInternalError, "authz check failed")
+			return &resp
+		}
+		if !ok {
+			resp := rpcErr(req.ID, rpcErrForbidden, "this API token does not have read access to the target folder")
+			return &resp
+		}
+		return nil
+	}
+	checkWrite := func(folderID *int64) *rpcResponse {
+		if authz == nil {
+			return nil
+		}
+		ok, err := authz.CanWrite(ctx, folders, userID, folderID)
+		if err != nil {
+			resp := rpcErr(req.ID, rpcInternalError, "authz check failed")
+			return &resp
+		}
+		if !ok {
+			resp := rpcErr(req.ID, rpcErrForbidden, "this API token does not have write access to the target folder")
+			return &resp
+		}
+		return nil
+	}
+	_ = checkRead
+	_ = checkWrite
 
 	switch params.Name {
 	case "search_notes":
@@ -566,6 +610,10 @@ func (h *MCPHandler) handleToolsCall(r *http.Request, req rpcRequest, user *mode
 		results, err := h.notes.Search(ctx, userID, args.Query, args.Tags)
 		if err != nil {
 			return rpcErr(req.ID, rpcInternalError, "search failed")
+		}
+		results, err = filterSearchResults(ctx, authz, folders, userID, h.notes, results)
+		if err != nil {
+			return rpcErr(req.ID, rpcInternalError, "authz filter failed")
 		}
 		text, _ := json.Marshal(results)
 		return rpcOK(req.ID, toolResult(string(text)))
@@ -581,6 +629,9 @@ func (h *MCPHandler) handleToolsCall(r *http.Request, req rpcRequest, user *mode
 		if err != nil {
 			return rpcErr(req.ID, rpcInternalError, errorString(err))
 		}
+		if resp := checkRead(note.FolderID); resp != nil {
+			return *resp
+		}
 		text, _ := json.Marshal(note)
 		return rpcOK(req.ID, toolResult(string(text)))
 
@@ -589,17 +640,24 @@ func (h *MCPHandler) handleToolsCall(r *http.Request, req rpcRequest, user *mode
 			FolderID *int64 `json:"folder_id"`
 		}
 		_ = json.Unmarshal(params.Arguments, &args)
-		var (
-			items []*model.NoteListItem
-			err   error
-		)
 		if args.FolderID != nil {
-			items, err = h.notes.ListNotes(ctx, userID, args.FolderID)
-		} else {
-			items, err = h.notes.ListAllNotes(ctx, userID)
+			if resp := checkRead(args.FolderID); resp != nil {
+				return *resp
+			}
+			items, err := h.notes.ListNotes(ctx, userID, args.FolderID)
+			if err != nil {
+				return rpcErr(req.ID, rpcInternalError, "list failed")
+			}
+			text, _ := json.Marshal(items)
+			return rpcOK(req.ID, toolResult(string(text)))
 		}
+		items, err := h.notes.ListAllNotes(ctx, userID)
 		if err != nil {
 			return rpcErr(req.ID, rpcInternalError, "list failed")
+		}
+		items, err = filterNoteListItems(ctx, authz, folders, userID, items)
+		if err != nil {
+			return rpcErr(req.ID, rpcInternalError, "authz filter failed")
 		}
 		text, _ := json.Marshal(items)
 		return rpcOK(req.ID, toolResult(string(text)))
@@ -616,6 +674,9 @@ func (h *MCPHandler) handleToolsCall(r *http.Request, req rpcRequest, user *mode
 		}
 		if args.Tags == nil {
 			args.Tags = []string{}
+		}
+		if resp := checkWrite(args.FolderID); resp != nil {
+			return *resp
 		}
 		note, err := h.notes.CreateNote(ctx, userID, userUUID, args.FolderID, args.Title, args.Tags)
 		if err != nil {
@@ -644,6 +705,9 @@ func (h *MCPHandler) handleToolsCall(r *http.Request, req rpcRequest, user *mode
 		if err != nil {
 			return rpcErr(req.ID, rpcInternalError, errorString(err))
 		}
+		if resp := checkWrite(note.FolderID); resp != nil {
+			return *resp
+		}
 		newHash, err := h.notes.UpdateNoteContent(ctx, userID, args.ID, args.Content, note.ContentHash)
 		if err != nil {
 			return rpcErr(req.ID, rpcInternalError, errorString(err))
@@ -654,11 +718,12 @@ func (h *MCPHandler) handleToolsCall(r *http.Request, req rpcRequest, user *mode
 		return rpcOK(req.ID, toolResult(string(text)))
 
 	case "list_folders":
-		folders, err := h.notes.FolderTree(ctx, userID)
+		tree, err := h.notes.FolderTree(ctx, userID)
 		if err != nil {
 			return rpcErr(req.ID, rpcInternalError, "list failed")
 		}
-		text, _ := json.Marshal(folders)
+		tree = filterFolderTree(authz, tree)
+		text, _ := json.Marshal(tree)
 		return rpcOK(req.ID, toolResult(string(text)))
 
 	case "find_folders":
@@ -668,11 +733,12 @@ func (h *MCPHandler) handleToolsCall(r *http.Request, req rpcRequest, user *mode
 		if err := json.Unmarshal(params.Arguments, &args); err != nil || args.Query == "" {
 			return rpcErr(req.ID, rpcInvalidParams, "query is required")
 		}
-		folders, err := h.notes.FindFoldersByName(ctx, userID, args.Query)
+		found, err := h.notes.FindFoldersByName(ctx, userID, args.Query)
 		if err != nil {
 			return rpcErr(req.ID, rpcInternalError, "search failed")
 		}
-		text, _ := json.Marshal(folders)
+		found = filterFolderTree(authz, found)
+		text, _ := json.Marshal(found)
 		return rpcOK(req.ID, toolResult(string(text)))
 
 	case "find_notes_by_tag":
@@ -686,6 +752,10 @@ func (h *MCPHandler) handleToolsCall(r *http.Request, req rpcRequest, user *mode
 		if err != nil {
 			return rpcErr(req.ID, rpcInternalError, "search failed")
 		}
+		items, err = filterNoteListItems(ctx, authz, folders, userID, items)
+		if err != nil {
+			return rpcErr(req.ID, rpcInternalError, "authz filter failed")
+		}
 		text, _ := json.Marshal(items)
 		return rpcOK(req.ID, toolResult(string(text)))
 
@@ -693,6 +763,30 @@ func (h *MCPHandler) handleToolsCall(r *http.Request, req rpcRequest, user *mode
 		tags, err := h.notes.ListAllTags(ctx, userID)
 		if err != nil {
 			return rpcErr(req.ID, rpcInternalError, "list failed")
+		}
+		// Only expose tags that appear on at least one readable note.
+		if authz != nil && authz.Scoped {
+			all, err := h.notes.ListAllNotes(ctx, userID)
+			if err != nil {
+				return rpcErr(req.ID, rpcInternalError, "list failed")
+			}
+			readable, err := filterNoteListItems(ctx, authz, folders, userID, all)
+			if err != nil {
+				return rpcErr(req.ID, rpcInternalError, "authz filter failed")
+			}
+			seen := make(map[string]struct{}, len(tags))
+			for _, n := range readable {
+				for _, t := range n.Tags {
+					seen[t] = struct{}{}
+				}
+			}
+			kept := make([]string, 0, len(tags))
+			for _, t := range tags {
+				if _, ok := seen[t]; ok {
+					kept = append(kept, t)
+				}
+			}
+			tags = kept
 		}
 		text, _ := json.Marshal(tags)
 		return rpcOK(req.ID, toolResult(string(text)))
@@ -712,6 +806,9 @@ func (h *MCPHandler) handleToolsCall(r *http.Request, req rpcRequest, user *mode
 		note, err := h.notes.GetNote(ctx, userID, args.ID)
 		if err != nil {
 			return rpcErr(req.ID, rpcInternalError, errorString(err))
+		}
+		if resp := checkWrite(note.FolderID); resp != nil {
+			return *resp
 		}
 		newTitle := note.Title
 		if args.Title != nil {
@@ -734,6 +831,16 @@ func (h *MCPHandler) handleToolsCall(r *http.Request, req rpcRequest, user *mode
 		if err := json.Unmarshal(params.Arguments, &args); err != nil || args.ID == 0 {
 			return rpcErr(req.ID, rpcInvalidParams, "id is required")
 		}
+		note, err := h.notes.GetNote(ctx, userID, args.ID)
+		if err != nil {
+			return rpcErr(req.ID, rpcInternalError, errorString(err))
+		}
+		if resp := checkWrite(note.FolderID); resp != nil {
+			return *resp
+		}
+		if resp := checkWrite(args.FolderID); resp != nil {
+			return *resp
+		}
 		if err := h.notes.MoveNote(ctx, userID, userUUID, args.ID, args.FolderID); err != nil {
 			return rpcErr(req.ID, rpcInternalError, errorString(err))
 		}
@@ -750,6 +857,13 @@ func (h *MCPHandler) handleToolsCall(r *http.Request, req rpcRequest, user *mode
 		if err := json.Unmarshal(params.Arguments, &args); err != nil || args.ID == 0 {
 			return rpcErr(req.ID, rpcInvalidParams, "id is required")
 		}
+		note, err := h.notes.GetNote(ctx, userID, args.ID)
+		if err != nil {
+			return rpcErr(req.ID, rpcInternalError, errorString(err))
+		}
+		if resp := checkWrite(note.FolderID); resp != nil {
+			return *resp
+		}
 		if err := h.notes.DeleteNote(ctx, userID, args.ID); err != nil {
 			return rpcErr(req.ID, rpcInternalError, errorString(err))
 		}
@@ -762,6 +876,9 @@ func (h *MCPHandler) handleToolsCall(r *http.Request, req rpcRequest, user *mode
 		}
 		if err := json.Unmarshal(params.Arguments, &args); err != nil || args.Name == "" {
 			return rpcErr(req.ID, rpcInvalidParams, "name is required")
+		}
+		if resp := checkWrite(args.ParentID); resp != nil {
+			return *resp
 		}
 		folder, err := h.notes.CreateFolder(ctx, userID, userUUID, args.ParentID, args.Name)
 		if err != nil {
@@ -778,6 +895,9 @@ func (h *MCPHandler) handleToolsCall(r *http.Request, req rpcRequest, user *mode
 		if err := json.Unmarshal(params.Arguments, &args); err != nil || args.ID == 0 || args.Name == "" {
 			return rpcErr(req.ID, rpcInvalidParams, "id and name are required")
 		}
+		if resp := checkWrite(&args.ID); resp != nil {
+			return *resp
+		}
 		if err := h.notes.RenameFolder(ctx, userID, userUUID, args.ID, args.Name); err != nil {
 			return rpcErr(req.ID, rpcInternalError, errorString(err))
 		}
@@ -790,6 +910,12 @@ func (h *MCPHandler) handleToolsCall(r *http.Request, req rpcRequest, user *mode
 		}
 		if err := json.Unmarshal(params.Arguments, &args); err != nil || args.ID == 0 {
 			return rpcErr(req.ID, rpcInvalidParams, "id is required")
+		}
+		if resp := checkWrite(&args.ID); resp != nil {
+			return *resp
+		}
+		if resp := checkWrite(args.ParentID); resp != nil {
+			return *resp
 		}
 		if err := h.notes.MoveFolder(ctx, userID, userUUID, args.ID, args.ParentID); err != nil {
 			return rpcErr(req.ID, rpcInternalError, errorString(err))
@@ -807,6 +933,9 @@ func (h *MCPHandler) handleToolsCall(r *http.Request, req rpcRequest, user *mode
 		if err := json.Unmarshal(params.Arguments, &args); err != nil || args.ID == 0 {
 			return rpcErr(req.ID, rpcInvalidParams, "id is required")
 		}
+		if resp := checkWrite(&args.ID); resp != nil {
+			return *resp
+		}
 		if err := h.notes.DeleteFolder(ctx, userID, args.ID); err != nil {
 			return rpcErr(req.ID, rpcInternalError, errorString(err))
 		}
@@ -818,9 +947,15 @@ func (h *MCPHandler) handleToolsCall(r *http.Request, req rpcRequest, user *mode
 }
 
 func (h *MCPHandler) handleResourcesList(r *http.Request, req rpcRequest, userID int64) rpcResponse {
-	items, err := h.notes.ListAllNotes(r.Context(), userID)
+	ctx := r.Context()
+	items, err := h.notes.ListAllNotes(ctx, userID)
 	if err != nil {
 		return rpcErr(req.ID, rpcInternalError, "list notes failed")
+	}
+	authz := auth.AuthzFromContext(ctx)
+	items, err = filterNoteListItems(ctx, authz, h.notes.Folders(), userID, items)
+	if err != nil {
+		return rpcErr(req.ID, rpcInternalError, "authz filter failed")
 	}
 	resources := make([]mcpResource, 0, len(items))
 	for _, item := range items {
@@ -860,9 +995,20 @@ func (h *MCPHandler) handleResourcesRead(r *http.Request, req rpcRequest, userID
 		id = id*10 + int64(c-'0')
 	}
 
-	note, err := h.notes.GetNote(r.Context(), userID, id)
+	ctx := r.Context()
+	note, err := h.notes.GetNote(ctx, userID, id)
 	if err != nil {
 		return rpcErr(req.ID, rpcInternalError, errorString(err))
+	}
+	authz := auth.AuthzFromContext(ctx)
+	if authz != nil {
+		ok, err := authz.CanRead(ctx, h.notes.Folders(), userID, note.FolderID)
+		if err != nil {
+			return rpcErr(req.ID, rpcInternalError, "authz check failed")
+		}
+		if !ok {
+			return rpcErr(req.ID, rpcErrForbidden, "this API token does not have read access to the target folder")
+		}
 	}
 	return rpcOK(req.ID, map[string]any{
 		"contents": []mcpTextContent{
@@ -945,4 +1091,125 @@ func isAppErr(err error, target **apperror.AppError) bool {
 		return true
 	}
 	return false
+}
+
+// ── Permission filtering helpers ──────────────────────────────────────────────
+
+// filterNoteListItems drops notes the token has no read access to. It caches
+// per-folder-id decisions so each folder is resolved at most once per call.
+func filterNoteListItems(
+	ctx context.Context,
+	authz *auth.TokenAuthz,
+	folders repository.FolderRepository,
+	userID int64,
+	items []*model.NoteListItem,
+) ([]*model.NoteListItem, error) {
+	if authz == nil || !authz.Scoped {
+		// Global scope already gated by token.Scope at the call site.
+		return items, nil
+	}
+	cache := map[int64]bool{} // folder_id → canRead
+	rootDecided, rootAllow := false, false
+
+	out := make([]*model.NoteListItem, 0, len(items))
+	for _, n := range items {
+		if n.FolderID == nil {
+			if !rootDecided {
+				ok, err := authz.CanRead(ctx, folders, userID, nil)
+				if err != nil {
+					return nil, err
+				}
+				rootDecided, rootAllow = true, ok
+			}
+			if rootAllow {
+				out = append(out, n)
+			}
+			continue
+		}
+		if allow, ok := cache[*n.FolderID]; ok {
+			if allow {
+				out = append(out, n)
+			}
+			continue
+		}
+		ok, err := authz.CanRead(ctx, folders, userID, n.FolderID)
+		if err != nil {
+			return nil, err
+		}
+		cache[*n.FolderID] = ok
+		if ok {
+			out = append(out, n)
+		}
+	}
+	return out, nil
+}
+
+// filterSearchResults drops search hits the token cannot read. It must load
+// each hit's folder_id (the SearchResult doesn't carry it directly), but
+// caches the per-folder decision.
+func filterSearchResults(
+	ctx context.Context,
+	authz *auth.TokenAuthz,
+	folders repository.FolderRepository,
+	userID int64,
+	notesSvc *notes.Service,
+	hits []*model.SearchResult,
+) ([]*model.SearchResult, error) {
+	if authz == nil || !authz.Scoped {
+		return hits, nil
+	}
+	cache := map[int64]bool{}
+	rootDecided, rootAllow := false, false
+	out := make([]*model.SearchResult, 0, len(hits))
+	for _, h := range hits {
+		note, err := notesSvc.GetNote(ctx, userID, h.NoteID)
+		if err != nil {
+			continue
+		}
+		if note.FolderID == nil {
+			if !rootDecided {
+				ok, err := authz.CanRead(ctx, folders, userID, nil)
+				if err != nil {
+					return nil, err
+				}
+				rootDecided, rootAllow = true, ok
+			}
+			if rootAllow {
+				out = append(out, h)
+			}
+			continue
+		}
+		if allow, ok := cache[*note.FolderID]; ok {
+			if allow {
+				out = append(out, h)
+			}
+			continue
+		}
+		ok, err := authz.CanRead(ctx, folders, userID, note.FolderID)
+		if err != nil {
+			return nil, err
+		}
+		cache[*note.FolderID] = ok
+		if ok {
+			out = append(out, h)
+		}
+	}
+	return out, nil
+}
+
+// filterFolderTree drops folders the token cannot read. Child folders whose
+// ancestor has a grant remain visible (FilterReadableFolderIDs resolves the
+// chain via the passed tree itself, not the repository).
+func filterFolderTree(authz *auth.TokenAuthz, tree []*model.FolderTreeItem) []*model.FolderTreeItem {
+	if authz == nil || !authz.Scoped {
+		return tree
+	}
+	readable, _ := authz.FilterReadableFolderIDs(tree)
+	out := make([]*model.FolderTreeItem, 0, len(tree))
+	for _, f := range tree {
+		if readable[f.ID] {
+			out = append(out, f)
+		}
+	}
+	return out
 }
