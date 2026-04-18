@@ -1420,6 +1420,7 @@ async function api(method, path, body) {
 
 // ── Account / API tokens ───────────────────────────────────────────────────
 let _newTokenValue = '';
+let _editingTokenId = null;
 
 async function showAccountModal() {
   const endpoint = location.origin + '/mcp';
@@ -1430,17 +1431,101 @@ async function showAccountModal() {
   document.getElementById('token-reveal-area').style.display = 'none';
   document.getElementById('new-token-name').value = '';
   _newTokenValue = '';
+  // Reset the create-form folder permissions picker.
+  const detailsEl = document.getElementById('new-token-perms-details');
+  if (detailsEl) detailsEl.open = false;
+  renderFolderPermsList('new-token-perms-list', []);
   // Show the modal immediately for instant feedback; tokens load async below.
   document.getElementById('account-modal').style.display = 'flex';
   await refreshTokenList();
+}
+
+// renderFolderPermsList paints a checkbox+select row per folder plus a "root"
+// row into containerId. Existing permissions are preselected so the control
+// round-trips without data loss.
+function renderFolderPermsList(containerId, existingPerms) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  const existing = new Map();
+  for (const p of existingPerms || []) {
+    const key = p.folder_id == null ? 'root' : String(p.folder_id);
+    existing.set(key, p.permission);
+  }
+
+  // Render root plus all folders, sorted by name so the list is stable.
+  const sortedFolders = (folders || []).slice().sort((a, b) => a.name.localeCompare(b.name));
+  const rows = [{ id: 'root', name: '/ (root, unfiled notes)' }]
+    .concat(sortedFolders.map(f => ({ id: String(f.id), name: buildFolderPath(f) })));
+
+  let html = '';
+  for (const row of rows) {
+    const saved = existing.get(row.id);
+    const checked = saved ? 'checked' : '';
+    const permValue = saved || 'read';
+    html += `<div class="token-perms-row">
+      <input type="checkbox" data-perm-row="${esc(row.id)}" ${checked}>
+      <label data-perm-label="${esc(row.id)}">${esc(row.name)}</label>
+      <select data-perm-select="${esc(row.id)}" ${saved ? '' : 'disabled'}>
+        <option value="read" ${permValue === 'read' ? 'selected' : ''}>read</option>
+        <option value="write" ${permValue === 'write' ? 'selected' : ''}>write</option>
+      </select>
+    </div>`;
+  }
+  el.innerHTML = html;
+
+  // Using onchange (not addEventListener) so re-rendering into the same
+  // container doesn't stack duplicate handlers.
+  el.onchange = function(e) {
+    if (e.target.matches('input[type="checkbox"][data-perm-row]')) {
+      const id = e.target.dataset.permRow;
+      const select = el.querySelector(`select[data-perm-select="${CSS.escape(id)}"]`);
+      if (select) select.disabled = !e.target.checked;
+    }
+  };
+}
+
+// buildFolderPath walks parent_id to render "Parent/Child" paths in the picker.
+function buildFolderPath(f) {
+  const segments = [f.name];
+  let pid = f.parent_id;
+  const guard = 64;
+  for (let i = 0; i < guard && pid != null; i++) {
+    const parent = folders.find(p => p.id === pid);
+    if (!parent) break;
+    segments.unshift(parent.name);
+    pid = parent.parent_id;
+  }
+  return segments.join(' / ');
+}
+
+// collectPermsFromList reads the current picker state and returns the
+// folder_permissions array to send to the API.
+function collectPermsFromList(containerId) {
+  const el = document.getElementById(containerId);
+  if (!el) return [];
+  const out = [];
+  el.querySelectorAll('input[type="checkbox"][data-perm-row]').forEach(cb => {
+    if (!cb.checked) return;
+    const id = cb.dataset.permRow;
+    const select = el.querySelector(`select[data-perm-select="${CSS.escape(id)}"]`);
+    const permission = select ? select.value : 'read';
+    out.push({
+      folder_id: id === 'root' ? null : Number(id),
+      permission,
+    });
+  });
+  return out;
 }
 
 function closeAccountModal() {
   document.getElementById('account-modal').style.display = 'none';
 }
 
+let _cachedTokens = [];
+
 async function refreshTokenList() {
   const tokens = await api('GET', '/api/v1/account/tokens').catch(() => []);
+  _cachedTokens = tokens || [];
   const el = document.getElementById('token-list');
   if (!tokens || tokens.length === 0) {
     el.innerHTML = '<div style="font-size:12px;color:#aaa;padding:6px 0;">No tokens yet.</div>';
@@ -1452,10 +1537,15 @@ async function refreshTokenList() {
     const used = t.last_used_at ? new Date(t.last_used_at).toLocaleDateString() : 'never';
     const scope = t.scope || 'readwrite';
     const scopeLabel = scope === 'read' ? 'Read only' : 'Read+Write';
+    const perms = t.folder_permissions || [];
+    const scopedBadge = perms.length > 0
+      ? `<span class="token-scope-badge scoped" title="Folder-scoped">${perms.length} folder${perms.length === 1 ? '' : 's'}</span>`
+      : '';
     html += `<div class="token-item">
-      <span class="token-name">${esc(t.name)}<span class="token-scope-badge ${esc(scope)}">${scopeLabel}</span></span>
+      <span class="token-name">${esc(t.name)}<span class="token-scope-badge ${esc(scope)}">${scopeLabel}</span>${scopedBadge}</span>
       <span class="token-prefix" title="Token prefix">${esc(t.prefix)}…</span>
       <span class="token-date">created ${created} · used ${used}</span>
+      <button class="token-revoke" data-action="edit-token-perms" data-token-id="${t.id}">Permissions</button>
       <button class="token-revoke" data-action="revoke-token" data-token-id="${t.id}">Revoke</button>
     </div>`;
   }
@@ -1465,15 +1555,45 @@ async function refreshTokenList() {
 async function createToken() {
   const name = document.getElementById('new-token-name').value.trim() || 'Default';
   const scope = document.getElementById('new-token-scope').value || 'readwrite';
+  const folder_permissions = collectPermsFromList('new-token-perms-list');
   try {
-    const token = await api('POST', '/api/v1/account/tokens', { name, scope });
+    const token = await api('POST', '/api/v1/account/tokens', { name, scope, folder_permissions });
     _newTokenValue = token.token;
     document.getElementById('token-reveal-value').textContent = token.token;
     document.getElementById('token-reveal-area').style.display = '';
     document.getElementById('new-token-name').value = '';
+    document.getElementById('new-token-perms-details').open = false;
+    renderFolderPermsList('new-token-perms-list', []);
     await refreshTokenList();
   } catch (e) {
     showNotification(e.message || 'Failed to create token', true);
+  }
+}
+
+function openTokenPermsModal(tokenId) {
+  const token = _cachedTokens.find(t => t.id === tokenId);
+  _editingTokenId = tokenId;
+  renderFolderPermsList('edit-token-perms-list', token ? (token.folder_permissions || []) : []);
+  document.getElementById('token-perms-error').textContent = '';
+  document.getElementById('token-perms-modal').style.display = 'flex';
+}
+
+function closeTokenPermsModal() {
+  document.getElementById('token-perms-modal').style.display = 'none';
+  _editingTokenId = null;
+}
+
+async function saveTokenPerms() {
+  if (_editingTokenId == null) return;
+  const folder_permissions = collectPermsFromList('edit-token-perms-list');
+  const errEl = document.getElementById('token-perms-error');
+  errEl.textContent = '';
+  try {
+    await api('PUT', `/api/v1/account/tokens/${_editingTokenId}/permissions`, { folder_permissions });
+    closeTokenPermsModal();
+    await refreshTokenList();
+  } catch (e) {
+    errEl.textContent = e.message || 'Failed to save permissions';
   }
 }
 
@@ -2020,11 +2140,18 @@ document.getElementById('folder-ctx-menu').addEventListener('click', async funct
 
 document.addEventListener('click', hideFolderCtxMenu);
 
-// Token list — event delegation for dynamically rendered revoke buttons
+// Token list — event delegation for dynamically rendered buttons
 document.getElementById('token-list').addEventListener('click', function(e) {
-  const btn = e.target.closest('[data-action="revoke-token"]');
-  if (btn) revokeToken(Number(btn.dataset.tokenId));
+  const revokeBtn = e.target.closest('[data-action="revoke-token"]');
+  if (revokeBtn) { revokeToken(Number(revokeBtn.dataset.tokenId)); return; }
+  const permsBtn = e.target.closest('[data-action="edit-token-perms"]');
+  if (permsBtn) openTokenPermsModal(Number(permsBtn.dataset.tokenId));
 });
+
+// Token permissions modal wiring.
+document.getElementById('token-perms-modal').addEventListener('click', function(e) { if (e.target === this) closeTokenPermsModal(); });
+document.getElementById('token-perms-cancel-btn').addEventListener('click', closeTokenPermsModal);
+document.getElementById('token-perms-save-btn').addEventListener('click', saveTokenPerms);
 
 // History modal
 document.getElementById('history-btn').addEventListener('click', openHistoryModal);

@@ -19,7 +19,7 @@ A self-hosted Markdown note-taking app with file-as-canonical storage. Every not
 - Tags
 - Shareable read-only note links
 - MCP server — full CRUD over notes and folders via 14 tools; read-only or read-write token scopes; works with Claude Desktop, Open WebUI, Cursor, and any MCP-compatible client
-- API tokens for programmatic access with scope control
+- API tokens for programmatic access with read/write scope and optional per-folder permissions
 - Live sync — edits made directly to `.md` files on disk are detected and pushed to open browser tabs via SSE
 - Multi-theme: Light, Dark, Catppuccin, Nord, Tokyo Night, Solarized — each with per-theme syntax highlighting tuned for that palette
 - **Markdown formatting toolbar** — bold, italic, heading, blockquote, ordered and unordered lists, link, table (with column-alignment formatter), undo/redo
@@ -182,6 +182,34 @@ thornotes implements the [MCP Streamable HTTP transport (2025-03-26)](https://sp
 All three endpoints require `Authorization: Bearer <token>`.
 
 **Token scopes:** When creating an API token you can choose **Read + Write** (default) or **Read only**. Read-only tokens can call all read tools but write tools return `403 Forbidden`.
+
+**Folder-scoped tokens:** On top of the global scope, an API token can be restricted to specific folders. In the **Account** modal expand *"Limit to specific folders"* when creating a token (or press *Permissions* on an existing token) and pick one or more folders with per-folder `read` or `write` access. Rules:
+
+- A token with **no folder permissions** behaves as before — its global scope applies everywhere.
+- A token with **one or more folder permissions** is a whitelist: the MCP handler denies access to every folder not covered by a grant.
+- Permissions **cascade to descendants**: a `write` grant on `Work` covers `Work/Projects` and `Work/Projects/Q3`, unless an inner folder carries its own (tighter) grant.
+- A grant on the root (the implicit "/" row) covers unfiled notes and acts as the fallback for folders with no direct grant.
+- Notes inherit from their folder — you cannot set permissions on individual notes.
+- `write` implies `read`. You cannot grant `write` on a token whose global scope is `read`.
+- Listings (`list_notes`, `list_folders`, `search_notes`, `list_tags`, `find_notes_by_tag`, `find_folders`, and the MCP `resources/list`) are automatically filtered so the client only sees allowed folders.
+
+Permissions can also be managed via the API:
+
+```bash
+# List tokens (includes folder_permissions on each)
+curl -b cookies.txt http://localhost:8080/api/v1/account/tokens
+
+# Replace the full set of folder permissions for a token
+curl -b cookies.txt -X PUT -H 'Content-Type: application/json' \
+     -H 'X-CSRF-Token: ...' \
+     -d '{"folder_permissions":[{"folder_id":42,"permission":"write"},{"folder_id":null,"permission":"read"}]}' \
+     http://localhost:8080/api/v1/account/tokens/<id>/permissions
+
+# Send an empty array to clear all folder permissions (revert to global scope)
+curl -b cookies.txt -X PUT -H 'Content-Type: application/json' \
+     -H 'X-CSRF-Token: ...' -d '{"folder_permissions":[]}' \
+     http://localhost:8080/api/v1/account/tokens/<id>/permissions
+```
 
 ### Available tools
 

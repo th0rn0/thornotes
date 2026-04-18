@@ -1180,3 +1180,66 @@ func TestMySQL_APITokenRepo_TouchLastUsed(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotNil(t, found.LastUsedAt)
 }
+
+func TestMySQL_APITokenRepo_SetAndListPermissions(t *testing.T) {
+	pool := openTestMySQL(t)
+	user := createMySQLUser(t, pool)
+	ctx := context.Background()
+	tokenRepo := NewAPITokenRepo(pool.WriteDB)
+	folderRepo := NewFolderRepo(pool.WriteDB)
+
+	token, err := tokenRepo.Create(ctx, user.ID, "scoped-mysql", "tn_mysqlscopedpermabc", "readwrite")
+	require.NoError(t, err)
+
+	f1, err := folderRepo.Create(ctx, user.ID, nil, "WorkMySQL", "test-uuid-1/WorkMySQL")
+	require.NoError(t, err)
+
+	require.NoError(t, tokenRepo.SetPermissions(ctx, user.ID, token.ID, []model.TokenFolderPermission{
+		{FolderID: &f1.ID, Permission: "write"},
+		{FolderID: nil, Permission: "read"},
+	}))
+
+	perms, err := tokenRepo.ListPermissions(ctx, token.ID)
+	require.NoError(t, err)
+	require.Len(t, perms, 2)
+
+	// Replace.
+	require.NoError(t, tokenRepo.SetPermissions(ctx, user.ID, token.ID, []model.TokenFolderPermission{
+		{FolderID: &f1.ID, Permission: "read"},
+	}))
+	perms, err = tokenRepo.ListPermissions(ctx, token.ID)
+	require.NoError(t, err)
+	require.Len(t, perms, 1)
+	assert.Equal(t, "read", perms[0].Permission)
+
+	// Clear.
+	require.NoError(t, tokenRepo.SetPermissions(ctx, user.ID, token.ID, nil))
+	perms, err = tokenRepo.ListPermissions(ctx, token.ID)
+	require.NoError(t, err)
+	assert.Empty(t, perms)
+}
+
+func TestMySQL_APITokenRepo_SetPermissions_RejectsCrossUserFolder(t *testing.T) {
+	pool := openTestMySQL(t)
+	user := createMySQLUser(t, pool)
+	ctx := context.Background()
+	userRepo := NewUserRepo(pool.WriteDB)
+	other, err := userRepo.Create(ctx, "mysql-other", "hash", "mysql-other-uuid")
+	require.NoError(t, err)
+
+	tokenRepo := NewAPITokenRepo(pool.WriteDB)
+	folderRepo := NewFolderRepo(pool.WriteDB)
+
+	token, err := tokenRepo.Create(ctx, user.ID, "mysql-cross", "tn_mysqlcrossperm1234", "readwrite")
+	require.NoError(t, err)
+	theirs, err := folderRepo.Create(ctx, other.ID, nil, "TheirsMySQL", "mysql-other-uuid/TheirsMySQL")
+	require.NoError(t, err)
+
+	err = tokenRepo.SetPermissions(ctx, user.ID, token.ID, []model.TokenFolderPermission{
+		{FolderID: &theirs.ID, Permission: "read"},
+	})
+	require.Error(t, err)
+	var appErr *apperror.AppError
+	require.ErrorAs(t, err, &appErr)
+	assert.Equal(t, 400, appErr.Code)
+}

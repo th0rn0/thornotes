@@ -146,6 +146,7 @@ func New(
 		account.GET("/tokens", accountH.ListTokens)
 		account.POST("/tokens", csrfMW, accountH.CreateToken)
 		account.DELETE("/tokens/:id", csrfMW, accountH.DeleteToken)
+		account.PUT("/tokens/:id/permissions", csrfMW, accountH.UpdateTokenPermissions)
 	}
 
 	// Import.

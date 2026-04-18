@@ -138,6 +138,12 @@ func (s *Service) FileStore() *FileStore {
 	return s.fs
 }
 
+// Folders returns the FolderRepository. Used by the MCP handler to walk
+// folder ancestor chains when resolving per-token permissions.
+func (s *Service) Folders() repository.FolderRepository {
+	return s.folders
+}
+
 // ptrEq reports whether two *int64 pointers point to equal values (or are both nil).
 func ptrEq(a, b *int64) bool {
 	if a == nil && b == nil {

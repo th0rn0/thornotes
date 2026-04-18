@@ -73,6 +73,13 @@ type APITokenRepository interface {
 	ListByUser(ctx context.Context, userID int64) ([]*model.APIToken, error)
 	Delete(ctx context.Context, userID, tokenID int64) error
 	TouchLastUsed(ctx context.Context, tokenID int64) error
+	// ListPermissions returns the per-folder permissions for a token. An empty
+	// slice means the token operates under its global Scope.
+	ListPermissions(ctx context.Context, tokenID int64) ([]model.TokenFolderPermission, error)
+	// SetPermissions replaces the full set of folder permissions for a token.
+	// It validates that every non-nil folder_id belongs to userID. Passing an
+	// empty slice removes all permissions (reverts the token to global scope).
+	SetPermissions(ctx context.Context, userID, tokenID int64, perms []model.TokenFolderPermission) error
 }
 
 type JournalRepository interface {
