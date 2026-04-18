@@ -477,8 +477,12 @@ body {
 .token-perms-hint { font-size: 11px; color: var(--text-mute); margin: 6px 0 8px; }
 .token-perms-list { max-height: 220px; overflow-y: auto; border: 1px solid var(--border-light); padding: 6px 8px; border-radius: 3px; font-size: 12px; }
 .token-perms-list .token-perms-row { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
-.token-perms-list .token-perms-row label { flex: 1; cursor: pointer; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.token-perms-list select { font-size: 11px; padding: 2px 4px; border: 1px solid var(--border); background: var(--bg-input); color: var(--text); }
+/* The global .modal label rule sets display:block + margin-bottom which
+   collapses the label to zero width inside this flex row. Reset both. */
+.token-perms-list .token-perms-row label { flex: 1 1 0; min-width: 0; display: block; margin-bottom: 0; font-size: 12px; cursor: pointer; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* The global .modal select rule sets width:100%, which steals all the space
+   from the label. Pin the select to its own intrinsic width. */
+.token-perms-list select { width: auto; flex: 0 0 auto; margin-bottom: 0; font-size: 11px; padding: 2px 4px; border: 1px solid var(--border); background: var(--bg-input); color: var(--text); }
 .token-perms-list .token-perms-row.disabled label { color: var(--text-dim); }
 .token-create-row { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
 .token-create-input { flex: 1; min-width: 140px; border: 1px solid var(--border); background: var(--bg-input); color: var(--text); padding: 7px 8px; font-size: 12px; }

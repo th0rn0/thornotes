@@ -1458,13 +1458,17 @@ function renderFolderPermsList(containerId, existingPerms) {
     .concat(sortedFolders.map(f => ({ id: String(f.id), name: buildFolderPath(f) })));
 
   let html = '';
+  // Unique suffix so the same container can be rendered twice on the page
+  // (create form + edit modal) without colliding checkbox IDs.
+  const idBase = containerId + '-';
   for (const row of rows) {
     const saved = existing.get(row.id);
     const checked = saved ? 'checked' : '';
     const permValue = saved || 'read';
+    const cbId = idBase + row.id;
     html += `<div class="token-perms-row">
-      <input type="checkbox" data-perm-row="${esc(row.id)}" ${checked}>
-      <label data-perm-label="${esc(row.id)}">${esc(row.name)}</label>
+      <input type="checkbox" id="${esc(cbId)}" data-perm-row="${esc(row.id)}" ${checked}>
+      <label for="${esc(cbId)}" data-perm-label="${esc(row.id)}">${esc(row.name)}</label>
       <select data-perm-select="${esc(row.id)}" ${saved ? '' : 'disabled'}>
         <option value="read" ${permValue === 'read' ? 'selected' : ''}>read</option>
         <option value="write" ${permValue === 'write' ? 'selected' : ''}>write</option>
