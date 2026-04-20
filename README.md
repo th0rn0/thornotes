@@ -62,6 +62,7 @@ services:
       THORNOTES_ALLOW_REGISTRATION: "true"   # set to "false" after first user
       # THORNOTES_TRUSTED_PROXY: "172.16.0.0/12"  # uncomment if behind a proxy
       # THORNOTES_ENABLE_GIT_HISTORY: "true"      # uncomment to record every save as a git commit
+      # THORNOTES_SEED_DEV: "true"                # dev only: create a 'dev' user with ~100 seeded notes
 
 volumes:
   thornotes-data:
@@ -142,6 +143,7 @@ All options are available as environment variables and CLI flags.
 | `THORNOTES_WATCH_INTERVAL` | `--watch-interval` | `30s` | How often to poll the notes directory for external file changes. Set to `0` to disable |
 | `THORNOTES_SKIP_RECONCILIATION` | `--skip-reconciliation` | `false` | Skip the startup hash-check scan (safe on trusted restarts with large note corpora) |
 | `THORNOTES_ENABLE_GIT_HISTORY` | `--enable-git-history` | `false` | Record every note save/delete as a git commit in the notes directory. Enables the history API (`GET /api/v1/notes/:id/history`, `GET /api/v1/notes/:id/history/:sha`, `POST /api/v1/notes/:id/history/:sha/restore`). Uses [go-git](https://github.com/go-git/go-git) — no git binary required. |
+| `THORNOTES_SEED_DEV` | `--seed-dev` | `false` | **Development only.** On startup, create a `dev` user (password `devpassword1`), a realistic folder tree, and ~100 seeded notes — but only if the `dev` user does not already exist. Idempotent. Never enable in production. |
 
 ## Running behind a reverse proxy
 

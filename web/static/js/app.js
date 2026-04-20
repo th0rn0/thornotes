@@ -1497,10 +1497,13 @@ function renderFolderPermsList(containerId, existingPerms) {
     existing.set(key, p.permission);
   }
 
-  // Render root plus all folders, sorted by name so the list is stable.
-  const sortedFolders = (folders || []).slice().sort((a, b) => a.name.localeCompare(b.name));
-  const rows = [{ id: 'root', name: '/ (root, unfiled notes)' }]
-    .concat(sortedFolders.map(f => ({ id: String(f.id), name: buildFolderPath(f) })));
+  // Build rendered path first, then sort by that path so the picker reads
+  // top-down alphabetically — "Work" appears before "Work / Projects" which
+  // appears before "Xylophone". Sorting by raw folder name (the old behavior)
+  // interleaved nested children with unrelated top-level folders.
+  const folderRows = (folders || []).map(f => ({ id: String(f.id), name: buildFolderPath(f) }));
+  folderRows.sort((a, b) => a.name.localeCompare(b.name));
+  const rows = [{ id: 'root', name: '/ (root, unfiled notes)' }].concat(folderRows);
 
   let html = '';
   // Unique suffix so the same container can be rendered twice on the page

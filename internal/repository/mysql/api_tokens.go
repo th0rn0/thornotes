@@ -126,12 +126,11 @@ func (r *APITokenRepo) SetScope(ctx context.Context, userID, tokenID int64, scop
 	if err != nil {
 		return apperror.Internal("update api token scope", err)
 	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return apperror.Internal("rows affected api token scope", err)
-	}
-	if n == 0 {
-		return apperror.ErrNotFound
+	if n, _ := res.RowsAffected(); n == 0 {
+		// MySQL RowsAffected returns "changed rows" by default, so a same-value
+		// UPDATE reports 0 even though the row exists. Verify before calling
+		// the token missing.
+		return r.ensureTokenOwned(ctx, userID, tokenID)
 	}
 	return nil
 }
@@ -146,11 +145,26 @@ func (r *APITokenRepo) SetName(ctx context.Context, userID, tokenID int64, name 
 	if err != nil {
 		return apperror.Internal("update api token name", err)
 	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return apperror.Internal("rows affected api token name", err)
+	if n, _ := res.RowsAffected(); n == 0 {
+		// Same no-op-update caveat as SetScope.
+		return r.ensureTokenOwned(ctx, userID, tokenID)
 	}
-	if n == 0 {
+	return nil
+}
+
+// ensureTokenOwned returns ErrNotFound iff no row for this (tokenID, userID)
+// pair exists. Used after an UPDATE that reported 0 rows affected to distinguish
+// "the row is missing" from "the value was unchanged so the driver reported no
+// change."
+func (r *APITokenRepo) ensureTokenOwned(ctx context.Context, userID, tokenID int64) error {
+	var exists bool
+	if err := r.db.QueryRowContext(ctx,
+		`SELECT EXISTS(SELECT 1 FROM api_tokens WHERE id = ? AND user_id = ?)`,
+		tokenID, userID,
+	).Scan(&exists); err != nil {
+		return apperror.Internal("verify api token exists", err)
+	}
+	if !exists {
 		return apperror.ErrNotFound
 	}
 	return nil

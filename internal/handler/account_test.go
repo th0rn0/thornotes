@@ -500,6 +500,32 @@ func TestUpdateTokenPermissions_ChangesName(t *testing.T) {
 	assert.Equal(t, "Claude Desktop", renamed.Name)
 }
 
+// Regression: submitting the edit modal without changing anything used to
+// return 404 on MySQL (RowsAffected=0 for no-op UPDATEs) and could hit the
+// same trap on SQLite for same-value updates. The repo layer now verifies
+// existence after a zero-row UPDATE before declaring the token missing.
+func TestUpdateTokenPermissions_SameValueIsNotNotFound(t *testing.T) {
+	user := &model.User{ID: 1, Username: "alice"}
+	repo := newFakeAPITokenRepo()
+	tok, err := repo.Create(context.Background(), 1, "Pinned", "tn_noop", "read")
+	require.NoError(t, err)
+
+	r := newAccountRouter(user, repo)
+	// Every field matches the current state — classic "open edit modal,
+	// click Save without touching anything."
+	body := strings.NewReader(`{"name":"Pinned","scope":"read","folder_permissions":[]}`)
+	req := httptest.NewRequest(http.MethodPut, fmt.Sprintf("/tokens/%d/permissions", tok.ID), body)
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	require.Equalf(t, http.StatusOK, rr.Code, "body=%s", rr.Body.String())
+	kept, err := repo.GetByToken(context.Background(), "tn_noop")
+	require.NoError(t, err)
+	assert.Equal(t, "Pinned", kept.Name)
+	assert.Equal(t, "read", kept.Scope)
+}
+
 func TestUpdateTokenPermissions_EmptyNameRejected(t *testing.T) {
 	user := &model.User{ID: 1, Username: "alice"}
 	repo := newFakeAPITokenRepo()

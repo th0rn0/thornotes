@@ -116,12 +116,12 @@ func (r *APITokenRepo) SetScope(ctx context.Context, userID, tokenID int64, scop
 	if err != nil {
 		return apperror.Internal("update api token scope", err)
 	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return apperror.Internal("rows affected api token scope", err)
-	}
-	if n == 0 {
-		return apperror.ErrNotFound
+	if n, _ := res.RowsAffected(); n == 0 {
+		// RowsAffected reports "changed rows" on MySQL by default (and can be
+		// 0 on SQLite too for same-value updates), so zero doesn't prove the
+		// row is missing. Verify existence before returning NotFound so that
+		// submitting the edit modal without touching scope isn't rejected.
+		return r.ensureTokenOwned(ctx, userID, tokenID)
 	}
 	return nil
 }
@@ -135,11 +135,26 @@ func (r *APITokenRepo) SetName(ctx context.Context, userID, tokenID int64, name 
 	if err != nil {
 		return apperror.Internal("update api token name", err)
 	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return apperror.Internal("rows affected api token name", err)
+	if n, _ := res.RowsAffected(); n == 0 {
+		// Same no-op-update caveat as SetScope.
+		return r.ensureTokenOwned(ctx, userID, tokenID)
 	}
-	if n == 0 {
+	return nil
+}
+
+// ensureTokenOwned returns ErrNotFound iff no row for this (tokenID, userID)
+// pair exists. Used after an UPDATE that reported 0 rows affected to distinguish
+// "the row is missing" from "the value was unchanged so the driver reported no
+// change."
+func (r *APITokenRepo) ensureTokenOwned(ctx context.Context, userID, tokenID int64) error {
+	var exists bool
+	if err := r.readDB.QueryRowContext(ctx,
+		`SELECT EXISTS(SELECT 1 FROM api_tokens WHERE id = ? AND user_id = ?)`,
+		tokenID, userID,
+	).Scan(&exists); err != nil {
+		return apperror.Internal("verify api token exists", err)
+	}
+	if !exists {
 		return apperror.ErrNotFound
 	}
 	return nil
