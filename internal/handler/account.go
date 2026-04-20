@@ -118,9 +118,10 @@ func (h *AccountHandler) CreateToken(c *gin.Context) {
 	c.JSON(http.StatusCreated, token)
 }
 
-// UpdateTokenPermissions replaces the folder permissions for a token.
-// Passing an empty folder_permissions array clears all per-folder permissions
-// and reverts the token to global-scope behavior.
+// UpdateTokenPermissions replaces the folder permissions for a token and,
+// optionally, its global scope. Passing an empty folder_permissions array
+// clears all per-folder permissions and reverts the token to global-scope
+// behavior. If scope is empty, the existing scope is left unchanged.
 func (h *AccountHandler) UpdateTokenPermissions(c *gin.Context) {
 	user := ginUser(c)
 	tokenID, err := ginParamInt64(c, "id")
@@ -130,15 +131,38 @@ func (h *AccountHandler) UpdateTokenPermissions(c *gin.Context) {
 	}
 
 	var body struct {
+		Scope             string                        `json:"scope"`
 		FolderPermissions []model.TokenFolderPermission `json:"folder_permissions"`
 	}
 	if err := readJSON(c, &body); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
 		return
 	}
+	if body.Scope != "" && body.Scope != "read" && body.Scope != "readwrite" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "scope must be \"read\" or \"readwrite\""})
+		return
+	}
 	for _, p := range body.FolderPermissions {
 		if p.Permission != "read" && p.Permission != "write" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "permission must be \"read\" or \"write\""})
+			return
+		}
+	}
+	// Mirror the create-time rule: a read-only token must not carry any
+	// folder-level write grants. Downgrading scope with stale write grants
+	// still on file would silently over-grant at enforcement time.
+	if body.Scope == "read" {
+		for _, p := range body.FolderPermissions {
+			if p.Permission == "write" {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "cannot grant write on a read-only token; set scope=\"readwrite\" first"})
+				return
+			}
+		}
+	}
+
+	if body.Scope != "" {
+		if err := h.tokens.SetScope(c.Request.Context(), user.ID, tokenID, body.Scope); err != nil {
+			writeError(c, err)
 			return
 		}
 	}
@@ -153,7 +177,11 @@ func (h *AccountHandler) UpdateTokenPermissions(c *gin.Context) {
 		writeError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"folder_permissions": perms})
+	resp := gin.H{"folder_permissions": perms}
+	if body.Scope != "" {
+		resp["scope"] = body.Scope
+	}
+	c.JSON(http.StatusOK, resp)
 }
 
 // DeleteToken revokes an API token by ID.

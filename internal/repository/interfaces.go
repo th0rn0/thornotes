@@ -80,6 +80,9 @@ type APITokenRepository interface {
 	// It validates that every non-nil folder_id belongs to userID. Passing an
 	// empty slice removes all permissions (reverts the token to global scope).
 	SetPermissions(ctx context.Context, userID, tokenID int64, perms []model.TokenFolderPermission) error
+	// SetScope updates the token's global read/write scope. Caller must pass
+	// "read" or "readwrite"; the repo enforces ownership.
+	SetScope(ctx context.Context, userID, tokenID int64, scope string) error
 }
 
 type JournalRepository interface {

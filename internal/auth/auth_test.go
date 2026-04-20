@@ -480,6 +480,10 @@ func (r *fakeAPITokenRepo) SetPermissions(_ context.Context, _, _ int64, _ []mod
 	return nil
 }
 
+func (r *fakeAPITokenRepo) SetScope(_ context.Context, _, _ int64, _ string) error {
+	return nil
+}
+
 func TestBearerMiddleware_Valid(t *testing.T) {
 	userRepo := newFakeUserRepo()
 	tokenRepo := newFakeAPITokenRepo()

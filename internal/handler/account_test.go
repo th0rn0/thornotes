@@ -116,6 +116,19 @@ func (r *fakeAPITokenRepo) SetPermissions(_ context.Context, userID, tokenID int
 	return apperror.NotFound("token not found")
 }
 
+func (r *fakeAPITokenRepo) SetScope(_ context.Context, userID, tokenID int64, scope string) error {
+	if r.err != nil {
+		return r.err
+	}
+	for _, t := range r.tokens {
+		if t.ID == tokenID && t.UserID == userID {
+			t.Scope = scope
+			return nil
+		}
+	}
+	return apperror.NotFound("token not found")
+}
+
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 // newAccountRouter builds a gin router with the account handler wired up
@@ -382,6 +395,77 @@ func TestUpdateTokenPermissions_ClearsWhenEmpty(t *testing.T) {
 	perms, err := repo.ListPermissions(context.Background(), tok.ID)
 	require.NoError(t, err)
 	assert.Empty(t, perms)
+}
+
+func TestUpdateTokenPermissions_ChangesScope(t *testing.T) {
+	user := &model.User{ID: 1, Username: "alice"}
+	repo := newFakeAPITokenRepo()
+	tok, err := repo.Create(context.Background(), 1, "t", "tn_scopechange", "readwrite")
+	require.NoError(t, err)
+
+	r := newAccountRouter(user, repo)
+	body := strings.NewReader(`{"scope":"read","folder_permissions":[]}`)
+	req := httptest.NewRequest(http.MethodPut, fmt.Sprintf("/tokens/%d/permissions", tok.ID), body)
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+	// The stored token should have the new scope.
+	updated, err := repo.GetByToken(context.Background(), "tn_scopechange")
+	require.NoError(t, err)
+	assert.Equal(t, "read", updated.Scope)
+}
+
+func TestUpdateTokenPermissions_RejectsInvalidScope(t *testing.T) {
+	user := &model.User{ID: 1, Username: "alice"}
+	repo := newFakeAPITokenRepo()
+	tok, err := repo.Create(context.Background(), 1, "t", "tn_badscope", "readwrite")
+	require.NoError(t, err)
+
+	r := newAccountRouter(user, repo)
+	body := strings.NewReader(`{"scope":"owner","folder_permissions":[]}`)
+	req := httptest.NewRequest(http.MethodPut, fmt.Sprintf("/tokens/%d/permissions", tok.ID), body)
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+func TestUpdateTokenPermissions_ReadScopeRejectsWriteFolderGrant(t *testing.T) {
+	user := &model.User{ID: 1, Username: "alice"}
+	repo := newFakeAPITokenRepo()
+	tok, err := repo.Create(context.Background(), 1, "t", "tn_downgrade", "readwrite")
+	require.NoError(t, err)
+
+	r := newAccountRouter(user, repo)
+	body := strings.NewReader(`{"scope":"read","folder_permissions":[{"folder_id":9,"permission":"write"}]}`)
+	req := httptest.NewRequest(http.MethodPut, fmt.Sprintf("/tokens/%d/permissions", tok.ID), body)
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+func TestUpdateTokenPermissions_OmittedScopeKeepsExisting(t *testing.T) {
+	user := &model.User{ID: 1, Username: "alice"}
+	repo := newFakeAPITokenRepo()
+	tok, err := repo.Create(context.Background(), 1, "t", "tn_keepscope", "read")
+	require.NoError(t, err)
+
+	r := newAccountRouter(user, repo)
+	body := strings.NewReader(`{"folder_permissions":[]}`)
+	req := httptest.NewRequest(http.MethodPut, fmt.Sprintf("/tokens/%d/permissions", tok.ID), body)
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+	kept, err := repo.GetByToken(context.Background(), "tn_keepscope")
+	require.NoError(t, err)
+	assert.Equal(t, "read", kept.Scope)
 }
 
 func TestUpdateTokenPermissions_InvalidPermission(t *testing.T) {

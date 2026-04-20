@@ -185,7 +185,7 @@ All three endpoints require `Authorization: Bearer <token>`.
 
 **Token scopes:** When creating an API token you can choose **Read + Write** (default) or **Read only**. Read-only tokens can call all read tools but write tools return `403 Forbidden`.
 
-**Folder-scoped tokens:** On top of the global scope, an API token can be restricted to specific folders. In the **Account** modal expand *"Limit to specific folders"* when creating a token (or press *Permissions* on an existing token) and pick one or more folders with per-folder `read` or `write` access. Rules:
+**Folder-scoped tokens:** On top of the global scope, an API token can be restricted to specific folders. In the **Account** modal expand *"Limit to specific folders"* when creating a token (or press *Permissions* on an existing token) and pick one or more folders with per-folder `read` or `write` access. The **Permissions** modal also lets you flip the token's global scope between Read only and Read + Write without regenerating the token. Rules:
 
 - A token with **no folder permissions** behaves as before — its global scope applies everywhere.
 - A token with **one or more folder permissions** is a whitelist: the MCP handler denies access to every folder not covered by a grant.
@@ -201,13 +201,15 @@ Permissions can also be managed via the API:
 # List tokens (includes folder_permissions on each)
 curl -b cookies.txt http://localhost:8080/api/v1/account/tokens
 
-# Replace the full set of folder permissions for a token
+# Replace the full set of folder permissions for a token, and optionally change
+# its global scope in the same call. Omit "scope" to leave it unchanged.
 curl -b cookies.txt -X PUT -H 'Content-Type: application/json' \
      -H 'X-CSRF-Token: ...' \
-     -d '{"folder_permissions":[{"folder_id":42,"permission":"write"},{"folder_id":null,"permission":"read"}]}' \
+     -d '{"scope":"readwrite","folder_permissions":[{"folder_id":42,"permission":"write"},{"folder_id":null,"permission":"read"}]}' \
      http://localhost:8080/api/v1/account/tokens/<id>/permissions
 
-# Send an empty array to clear all folder permissions (revert to global scope)
+# Send an empty folder_permissions array to clear all folder permissions
+# (revert to global scope). "scope" is still optional here.
 curl -b cookies.txt -X PUT -H 'Content-Type: application/json' \
      -H 'X-CSRF-Token: ...' -d '{"folder_permissions":[]}' \
      http://localhost:8080/api/v1/account/tokens/<id>/permissions

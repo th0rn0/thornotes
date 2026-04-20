@@ -107,6 +107,25 @@ func (r *APITokenRepo) TouchLastUsed(ctx context.Context, tokenID int64) error {
 	return nil
 }
 
+func (r *APITokenRepo) SetScope(ctx context.Context, userID, tokenID int64, scope string) error {
+	if scope != "read" && scope != "readwrite" {
+		return apperror.BadRequest("scope must be \"read\" or \"readwrite\"")
+	}
+	const q = `UPDATE api_tokens SET scope = ? WHERE id = ? AND user_id = ?`
+	res, err := r.writeDB.ExecContext(ctx, q, scope, tokenID, userID)
+	if err != nil {
+		return apperror.Internal("update api token scope", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return apperror.Internal("rows affected api token scope", err)
+	}
+	if n == 0 {
+		return apperror.ErrNotFound
+	}
+	return nil
+}
+
 func (r *APITokenRepo) ListPermissions(ctx context.Context, tokenID int64) ([]model.TokenFolderPermission, error) {
 	const q = `
 		SELECT folder_id, permission

@@ -760,6 +760,11 @@ body {
 <div class="modal-overlay" id="token-perms-modal">
   <div class="modal" style="max-width:520px">
     <h2>Edit token permissions</h2>
+    <label for="edit-token-scope" class="token-perms-hint" style="display:block;margin-bottom:4px;">Global access</label>
+    <select id="edit-token-scope" class="token-create-select" style="margin-bottom:12px;">
+      <option value="readwrite">Read + Write</option>
+      <option value="read">Read only</option>
+    </select>
     <p class="token-perms-hint">
       Leave every folder unchecked to remove all folder-level permissions and fall back to the global scope.
       Write access implies read.

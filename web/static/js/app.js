@@ -1577,6 +1577,8 @@ async function createToken() {
 function openTokenPermsModal(tokenId) {
   const token = _cachedTokens.find(t => t.id === tokenId);
   _editingTokenId = tokenId;
+  const scopeSel = document.getElementById('edit-token-scope');
+  if (scopeSel) scopeSel.value = (token && token.scope) || 'readwrite';
   renderFolderPermsList('edit-token-perms-list', token ? (token.folder_permissions || []) : []);
   document.getElementById('token-perms-error').textContent = '';
   document.getElementById('token-perms-modal').style.display = 'flex';
@@ -1590,10 +1592,11 @@ function closeTokenPermsModal() {
 async function saveTokenPerms() {
   if (_editingTokenId == null) return;
   const folder_permissions = collectPermsFromList('edit-token-perms-list');
+  const scope = document.getElementById('edit-token-scope').value || 'readwrite';
   const errEl = document.getElementById('token-perms-error');
   errEl.textContent = '';
   try {
-    await api('PUT', `/api/v1/account/tokens/${_editingTokenId}/permissions`, { folder_permissions });
+    await api('PUT', `/api/v1/account/tokens/${_editingTokenId}/permissions`, { scope, folder_permissions });
     closeTokenPermsModal();
     await refreshTokenList();
   } catch (e) {
