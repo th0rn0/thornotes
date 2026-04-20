@@ -39,10 +39,13 @@ func TestAppTemplate_SidebarCollapseArtifacts(t *testing.T) {
 		name   string
 		needle string
 	}{
-		// Markup — the footer button with the id the JS binds to.
+		// Markup — the header button with the id the JS binds to.
 		{"sidebar collapse button id", `id="sidebar-collapse-btn"`},
 		{"sidebar collapse button class", `class="sidebar-collapse-btn"`},
 		{"sidebar element id", `id="sidebar"`},
+		// The collapse button sits in a dedicated header row at the very top
+		// of the sidebar — NOT inside the footer alongside the GitHub link.
+		{"sidebar-header wraps the button", `<div class="sidebar-header">`},
 		// The topbar hamburger is still in the DOM (mobile needs it) but its
 		// default display must be 'none' so the desktop topbar looks as it
 		// did before the collapse feature was added.
@@ -57,10 +60,12 @@ func TestAppTemplate_SidebarCollapseArtifacts(t *testing.T) {
 		// Sections hidden in rail mode.
 		{"rail hides sidebar-toolbar", `.sidebar.collapsed .sidebar-toolbar`},
 		{"rail hides tree", `.sidebar.collapsed .tree`},
-		{"rail hides github link text", `.sidebar.collapsed .sidebar-github-link`},
+		{"rail hides sidebar-footer (incl. github link)", `.sidebar.collapsed .sidebar-footer`},
+		// The header stays visible in the rail so the toggle remains reachable.
+		{"rail keeps header visible", `.sidebar.collapsed .sidebar-header`},
 		// Mobile override — rail CSS doesn't apply on phones.
 		{"mobile override keeps full sidebar", `.sidebar.collapsed { width: 220px`},
-		{"mobile override hides footer collapse btn", `.sidebar-collapse-btn { display: none; }`},
+		{"mobile override hides header collapse btn", `.sidebar-collapse-btn { display: none; }`},
 	}
 	for _, tc := range cases {
 		if !strings.Contains(out, tc.needle) {
