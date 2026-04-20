@@ -139,16 +139,27 @@ function showApp() {
   // Load auto-collapse setting
   const acToggle = document.getElementById('auto-collapse-toggle');
   if (acToggle) acToggle.checked = localStorage.getItem('autoCollapse') !== 'false';
+  restoreSidebarCollapse();
   connectEventSource();
 }
 
-// ── Mobile sidebar ─────────────────────────────────────────────────────────
+// ── Sidebar toggle ─────────────────────────────────────────────────────────
+// On desktop the hamburger collapses the sidebar to zero width and the state
+// persists in localStorage. On mobile it toggles the off-canvas drawer, which
+// is session-only — remembering "collapsed" on mobile would hide the only way
+// to navigate back in.
 function toggleSidebar() {
   const sidebar = document.getElementById('sidebar');
-  const overlay = document.getElementById('sidebar-overlay');
-  const isOpen = sidebar.classList.contains('mobile-open');
-  sidebar.classList.toggle('mobile-open', !isOpen);
-  overlay.classList.toggle('active', !isOpen);
+  if (isMobile()) {
+    const overlay = document.getElementById('sidebar-overlay');
+    const isOpen = sidebar.classList.contains('mobile-open');
+    sidebar.classList.toggle('mobile-open', !isOpen);
+    overlay.classList.toggle('active', !isOpen);
+    return;
+  }
+  const willCollapse = !sidebar.classList.contains('collapsed');
+  sidebar.classList.toggle('collapsed', willCollapse);
+  try { localStorage.setItem('sidebarCollapsed', willCollapse ? 'true' : 'false'); } catch (e) {}
 }
 
 function closeSidebar() {
@@ -158,6 +169,17 @@ function closeSidebar() {
 
 function isMobile() {
   return window.matchMedia('(max-width: 640px)').matches;
+}
+
+// Restore the saved desktop-collapsed state on app load. Called from showApp()
+// once the sidebar element is actually displayed.
+function restoreSidebarCollapse() {
+  if (isMobile()) return;
+  let saved = null;
+  try { saved = localStorage.getItem('sidebarCollapsed'); } catch (e) {}
+  if (saved === 'true') {
+    document.getElementById('sidebar').classList.add('collapsed');
+  }
 }
 
 // ── Disk-change SSE ────────────────────────────────────────────────────────

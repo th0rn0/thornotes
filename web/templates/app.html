@@ -162,9 +162,15 @@ body {
 .topbar .logo img { display: block; border-radius: 4px; flex-shrink: 0; }
 .main { display: flex; flex: 1; overflow: hidden; position: relative; }
 
-/* MOBILE TOPBAR MENU BUTTON */
+/* Desktop collapse transition — mobile overrides with its own left-slide animation. */
+.sidebar { transition: width 0.15s ease, border-right-width 0.15s ease; }
+.sidebar.collapsed { width: 0; border-right-width: 0; }
+
+/* TOPBAR MENU BUTTON — visible on both desktop (collapse toggle) and mobile (off-canvas drawer). */
 .topbar-menu-btn {
-  display: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   background: none;
   border: none;
   font-size: 18px;
@@ -176,6 +182,7 @@ body {
   line-height: 1;
   flex-shrink: 0;
 }
+.topbar-menu-btn:hover { background: var(--bg-hover); }
 
 /* USER MENU DROPDOWN */
 .user-menu { position: relative; flex-shrink: 0; }
@@ -496,9 +503,11 @@ body {
 
 /* ── RESPONSIVE / MOBILE ──────────────────────────────────────────────────── */
 @media (max-width: 640px) {
-  /* Show hamburger, hide desktop-only topbar items */
-  .topbar-menu-btn { display: flex; align-items: center; justify-content: center; }
+  /* Hamburger is already visible globally; hide desktop-only topbar items. */
   .toggle-label { display: none; }
+  /* Undo desktop collapse behavior — mobile uses its own off-canvas animation. */
+  .sidebar { transition: left 0.22s ease; }
+  .sidebar.collapsed { width: 220px; border-right-width: 1px; }
 
   /* Off-canvas sidebar — slides in from left */
   .sidebar {
