@@ -1872,3 +1872,63 @@ func TestMCP_Scoped_AncestorGrantCascades(t *testing.T) {
 	require.NoError(t, json.NewDecoder(cr.Body).Decode(&cres))
 	assert.Nil(t, cres["error"], "ancestor write grant should cascade to children")
 }
+
+// TestMCP_Scoped_ScopeDowngradeTakesEffect verifies that flipping a token from
+// readwrite to read via the update endpoint immediately blocks write tools.
+func TestMCP_Scoped_ScopeDowngradeTakesEffect(t *testing.T) {
+	tc := newTestClient(t)
+	tc.registerAndLogin(t)
+	workID := createFolderHelper(t, tc, "Work")
+
+	// Create a readwrite token.
+	resp := tc.do(t, http.MethodPost, "/api/v1/account/tokens", map[string]interface{}{
+		"name":  "downgrade",
+		"scope": "readwrite",
+	})
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusCreated, resp.StatusCode)
+	var created map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&created))
+	tokenID := int64(created["id"].(float64))
+	raw := created["token"].(string)
+
+	m := &mcpClient{testClient: tc, bearerToken: raw}
+	sessionID := m.initialize(t)
+
+	// First create should succeed (readwrite).
+	cr1 := m.post(t, rpc(1, "tools/call", map[string]interface{}{
+		"name": "create_note",
+		"arguments": map[string]interface{}{
+			"title":     "before-downgrade",
+			"folder_id": workID,
+		},
+	}), sessionID)
+	defer cr1.Body.Close()
+	var cres1 map[string]interface{}
+	require.NoError(t, json.NewDecoder(cr1.Body).Decode(&cres1))
+	require.Nil(t, cres1["error"], "readwrite token should create notes")
+
+	// Downgrade scope to read via the permissions endpoint.
+	permResp := tc.do(t, http.MethodPut, fmt.Sprintf("/api/v1/account/tokens/%d/permissions", tokenID), map[string]interface{}{
+		"scope":              "read",
+		"folder_permissions": []map[string]interface{}{},
+	})
+	defer permResp.Body.Close()
+	require.Equal(t, http.StatusOK, permResp.StatusCode)
+
+	// Second create must be rejected — the bearer middleware re-reads scope
+	// on every request, so the downgrade is live immediately.
+	cr2 := m.post(t, rpc(2, "tools/call", map[string]interface{}{
+		"name": "create_note",
+		"arguments": map[string]interface{}{
+			"title":     "after-downgrade",
+			"folder_id": workID,
+		},
+	}), sessionID)
+	defer cr2.Body.Close()
+	var cres2 map[string]interface{}
+	require.NoError(t, json.NewDecoder(cr2.Body).Decode(&cres2))
+	errObj, _ := cres2["error"].(map[string]interface{})
+	require.NotNil(t, errObj, "downgraded token must be rejected on write")
+	assert.Contains(t, errObj["message"].(string), "read-only")
+}

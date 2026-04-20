@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/th0rn0/thornotes/internal/model"
@@ -118,9 +119,12 @@ func (h *AccountHandler) CreateToken(c *gin.Context) {
 	c.JSON(http.StatusCreated, token)
 }
 
-// UpdateTokenPermissions replaces the folder permissions for a token.
-// Passing an empty folder_permissions array clears all per-folder permissions
-// and reverts the token to global-scope behavior.
+// UpdateTokenPermissions applies partial edits to an API token: folder
+// permissions, global scope, and/or display name. Any field left out of the
+// request body is preserved. Passing an empty folder_permissions array clears
+// all per-folder permissions and reverts the token to global-scope behavior.
+// The route name is historic — it now edits any token metadata the owner is
+// allowed to change, not just permissions.
 func (h *AccountHandler) UpdateTokenPermissions(c *gin.Context) {
 	user := ginUser(c)
 	tokenID, err := ginParamInt64(c, "id")
@@ -129,23 +133,64 @@ func (h *AccountHandler) UpdateTokenPermissions(c *gin.Context) {
 		return
 	}
 
+	// json.RawMessage on FolderPermissions so we can tell "omitted" apart
+	// from "explicitly empty" (the latter is a request to clear the list).
 	var body struct {
-		FolderPermissions []model.TokenFolderPermission `json:"folder_permissions"`
+		Name              *string                       `json:"name"`
+		Scope             string                        `json:"scope"`
+		FolderPermissions *[]model.TokenFolderPermission `json:"folder_permissions"`
 	}
 	if err := readJSON(c, &body); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
 		return
 	}
-	for _, p := range body.FolderPermissions {
-		if p.Permission != "read" && p.Permission != "write" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "permission must be \"read\" or \"write\""})
+	if body.Name != nil && strings.TrimSpace(*body.Name) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "name must not be empty"})
+		return
+	}
+	if body.Scope != "" && body.Scope != "read" && body.Scope != "readwrite" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "scope must be \"read\" or \"readwrite\""})
+		return
+	}
+	if body.FolderPermissions != nil {
+		for _, p := range *body.FolderPermissions {
+			if p.Permission != "read" && p.Permission != "write" {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "permission must be \"read\" or \"write\""})
+				return
+			}
+		}
+	}
+	// Mirror the create-time rule: a read-only token must not carry any
+	// folder-level write grants. Downgrading scope with stale write grants
+	// still on file would silently over-grant at enforcement time.
+	if body.Scope == "read" && body.FolderPermissions != nil {
+		for _, p := range *body.FolderPermissions {
+			if p.Permission == "write" {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "cannot grant write on a read-only token; set scope=\"readwrite\" first"})
+				return
+			}
+		}
+	}
+
+	if body.Name != nil {
+		if err := h.tokens.SetName(c.Request.Context(), user.ID, tokenID, strings.TrimSpace(*body.Name)); err != nil {
+			writeError(c, err)
 			return
 		}
 	}
 
-	if err := h.tokens.SetPermissions(c.Request.Context(), user.ID, tokenID, body.FolderPermissions); err != nil {
-		writeError(c, err)
-		return
+	if body.Scope != "" {
+		if err := h.tokens.SetScope(c.Request.Context(), user.ID, tokenID, body.Scope); err != nil {
+			writeError(c, err)
+			return
+		}
+	}
+
+	if body.FolderPermissions != nil {
+		if err := h.tokens.SetPermissions(c.Request.Context(), user.ID, tokenID, *body.FolderPermissions); err != nil {
+			writeError(c, err)
+			return
+		}
 	}
 
 	perms, err := h.tokens.ListPermissions(c.Request.Context(), tokenID)
@@ -153,7 +198,14 @@ func (h *AccountHandler) UpdateTokenPermissions(c *gin.Context) {
 		writeError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"folder_permissions": perms})
+	resp := gin.H{"folder_permissions": perms}
+	if body.Scope != "" {
+		resp["scope"] = body.Scope
+	}
+	if body.Name != nil {
+		resp["name"] = strings.TrimSpace(*body.Name)
+	}
+	c.JSON(http.StatusOK, resp)
 }
 
 // DeleteToken revokes an API token by ID.

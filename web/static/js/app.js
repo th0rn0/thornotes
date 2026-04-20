@@ -139,10 +139,15 @@ function showApp() {
   // Load auto-collapse setting
   const acToggle = document.getElementById('auto-collapse-toggle');
   if (acToggle) acToggle.checked = localStorage.getItem('autoCollapse') !== 'false';
+  restoreSidebarCollapse();
   connectEventSource();
 }
 
-// ── Mobile sidebar ─────────────────────────────────────────────────────────
+// ── Sidebar toggle ─────────────────────────────────────────────────────────
+// toggleSidebar handles the mobile hamburger in the topbar — it opens or
+// closes the off-canvas drawer. Desktop collapse is driven by a separate
+// button in the sidebar footer (toggleSidebarCollapse) so the toggle stays
+// reachable even when the sidebar is in its rail state.
 function toggleSidebar() {
   const sidebar = document.getElementById('sidebar');
   const overlay = document.getElementById('sidebar-overlay');
@@ -158,6 +163,43 @@ function closeSidebar() {
 
 function isMobile() {
   return window.matchMedia('(max-width: 640px)').matches;
+}
+
+// toggleSidebarCollapse flips the rail-collapsed state on desktop and
+// persists it in localStorage so the choice sticks across sessions. The
+// button stays visible in both states because the collapsed sidebar retains
+// a thin rail just wide enough to show it.
+function toggleSidebarCollapse() {
+  if (isMobile()) return;
+  const sidebar = document.getElementById('sidebar');
+  const willCollapse = !sidebar.classList.contains('collapsed');
+  sidebar.classList.toggle('collapsed', willCollapse);
+  try { localStorage.setItem('sidebarCollapsed', willCollapse ? 'true' : 'false'); } catch (e) {}
+  syncSidebarCollapseBtn();
+}
+
+// syncSidebarCollapseBtn updates the chevron + aria/title on the footer
+// toggle so it reflects the current collapsed/expanded state.
+function syncSidebarCollapseBtn() {
+  const btn = document.getElementById('sidebar-collapse-btn');
+  if (!btn) return;
+  const collapsed = document.getElementById('sidebar').classList.contains('collapsed');
+  const chevron = btn.querySelector('.chevron');
+  if (chevron) chevron.innerHTML = collapsed ? '&raquo;' : '&laquo;';
+  btn.setAttribute('aria-label', collapsed ? 'Expand sidebar' : 'Collapse sidebar');
+  btn.setAttribute('title', collapsed ? 'Expand sidebar' : 'Collapse sidebar');
+}
+
+// Restore the saved desktop-collapsed state on app load. Called from showApp()
+// once the sidebar element is actually displayed.
+function restoreSidebarCollapse() {
+  if (isMobile()) return;
+  let saved = null;
+  try { saved = localStorage.getItem('sidebarCollapsed'); } catch (e) {}
+  if (saved === 'true') {
+    document.getElementById('sidebar').classList.add('collapsed');
+  }
+  syncSidebarCollapseBtn();
 }
 
 // ── Disk-change SSE ────────────────────────────────────────────────────────
@@ -1434,6 +1476,9 @@ async function showAccountModal() {
   // Reset the create-form folder permissions picker.
   const detailsEl = document.getElementById('new-token-perms-details');
   if (detailsEl) detailsEl.open = false;
+  // Pull the latest folder tree so newly created folders show up in the
+  // picker without requiring a page reload.
+  await loadFolderTree().catch(() => {});
   renderFolderPermsList('new-token-perms-list', []);
   // Show the modal immediately for instant feedback; tokens load async below.
   document.getElementById('account-modal').style.display = 'flex';
@@ -1574,9 +1619,16 @@ async function createToken() {
   }
 }
 
-function openTokenPermsModal(tokenId) {
+async function openTokenPermsModal(tokenId) {
   const token = _cachedTokens.find(t => t.id === tokenId);
   _editingTokenId = tokenId;
+  const nameInput = document.getElementById('edit-token-name');
+  if (nameInput) nameInput.value = (token && token.name) || '';
+  const scopeSel = document.getElementById('edit-token-scope');
+  if (scopeSel) scopeSel.value = (token && token.scope) || 'readwrite';
+  // Pull the latest folder tree so the picker reflects any folders created
+  // after the Account modal was first opened.
+  await loadFolderTree().catch(() => {});
   renderFolderPermsList('edit-token-perms-list', token ? (token.folder_permissions || []) : []);
   document.getElementById('token-perms-error').textContent = '';
   document.getElementById('token-perms-modal').style.display = 'flex';
@@ -1590,14 +1642,20 @@ function closeTokenPermsModal() {
 async function saveTokenPerms() {
   if (_editingTokenId == null) return;
   const folder_permissions = collectPermsFromList('edit-token-perms-list');
+  const scope = document.getElementById('edit-token-scope').value || 'readwrite';
+  const name = (document.getElementById('edit-token-name').value || '').trim();
   const errEl = document.getElementById('token-perms-error');
   errEl.textContent = '';
+  if (!name) {
+    errEl.textContent = 'Name is required';
+    return;
+  }
   try {
-    await api('PUT', `/api/v1/account/tokens/${_editingTokenId}/permissions`, { folder_permissions });
+    await api('PUT', `/api/v1/account/tokens/${_editingTokenId}/permissions`, { name, scope, folder_permissions });
     closeTokenPermsModal();
     await refreshTokenList();
   } catch (e) {
-    errEl.textContent = e.message || 'Failed to save permissions';
+    errEl.textContent = e.message || 'Failed to save token';
   }
 }
 
@@ -1917,6 +1975,13 @@ document.getElementById('show-login-link').addEventListener('click', showLogin);
 
 // Topbar
 document.querySelector('.topbar-menu-btn').addEventListener('click', toggleSidebar);
+
+// Desktop sidebar collapse toggle lives in the sidebar footer. Safe-guarded
+// with optional chaining so the page still boots if the element is missing.
+(function() {
+  const btn = document.getElementById('sidebar-collapse-btn');
+  if (btn) btn.addEventListener('click', toggleSidebarCollapse);
+})();
 
 // User menu dropdown
 (function() {
