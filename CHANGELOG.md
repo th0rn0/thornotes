@@ -5,7 +5,10 @@ All notable changes to thornotes are documented here.
 ## [1.5.11.0] - 2026-04-20
 
 ### Added
-- **Edit a token's global scope alongside its folder permissions** — the Account modal's **Permissions** button now lets you flip a token between Read only and Read + Write as well as change which folders it can reach. The `PUT /api/v1/account/tokens/:id/permissions` endpoint accepts an optional `scope` field in the body; the scope change is live on the very next request (the bearer middleware re-reads the token on every call). Downgrading to `read` while any folder row still carries `write` is rejected, mirroring the create-time rule.
+- **Full token editing from the Account modal** — the **Permissions** button on each token now opens an edit modal that can change the token's name, global scope (Read only vs Read + Write), and folder-level permissions in one form. The `PUT /api/v1/account/tokens/:id/permissions` endpoint accepts `name`, `scope`, and `folder_permissions` (all optional); anything you omit is preserved. Scope changes go live on the very next request (the bearer middleware re-reads each token per call). Downgrading to `read` while any folder row still carries `write` is rejected, mirroring the create-time rule.
+
+### Fixed
+- **Token permissions picker now refreshes the folder tree on open** — opening the Account modal or the per-token Permissions modal re-fetches `/api/v1/folders`, so newly created folders appear in the picker without a page reload.
 
 ## [1.5.10.2] - 2026-04-18
 

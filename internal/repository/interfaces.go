@@ -83,6 +83,9 @@ type APITokenRepository interface {
 	// SetScope updates the token's global read/write scope. Caller must pass
 	// "read" or "readwrite"; the repo enforces ownership.
 	SetScope(ctx context.Context, userID, tokenID int64, scope string) error
+	// SetName updates the display name of a token. The name is metadata only;
+	// the token value and hash are untouched. Empty names are rejected.
+	SetName(ctx context.Context, userID, tokenID int64, name string) error
 }
 
 type JournalRepository interface {

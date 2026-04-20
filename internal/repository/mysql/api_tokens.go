@@ -136,6 +136,26 @@ func (r *APITokenRepo) SetScope(ctx context.Context, userID, tokenID int64, scop
 	return nil
 }
 
+func (r *APITokenRepo) SetName(ctx context.Context, userID, tokenID int64, name string) error {
+	if name == "" {
+		return apperror.BadRequest("name must not be empty")
+	}
+	res, err := r.db.ExecContext(ctx,
+		`UPDATE api_tokens SET name = ? WHERE id = ? AND user_id = ?`, name, tokenID, userID,
+	)
+	if err != nil {
+		return apperror.Internal("update api token name", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return apperror.Internal("rows affected api token name", err)
+	}
+	if n == 0 {
+		return apperror.ErrNotFound
+	}
+	return nil
+}
+
 func (r *APITokenRepo) ListPermissions(ctx context.Context, tokenID int64) ([]model.TokenFolderPermission, error) {
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT folder_id, permission

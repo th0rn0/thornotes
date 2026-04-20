@@ -129,6 +129,19 @@ func (r *fakeAPITokenRepo) SetScope(_ context.Context, userID, tokenID int64, sc
 	return apperror.NotFound("token not found")
 }
 
+func (r *fakeAPITokenRepo) SetName(_ context.Context, userID, tokenID int64, name string) error {
+	if r.err != nil {
+		return r.err
+	}
+	for _, t := range r.tokens {
+		if t.ID == tokenID && t.UserID == userID {
+			t.Name = name
+			return nil
+		}
+	}
+	return apperror.NotFound("token not found")
+}
+
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 // newAccountRouter builds a gin router with the account handler wired up
@@ -466,6 +479,118 @@ func TestUpdateTokenPermissions_OmittedScopeKeepsExisting(t *testing.T) {
 	kept, err := repo.GetByToken(context.Background(), "tn_keepscope")
 	require.NoError(t, err)
 	assert.Equal(t, "read", kept.Scope)
+}
+
+func TestUpdateTokenPermissions_ChangesName(t *testing.T) {
+	user := &model.User{ID: 1, Username: "alice"}
+	repo := newFakeAPITokenRepo()
+	tok, err := repo.Create(context.Background(), 1, "Old Name", "tn_renamed", "readwrite")
+	require.NoError(t, err)
+
+	r := newAccountRouter(user, repo)
+	body := strings.NewReader(`{"name":"Claude Desktop"}`)
+	req := httptest.NewRequest(http.MethodPut, fmt.Sprintf("/tokens/%d/permissions", tok.ID), body)
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+	renamed, err := repo.GetByToken(context.Background(), "tn_renamed")
+	require.NoError(t, err)
+	assert.Equal(t, "Claude Desktop", renamed.Name)
+}
+
+func TestUpdateTokenPermissions_EmptyNameRejected(t *testing.T) {
+	user := &model.User{ID: 1, Username: "alice"}
+	repo := newFakeAPITokenRepo()
+	tok, err := repo.Create(context.Background(), 1, "Original", "tn_emptyname", "readwrite")
+	require.NoError(t, err)
+
+	r := newAccountRouter(user, repo)
+	body := strings.NewReader(`{"name":"   "}`)
+	req := httptest.NewRequest(http.MethodPut, fmt.Sprintf("/tokens/%d/permissions", tok.ID), body)
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+	// The name must not have been mutated.
+	kept, err := repo.GetByToken(context.Background(), "tn_emptyname")
+	require.NoError(t, err)
+	assert.Equal(t, "Original", kept.Name)
+}
+
+func TestUpdateTokenPermissions_NameIsTrimmed(t *testing.T) {
+	user := &model.User{ID: 1, Username: "alice"}
+	repo := newFakeAPITokenRepo()
+	tok, err := repo.Create(context.Background(), 1, "Original", "tn_trimname", "readwrite")
+	require.NoError(t, err)
+
+	r := newAccountRouter(user, repo)
+	body := strings.NewReader(`{"name":"  Renamed  "}`)
+	req := httptest.NewRequest(http.MethodPut, fmt.Sprintf("/tokens/%d/permissions", tok.ID), body)
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+	kept, err := repo.GetByToken(context.Background(), "tn_trimname")
+	require.NoError(t, err)
+	assert.Equal(t, "Renamed", kept.Name)
+}
+
+func TestUpdateTokenPermissions_OmittedFieldsKeepExisting(t *testing.T) {
+	// Sending only "name" must preserve scope AND existing folder permissions.
+	user := &model.User{ID: 1, Username: "alice"}
+	repo := newFakeAPITokenRepo()
+	tok, err := repo.Create(context.Background(), 1, "Original", "tn_partial", "read")
+	require.NoError(t, err)
+	// Seed one permission so we can assert it survives.
+	require.NoError(t, repo.SetPermissions(context.Background(), 1, tok.ID, []model.TokenFolderPermission{
+		{FolderID: nil, Permission: "read"},
+	}))
+
+	r := newAccountRouter(user, repo)
+	body := strings.NewReader(`{"name":"Only Rename"}`)
+	req := httptest.NewRequest(http.MethodPut, fmt.Sprintf("/tokens/%d/permissions", tok.ID), body)
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+	kept, err := repo.GetByToken(context.Background(), "tn_partial")
+	require.NoError(t, err)
+	assert.Equal(t, "Only Rename", kept.Name)
+	assert.Equal(t, "read", kept.Scope, "scope must be preserved when not in body")
+	perms, err := repo.ListPermissions(context.Background(), tok.ID)
+	require.NoError(t, err)
+	require.Len(t, perms, 1, "folder_permissions must be preserved when key is omitted from body")
+	assert.Equal(t, "read", perms[0].Permission)
+}
+
+func TestUpdateTokenPermissions_CombinedEdit(t *testing.T) {
+	// All three fields at once: rename, upgrade scope, set a folder grant.
+	user := &model.User{ID: 1, Username: "alice"}
+	repo := newFakeAPITokenRepo()
+	tok, err := repo.Create(context.Background(), 1, "Original", "tn_combined", "read")
+	require.NoError(t, err)
+
+	r := newAccountRouter(user, repo)
+	body := strings.NewReader(`{"name":"Combined","scope":"readwrite","folder_permissions":[{"folder_id":null,"permission":"write"}]}`)
+	req := httptest.NewRequest(http.MethodPut, fmt.Sprintf("/tokens/%d/permissions", tok.ID), body)
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+	kept, err := repo.GetByToken(context.Background(), "tn_combined")
+	require.NoError(t, err)
+	assert.Equal(t, "Combined", kept.Name)
+	assert.Equal(t, "readwrite", kept.Scope)
+	perms, err := repo.ListPermissions(context.Background(), tok.ID)
+	require.NoError(t, err)
+	require.Len(t, perms, 1)
+	assert.Equal(t, "write", perms[0].Permission)
 }
 
 func TestUpdateTokenPermissions_InvalidPermission(t *testing.T) {

@@ -759,7 +759,9 @@ body {
 <!-- TOKEN PERMISSIONS MODAL -->
 <div class="modal-overlay" id="token-perms-modal">
   <div class="modal" style="max-width:520px">
-    <h2>Edit token permissions</h2>
+    <h2>Edit token</h2>
+    <label for="edit-token-name" class="token-perms-hint" style="display:block;margin-bottom:4px;">Name</label>
+    <input id="edit-token-name" type="text" class="token-create-input" style="margin-bottom:12px;width:100%;" />
     <label for="edit-token-scope" class="token-perms-hint" style="display:block;margin-bottom:4px;">Global access</label>
     <select id="edit-token-scope" class="token-create-select" style="margin-bottom:12px;">
       <option value="readwrite">Read + Write</option>

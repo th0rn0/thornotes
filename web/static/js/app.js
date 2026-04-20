@@ -1580,6 +1580,8 @@ async function createToken() {
 async function openTokenPermsModal(tokenId) {
   const token = _cachedTokens.find(t => t.id === tokenId);
   _editingTokenId = tokenId;
+  const nameInput = document.getElementById('edit-token-name');
+  if (nameInput) nameInput.value = (token && token.name) || '';
   const scopeSel = document.getElementById('edit-token-scope');
   if (scopeSel) scopeSel.value = (token && token.scope) || 'readwrite';
   // Pull the latest folder tree so the picker reflects any folders created
@@ -1599,14 +1601,19 @@ async function saveTokenPerms() {
   if (_editingTokenId == null) return;
   const folder_permissions = collectPermsFromList('edit-token-perms-list');
   const scope = document.getElementById('edit-token-scope').value || 'readwrite';
+  const name = (document.getElementById('edit-token-name').value || '').trim();
   const errEl = document.getElementById('token-perms-error');
   errEl.textContent = '';
+  if (!name) {
+    errEl.textContent = 'Name is required';
+    return;
+  }
   try {
-    await api('PUT', `/api/v1/account/tokens/${_editingTokenId}/permissions`, { scope, folder_permissions });
+    await api('PUT', `/api/v1/account/tokens/${_editingTokenId}/permissions`, { name, scope, folder_permissions });
     closeTokenPermsModal();
     await refreshTokenList();
   } catch (e) {
-    errEl.textContent = e.message || 'Failed to save permissions';
+    errEl.textContent = e.message || 'Failed to save token';
   }
 }
 
