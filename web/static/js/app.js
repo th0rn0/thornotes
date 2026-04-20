@@ -1434,6 +1434,9 @@ async function showAccountModal() {
   // Reset the create-form folder permissions picker.
   const detailsEl = document.getElementById('new-token-perms-details');
   if (detailsEl) detailsEl.open = false;
+  // Pull the latest folder tree so newly created folders show up in the
+  // picker without requiring a page reload.
+  await loadFolderTree().catch(() => {});
   renderFolderPermsList('new-token-perms-list', []);
   // Show the modal immediately for instant feedback; tokens load async below.
   document.getElementById('account-modal').style.display = 'flex';
@@ -1574,11 +1577,14 @@ async function createToken() {
   }
 }
 
-function openTokenPermsModal(tokenId) {
+async function openTokenPermsModal(tokenId) {
   const token = _cachedTokens.find(t => t.id === tokenId);
   _editingTokenId = tokenId;
   const scopeSel = document.getElementById('edit-token-scope');
   if (scopeSel) scopeSel.value = (token && token.scope) || 'readwrite';
+  // Pull the latest folder tree so the picker reflects any folders created
+  // after the Account modal was first opened.
+  await loadFolderTree().catch(() => {});
   renderFolderPermsList('edit-token-perms-list', token ? (token.folder_permissions || []) : []);
   document.getElementById('token-perms-error').textContent = '';
   document.getElementById('token-perms-modal').style.display = 'flex';
