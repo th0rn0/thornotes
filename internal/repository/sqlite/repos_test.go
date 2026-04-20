@@ -1558,3 +1558,74 @@ func TestNoteRepo_ListForContext_WithFolder(t *testing.T) {
 	assert.Len(t, got, 1)
 	assert.Equal(t, "Folder Note", got[0].Title)
 }
+
+// ─── APIToken SetName / SetScope same-value regressions ───────────────────────
+//
+// Before v1.5.11.1 these methods treated RowsAffected == 0 as "token not found,"
+// which was wrong on MySQL (changed-rows semantics) and could also bite on
+// SQLite for same-value updates. The repo now verifies existence before
+// returning NotFound.
+
+func TestAPITokenRepo_SetName_SameValue_IsNotNotFound(t *testing.T) {
+	pool := openTestDB(t)
+	user := createUser(t, pool)
+	ctx := context.Background()
+	repo := NewAPITokenRepo(pool.ReadDB, pool.WriteDB)
+
+	tok, err := repo.Create(ctx, user.ID, "Pinned", "tn_noopname", "readwrite")
+	require.NoError(t, err)
+
+	// Same name twice must both succeed.
+	require.NoError(t, repo.SetName(ctx, user.ID, tok.ID, "Renamed"))
+	require.NoError(t, repo.SetName(ctx, user.ID, tok.ID, "Renamed"))
+}
+
+func TestAPITokenRepo_SetName_Missing_ReturnsNotFound(t *testing.T) {
+	pool := openTestDB(t)
+	user := createUser(t, pool)
+	ctx := context.Background()
+	repo := NewAPITokenRepo(pool.ReadDB, pool.WriteDB)
+
+	err := repo.SetName(ctx, user.ID, 9999, "Whatever")
+	require.ErrorIs(t, err, apperror.ErrNotFound)
+}
+
+func TestAPITokenRepo_SetScope_SameValue_IsNotNotFound(t *testing.T) {
+	pool := openTestDB(t)
+	user := createUser(t, pool)
+	ctx := context.Background()
+	repo := NewAPITokenRepo(pool.ReadDB, pool.WriteDB)
+
+	tok, err := repo.Create(ctx, user.ID, "Token", "tn_noopscope", "readwrite")
+	require.NoError(t, err)
+
+	require.NoError(t, repo.SetScope(ctx, user.ID, tok.ID, "readwrite"))
+	require.NoError(t, repo.SetScope(ctx, user.ID, tok.ID, "readwrite"))
+}
+
+func TestAPITokenRepo_SetScope_Missing_ReturnsNotFound(t *testing.T) {
+	pool := openTestDB(t)
+	user := createUser(t, pool)
+	ctx := context.Background()
+	repo := NewAPITokenRepo(pool.ReadDB, pool.WriteDB)
+
+	err := repo.SetScope(ctx, user.ID, 9999, "read")
+	require.ErrorIs(t, err, apperror.ErrNotFound)
+}
+
+func TestAPITokenRepo_SetName_WrongOwner_ReturnsNotFound(t *testing.T) {
+	pool := openTestDB(t)
+	user1 := createUser(t, pool)
+	userRepo := NewUserRepo(pool.WriteDB)
+	user2, err := userRepo.Create(context.Background(), "user2", "hash", "test-uuid-2")
+	require.NoError(t, err)
+	ctx := context.Background()
+	repo := NewAPITokenRepo(pool.ReadDB, pool.WriteDB)
+
+	tok, err := repo.Create(ctx, user1.ID, "Mine", "tn_crossuser", "readwrite")
+	require.NoError(t, err)
+
+	// user2 tries to rename user1's token.
+	err = repo.SetName(ctx, user2.ID, tok.ID, "Hijacked")
+	require.ErrorIs(t, err, apperror.ErrNotFound)
+}

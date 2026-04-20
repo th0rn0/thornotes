@@ -25,6 +25,7 @@ type Config struct {
 	WatchInterval      time.Duration // 0 disables the disk watcher
 	SkipReconciliation bool          // skip startup hash-check scan
 	EnableGitHistory   bool          // record every note save/delete as a git commit
+	SeedDev            bool          // seed a dev user + folder tree + ~100 notes on first boot
 }
 
 func Parse() (*Config, error) {
@@ -45,6 +46,7 @@ func Parse() (*Config, error) {
 	flag.DurationVar(&cfg.WatchInterval, "watch-interval", envDuration("THORNOTES_WATCH_INTERVAL", 30*time.Second), "disk watch poll interval (0 to disable)")
 	flag.BoolVar(&cfg.SkipReconciliation, "skip-reconciliation", envBool("THORNOTES_SKIP_RECONCILIATION", false), "skip startup reconciliation scan (use on trusted restarts with large note corpora)")
 	flag.BoolVar(&cfg.EnableGitHistory, "enable-git-history", envBool("THORNOTES_ENABLE_GIT_HISTORY", false), "record every note save/delete as a git commit in the notes directory")
+	flag.BoolVar(&cfg.SeedDev, "seed-dev", envBool("THORNOTES_SEED_DEV", false), "development-only: create a 'dev' user with a realistic folder tree and ~100 seeded notes if the user does not already exist")
 	flag.Parse()
 
 	cfg.MaxContentBytes = 1 << 20 // 1 MB

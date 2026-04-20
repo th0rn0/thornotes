@@ -2,6 +2,15 @@
 
 All notable changes to thornotes are documented here.
 
+## [1.5.11.1] - 2026-04-20
+
+### Fixed
+- **Editing an API token returned "not found" when the saved values matched the current ones** — `SetName` and `SetScope` in the API-token repository treated `RowsAffected == 0` as a missing row, but MySQL's default semantics report 0 for no-op UPDATEs (same value already in place), and SQLite can do the same. Both methods now verify the token exists before returning `ErrNotFound`, so opening the edit modal and clicking Save without changing anything succeeds.
+- **Token permissions folder picker now sorts by full display path** — nested folders used to interleave with unrelated top-level folders because the sort keyed on the raw folder name. Sort is now on the rendered `Parent / Child` path so the list reads alphabetically top-down.
+
+### Added
+- **Development seed mode** (`--seed-dev` / `THORNOTES_SEED_DEV=true`) — on boot, creates a default `dev` / `devpassword1` user plus an 18-folder tree and 100 seeded notes for local testing. Idempotent: skipped if the `dev` user already exists. Distinct from the welcome/getting-started notes that new real users receive.
+
 ## [1.5.11.0] - 2026-04-20
 
 ### Added

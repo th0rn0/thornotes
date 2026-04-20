@@ -107,6 +107,41 @@ func TestAppStaticJS_CollapseWiring(t *testing.T) {
 	}
 }
 
+// TestAppStaticJS_TokenPermsPickerSortsByPath guards the regression where the
+// folder permissions picker sorted by raw folder name, causing nested folders
+// to interleave with unrelated top-level folders. The picker must build the
+// full display path first, then sort by that path so the rendered list reads
+// alphabetically top-down.
+func TestAppStaticJS_TokenPermsPickerSortsByPath(t *testing.T) {
+	data, err := StaticFS.ReadFile("web/static/js/app.js")
+	if err != nil {
+		t.Fatalf("read app.js: %v", err)
+	}
+	src := string(data)
+
+	// The fixed implementation builds {id, name: buildFolderPath(f)} rows and
+	// sorts them afterwards — proving both steps are present catches the
+	// "reverted to name sort" regression and the "forgot to sort" regression.
+	needles := []string{
+		`buildFolderPath(f)`,
+		`folderRows.sort((a, b) => a.name.localeCompare(b.name))`,
+	}
+	for _, n := range needles {
+		if !strings.Contains(src, n) {
+			t.Errorf("app.js missing token perms picker sort substring: %q", n)
+		}
+	}
+	// Guard against the old broken pattern sneaking back.
+	forbidden := []string{
+		`(folders || []).slice().sort((a, b) => a.name.localeCompare(b.name))`,
+	}
+	for _, n := range forbidden {
+		if strings.Contains(src, n) {
+			t.Errorf("app.js still contains the old name-only sort: %q", n)
+		}
+	}
+}
+
 // TestAppTemplate_ShareTemplate_StillRenders is a smoke test: the share view
 // template must still parse and render alongside app.html in the same FS. If
 // the embed pattern ever stops picking both up, this fails.

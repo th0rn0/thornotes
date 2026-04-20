@@ -18,6 +18,7 @@ import (
 	"github.com/th0rn0/thornotes/internal/auth"
 	"github.com/th0rn0/thornotes/internal/config"
 	"github.com/th0rn0/thornotes/internal/db"
+	"github.com/th0rn0/thornotes/internal/devseed"
 	"github.com/th0rn0/thornotes/internal/hub"
 	"github.com/th0rn0/thornotes/internal/notes"
 	"github.com/th0rn0/thornotes/internal/repository"
@@ -111,6 +112,21 @@ func main() {
 	// Build services.
 	authSvc := auth.NewService(userRepo, sessionRepo, cfg.AllowRegistration)
 	notesSvc := notes.NewService(noteRepo, folderRepo, searchRepo, journalRepo, fs)
+
+	// Development-only: seed a dev user + folder tree + ~100 notes.
+	// Idempotent — skipped entirely if the dev user already exists.
+	if cfg.SeedDev {
+		stats, err := devseed.Seed(context.Background(), authSvc, notesSvc, userRepo)
+		if err != nil {
+			log.Error().Err(err).Msg("seed: dev seeding failed")
+			os.Exit(1)
+		}
+		if stats.Skipped {
+			log.Info().Msg("seed: dev user already exists, skipping")
+		} else {
+			log.Info().Int("folders", stats.Folders).Int("notes", stats.Notes).Msgf("seed: created dev user + %d folders + %d notes", stats.Folders, stats.Notes)
+		}
+	}
 
 	// Build SSE hub.
 	notifyHub := hub.New()
