@@ -144,22 +144,16 @@ function showApp() {
 }
 
 // ── Sidebar toggle ─────────────────────────────────────────────────────────
-// On desktop the hamburger collapses the sidebar to zero width and the state
-// persists in localStorage. On mobile it toggles the off-canvas drawer, which
-// is session-only — remembering "collapsed" on mobile would hide the only way
-// to navigate back in.
+// toggleSidebar handles the mobile hamburger in the topbar — it opens or
+// closes the off-canvas drawer. Desktop collapse is driven by a separate
+// button in the sidebar footer (toggleSidebarCollapse) so the toggle stays
+// reachable even when the sidebar is in its rail state.
 function toggleSidebar() {
   const sidebar = document.getElementById('sidebar');
-  if (isMobile()) {
-    const overlay = document.getElementById('sidebar-overlay');
-    const isOpen = sidebar.classList.contains('mobile-open');
-    sidebar.classList.toggle('mobile-open', !isOpen);
-    overlay.classList.toggle('active', !isOpen);
-    return;
-  }
-  const willCollapse = !sidebar.classList.contains('collapsed');
-  sidebar.classList.toggle('collapsed', willCollapse);
-  try { localStorage.setItem('sidebarCollapsed', willCollapse ? 'true' : 'false'); } catch (e) {}
+  const overlay = document.getElementById('sidebar-overlay');
+  const isOpen = sidebar.classList.contains('mobile-open');
+  sidebar.classList.toggle('mobile-open', !isOpen);
+  overlay.classList.toggle('active', !isOpen);
 }
 
 function closeSidebar() {
@@ -171,6 +165,31 @@ function isMobile() {
   return window.matchMedia('(max-width: 640px)').matches;
 }
 
+// toggleSidebarCollapse flips the rail-collapsed state on desktop and
+// persists it in localStorage so the choice sticks across sessions. The
+// button stays visible in both states because the collapsed sidebar retains
+// a thin rail just wide enough to show it.
+function toggleSidebarCollapse() {
+  if (isMobile()) return;
+  const sidebar = document.getElementById('sidebar');
+  const willCollapse = !sidebar.classList.contains('collapsed');
+  sidebar.classList.toggle('collapsed', willCollapse);
+  try { localStorage.setItem('sidebarCollapsed', willCollapse ? 'true' : 'false'); } catch (e) {}
+  syncSidebarCollapseBtn();
+}
+
+// syncSidebarCollapseBtn updates the chevron + aria/title on the footer
+// toggle so it reflects the current collapsed/expanded state.
+function syncSidebarCollapseBtn() {
+  const btn = document.getElementById('sidebar-collapse-btn');
+  if (!btn) return;
+  const collapsed = document.getElementById('sidebar').classList.contains('collapsed');
+  const chevron = btn.querySelector('.chevron');
+  if (chevron) chevron.innerHTML = collapsed ? '&raquo;' : '&laquo;';
+  btn.setAttribute('aria-label', collapsed ? 'Expand sidebar' : 'Collapse sidebar');
+  btn.setAttribute('title', collapsed ? 'Expand sidebar' : 'Collapse sidebar');
+}
+
 // Restore the saved desktop-collapsed state on app load. Called from showApp()
 // once the sidebar element is actually displayed.
 function restoreSidebarCollapse() {
@@ -180,6 +199,7 @@ function restoreSidebarCollapse() {
   if (saved === 'true') {
     document.getElementById('sidebar').classList.add('collapsed');
   }
+  syncSidebarCollapseBtn();
 }
 
 // ── Disk-change SSE ────────────────────────────────────────────────────────
@@ -1955,6 +1975,13 @@ document.getElementById('show-login-link').addEventListener('click', showLogin);
 
 // Topbar
 document.querySelector('.topbar-menu-btn').addEventListener('click', toggleSidebar);
+
+// Desktop sidebar collapse toggle lives in the sidebar footer. Safe-guarded
+// with optional chaining so the page still boots if the element is missing.
+(function() {
+  const btn = document.getElementById('sidebar-collapse-btn');
+  if (btn) btn.addEventListener('click', toggleSidebarCollapse);
+})();
 
 // User menu dropdown
 (function() {

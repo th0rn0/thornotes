@@ -162,15 +162,9 @@ body {
 .topbar .logo img { display: block; border-radius: 4px; flex-shrink: 0; }
 .main { display: flex; flex: 1; overflow: hidden; position: relative; }
 
-/* Desktop collapse transition — mobile overrides with its own left-slide animation. */
-.sidebar { transition: width 0.15s ease, border-right-width 0.15s ease; }
-.sidebar.collapsed { width: 0; border-right-width: 0; }
-
-/* TOPBAR MENU BUTTON — visible on both desktop (collapse toggle) and mobile (off-canvas drawer). */
+/* MOBILE TOPBAR MENU BUTTON — hidden on desktop; the desktop collapse toggle lives in the sidebar footer. */
 .topbar-menu-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  display: none;
   background: none;
   border: none;
   font-size: 18px;
@@ -182,7 +176,6 @@ body {
   line-height: 1;
   flex-shrink: 0;
 }
-.topbar-menu-btn:hover { background: var(--bg-hover); }
 
 /* USER MENU DROPDOWN */
 .user-menu { position: relative; flex-shrink: 0; }
@@ -227,16 +220,29 @@ body {
 .sidebar-overlay.active { display: block; }
 
 /* SIDEBAR */
-.sidebar { width: 220px; flex-shrink: 0; background: var(--bg-side); border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; }
+.sidebar { width: 220px; flex-shrink: 0; background: var(--bg-side); border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; transition: width 0.15s ease; }
+/* Collapsed rail: just wide enough to keep the footer toggle reachable. */
+.sidebar.collapsed { width: 36px; }
+.sidebar.collapsed .sidebar-toolbar,
+.sidebar.collapsed .sidebar-search,
+.sidebar.collapsed .journal-section,
+.sidebar.collapsed .tree,
+.sidebar.collapsed .sidebar-github-link { display: none; }
+.sidebar.collapsed .sidebar-footer { padding: 4px 0; display: flex; justify-content: center; }
 .sidebar-toolbar { display: flex; gap: 4px; padding: 8px; border-bottom: 1px solid var(--border-light); }
 .sidebar-toolbar button { flex: 1; padding: 8px 0; font-size: 11px; border: 1px solid var(--border); background: var(--bg-btn); cursor: pointer; color: var(--text-btn); min-height: 36px; }
 .sidebar-toolbar button:hover { background: var(--bg-hover); }
 .sidebar-search { padding: 6px 8px; border-bottom: 1px solid var(--border-light); }
 .sidebar-search input { width: 100%; border: 1px solid var(--border); background: var(--bg-input); color: var(--text); padding: 6px 8px; font-size: 12px; }
 .tree { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 4px 0; }
-.sidebar-footer { flex-shrink: 0; border-top: 1px solid var(--border-light); padding: 8px; }
+.sidebar-footer { flex-shrink: 0; border-top: 1px solid var(--border-light); padding: 8px; display: flex; flex-direction: column; gap: 4px; }
 .sidebar-github-link { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-dim); text-decoration: none; padding: 4px 4px; border-radius: 3px; }
 .sidebar-github-link:hover { color: var(--text-mute); background: var(--bg-hover); }
+.sidebar-collapse-btn { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-dim); background: none; border: none; cursor: pointer; padding: 4px 4px; border-radius: 3px; text-align: left; width: 100%; }
+.sidebar-collapse-btn:hover { color: var(--text-mute); background: var(--bg-hover); }
+.sidebar-collapse-btn .chevron { display: inline-block; width: 14px; text-align: center; font-size: 13px; }
+.sidebar.collapsed .sidebar-collapse-btn { justify-content: center; width: auto; padding: 6px; }
+.sidebar.collapsed .sidebar-collapse-btn .label { display: none; }
 .tree-folder-label { display: flex; align-items: center; gap: 4px; padding: 6px 8px; cursor: pointer; color: var(--text-btn); font-size: 12px; user-select: none; min-height: 34px; }
 .tree-folder-label:hover { background: var(--bg-hover); }
 .tree-folder-label.active { background: var(--bg-active-folder); color: var(--text); font-weight: 500; }
@@ -503,11 +509,13 @@ body {
 
 /* ── RESPONSIVE / MOBILE ──────────────────────────────────────────────────── */
 @media (max-width: 640px) {
-  /* Hamburger is already visible globally; hide desktop-only topbar items. */
+  /* Show hamburger, hide desktop-only topbar items. */
+  .topbar-menu-btn { display: flex; align-items: center; justify-content: center; }
   .toggle-label { display: none; }
-  /* Undo desktop collapse behavior — mobile uses its own off-canvas animation. */
+  /* The desktop rail-collapse doesn't apply on mobile; the off-canvas drawer is the mobile idiom. */
   .sidebar { transition: left 0.22s ease; }
-  .sidebar.collapsed { width: 220px; border-right-width: 1px; }
+  .sidebar.collapsed { width: 220px; }
+  .sidebar-collapse-btn { display: none; }
 
   /* Off-canvas sidebar — slides in from left */
   .sidebar {
@@ -626,6 +634,9 @@ body {
       </div>
       <div class="tree" id="tree"></div>
       <div class="sidebar-footer">
+        <button id="sidebar-collapse-btn" class="sidebar-collapse-btn" type="button" aria-label="Collapse sidebar" title="Collapse sidebar">
+          <span class="chevron" aria-hidden="true">&laquo;</span><span class="label">Collapse</span>
+        </button>
         <a href="https://github.com/th0rn0/thornotes" target="_blank" rel="noopener" class="sidebar-github-link">
           <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
           GitHub
