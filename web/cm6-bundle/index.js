@@ -310,6 +310,8 @@ function createEditor(parent, { onChange, theme } = {}) {
       // dispatch would record the note-switch as an undoable transaction, letting
       // Ctrl+Z bleed content from the previous note into the current one.
       view.setState(EditorState.create({ doc: text, extensions: makeExtensions() }));
+      // Reset scroll so switching notes always starts at the top.
+      view.scrollDOM.scrollTop = 0;
     },
     setTheme(name) {
       currentTheme = name;
