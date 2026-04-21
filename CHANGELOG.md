@@ -2,10 +2,10 @@
 
 All notable changes to thornotes are documented here.
 
-## [Unreleased]
+## [1.5.11.3] - 2026-04-22
 
 ### Fixed
-- **Editor scroll position was not reset when switching between notes.** The CodeMirror 6 scroller's `scrollTop` and the preview pane's `scrollTop` are now both reset to 0 whenever a new note is loaded, so every note opens cleanly from the top.
+- **Editor scroll position was not reset when switching between notes.** Switching notes now reliably resets both the CodeMirror 6 editor scroll and the preview pane to the top. The initial fix placed the reset inside `setValue()`, which caused two regressions: in-note edits (checkbox toggles, inline edits) lost the user's scroll position, and CM6's internal focus handler was restoring `inputState.lastScrollTop` whenever `scrollTop` dropped to 0, undoing the reset the moment the user clicked into the editor. The fix exposes a dedicated `scrollToTop()` method that clears both `scrollDOM.scrollTop` and `inputState.lastScrollTop/lastScrollLeft`; only note-switch code calls it.
 
 ## [1.5.11.2] - 2026-04-21
 
