@@ -115,6 +115,13 @@ func (a *TokenAuthz) HasAnyAccess() bool {
 //
 // When the token is not scoped (global readwrite/read), every folder is
 // returned as readable and rootReadable is true.
+//
+// WARNING: `tree` must be the FULL folder tree for the user. The ancestor
+// walk is built from the passed tree's parent pointers; passing a subset
+// (e.g. search results) truncates the chain at the first missing ancestor
+// and MISSES grants on ancestors outside the subset, returning false
+// negatives. If you only have a subset to filter, fetch the full tree via
+// FolderRepository.Tree first and intersect afterwards.
 func (a *TokenAuthz) FilterReadableFolderIDs(tree []*model.FolderTreeItem) (readable map[int64]bool, rootReadable bool) {
 	readable = make(map[int64]bool, len(tree))
 	if a == nil {

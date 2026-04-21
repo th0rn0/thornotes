@@ -722,7 +722,10 @@ func (h *MCPHandler) handleToolsCall(r *http.Request, req rpcRequest, user *mode
 		if err != nil {
 			return rpcErr(req.ID, rpcInternalError, "list failed")
 		}
-		tree = filterFolderTree(authz, tree)
+		tree, err = filterFolderTree(ctx, authz, folders, userID, tree)
+		if err != nil {
+			return rpcErr(req.ID, rpcInternalError, "authz filter failed")
+		}
 		text, _ := json.Marshal(tree)
 		return rpcOK(req.ID, toolResult(string(text)))
 
@@ -737,7 +740,10 @@ func (h *MCPHandler) handleToolsCall(r *http.Request, req rpcRequest, user *mode
 		if err != nil {
 			return rpcErr(req.ID, rpcInternalError, "search failed")
 		}
-		found = filterFolderTree(authz, found)
+		found, err = filterFolderTree(ctx, authz, folders, userID, found)
+		if err != nil {
+			return rpcErr(req.ID, rpcInternalError, "authz filter failed")
+		}
 		text, _ := json.Marshal(found)
 		return rpcOK(req.ID, toolResult(string(text)))
 
@@ -1198,18 +1204,27 @@ func filterSearchResults(
 }
 
 // filterFolderTree drops folders the token cannot read. Child folders whose
-// ancestor has a grant remain visible (FilterReadableFolderIDs resolves the
-// chain via the passed tree itself, not the repository).
-func filterFolderTree(authz *auth.TokenAuthz, tree []*model.FolderTreeItem) []*model.FolderTreeItem {
+// ancestor has a grant remain visible.
+//
+// `tree` can be the full folder tree (from list_folders) or any subset
+// (from find_folders or similar search results). FilterReadableFolderIDs
+// builds its parent-chain map from the tree it receives, so passing a subset
+// stranded ancestors outside the subset and missed grants on them. We fetch
+// the full tree here so the readable set always walks the real chain.
+func filterFolderTree(ctx context.Context, authz *auth.TokenAuthz, folders repository.FolderRepository, userID int64, tree []*model.FolderTreeItem) ([]*model.FolderTreeItem, error) {
 	if authz == nil || !authz.Scoped {
-		return tree
+		return tree, nil
 	}
-	readable, _ := authz.FilterReadableFolderIDs(tree)
+	full, err := folders.Tree(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	readable, _ := authz.FilterReadableFolderIDs(full)
 	out := make([]*model.FolderTreeItem, 0, len(tree))
 	for _, f := range tree {
 		if readable[f.ID] {
 			out = append(out, f)
 		}
 	}
-	return out
+	return out, nil
 }

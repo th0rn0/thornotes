@@ -1932,3 +1932,203 @@ func TestMCP_Scoped_ScopeDowngradeTakesEffect(t *testing.T) {
 	require.NotNil(t, errObj, "downgraded token must be rejected on write")
 	assert.Contains(t, errObj["message"].(string), "read-only")
 }
+
+// TestMCP_Scoped_FindFolders_RespectsAncestorGrant is a regression for a
+// bug shipped in v1.5.11.1 and earlier: find_folders returned zero results
+// when the matching folder inherited access from a granted ancestor two or
+// more levels up. filterFolderTree was feeding the search subset into
+// TokenAuthz.FilterReadableFolderIDs, whose parent-chain map was built from
+// that same subset — so the walk from (deeply nested match) up to (granted
+// ancestor outside the subset) broke on the first missing parent.
+//
+// Repro: Work/Projects/Q3, grant on Work. find_folders("Q3") returned [].
+// Expected: [Q3].
+func TestMCP_Scoped_FindFolders_RespectsAncestorGrant(t *testing.T) {
+	tc := newTestClient(t)
+	tc.registerAndLogin(t)
+
+	// Build Work > Projects > Q3 — the matching folder is two levels deep.
+	workID := createFolderHelper(t, tc, "Work")
+	projResp := tc.do(t, http.MethodPost, "/api/v1/folders", map[string]interface{}{
+		"name":      "Projects",
+		"parent_id": workID,
+	})
+	require.Equal(t, http.StatusCreated, projResp.StatusCode)
+	var proj map[string]interface{}
+	require.NoError(t, json.NewDecoder(projResp.Body).Decode(&proj))
+	projResp.Body.Close()
+	projID := int64(proj["id"].(float64))
+
+	q3Resp := tc.do(t, http.MethodPost, "/api/v1/folders", map[string]interface{}{
+		"name":      "Q3",
+		"parent_id": projID,
+	})
+	require.Equal(t, http.StatusCreated, q3Resp.StatusCode)
+	q3Resp.Body.Close()
+
+	// Token scoped to Work (read). Q3 must be reachable via ancestor cascade.
+	resp := tc.do(t, http.MethodPost, "/api/v1/account/tokens", map[string]interface{}{
+		"name":  "ancestor-find",
+		"scope": "readwrite",
+	})
+	defer resp.Body.Close()
+	var created map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&created))
+	tokenID := int64(created["id"].(float64))
+	raw := created["token"].(string)
+
+	permResp := tc.do(t, http.MethodPut, fmt.Sprintf("/api/v1/account/tokens/%d/permissions", tokenID), map[string]interface{}{
+		"folder_permissions": []map[string]interface{}{
+			{"folder_id": workID, "permission": "read"},
+		},
+	})
+	defer permResp.Body.Close()
+	require.Equal(t, http.StatusOK, permResp.StatusCode)
+
+	m := &mcpClient{testClient: tc, bearerToken: raw}
+	sessionID := m.initialize(t)
+
+	// find_folders "Q3" — match is two levels below the granted folder.
+	fr := m.post(t, rpc(1, "tools/call", map[string]interface{}{
+		"name":      "find_folders",
+		"arguments": map[string]interface{}{"query": "Q3"},
+	}), sessionID)
+	defer fr.Body.Close()
+	var fres map[string]interface{}
+	require.NoError(t, json.NewDecoder(fr.Body).Decode(&fres))
+	require.Nil(t, fres["error"])
+	text := fres["result"].(map[string]interface{})["content"].([]interface{})[0].(map[string]interface{})["text"].(string)
+	var found []map[string]interface{}
+	require.NoError(t, json.Unmarshal([]byte(text), &found))
+	assert.Lenf(t, found, 1, "find_folders should return Q3 via ancestor cascade; got %s", text)
+	if len(found) == 1 {
+		assert.Equal(t, "Q3", found[0]["name"])
+	}
+
+	// Same for "Projects" — one level below the grant. Was already passing
+	// because the subset happened to contain Projects' direct parent, but
+	// guard it so future refactors can't regress.
+	pr := m.post(t, rpc(2, "tools/call", map[string]interface{}{
+		"name":      "find_folders",
+		"arguments": map[string]interface{}{"query": "Projects"},
+	}), sessionID)
+	defer pr.Body.Close()
+	var pres map[string]interface{}
+	require.NoError(t, json.NewDecoder(pr.Body).Decode(&pres))
+	require.Nil(t, pres["error"])
+	pText := pres["result"].(map[string]interface{})["content"].([]interface{})[0].(map[string]interface{})["text"].(string)
+	var pFound []map[string]interface{}
+	require.NoError(t, json.Unmarshal([]byte(pText), &pFound))
+	assert.Lenf(t, pFound, 1, "find_folders(Projects) should return it via Work grant; got %s", pText)
+}
+
+// TestMCP_Scoped_FindFolders_DoesNotLeakUngranted guards the opposite
+// direction — a folder that does NOT match any grant must stay hidden.
+func TestMCP_Scoped_FindFolders_DoesNotLeakUngranted(t *testing.T) {
+	tc := newTestClient(t)
+	tc.registerAndLogin(t)
+
+	workID := createFolderHelper(t, tc, "Work")
+	_ = createFolderHelper(t, tc, "Personal")
+
+	resp := tc.do(t, http.MethodPost, "/api/v1/account/tokens", map[string]interface{}{
+		"name":  "work-only",
+		"scope": "readwrite",
+	})
+	defer resp.Body.Close()
+	var created map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&created))
+	tokenID := int64(created["id"].(float64))
+	raw := created["token"].(string)
+
+	permResp := tc.do(t, http.MethodPut, fmt.Sprintf("/api/v1/account/tokens/%d/permissions", tokenID), map[string]interface{}{
+		"folder_permissions": []map[string]interface{}{
+			{"folder_id": workID, "permission": "read"},
+		},
+	})
+	defer permResp.Body.Close()
+	require.Equal(t, http.StatusOK, permResp.StatusCode)
+
+	m := &mcpClient{testClient: tc, bearerToken: raw}
+	sessionID := m.initialize(t)
+
+	fr := m.post(t, rpc(1, "tools/call", map[string]interface{}{
+		"name":      "find_folders",
+		"arguments": map[string]interface{}{"query": "Personal"},
+	}), sessionID)
+	defer fr.Body.Close()
+	var fres map[string]interface{}
+	require.NoError(t, json.NewDecoder(fr.Body).Decode(&fres))
+	require.Nil(t, fres["error"])
+	text := fres["result"].(map[string]interface{})["content"].([]interface{})[0].(map[string]interface{})["text"].(string)
+	var found []map[string]interface{}
+	require.NoError(t, json.Unmarshal([]byte(text), &found))
+	assert.Emptyf(t, found, "Personal is ungranted, find_folders must not leak it; got %s", text)
+}
+
+// TestMCP_Scoped_ListFolders_NestedGrantShowsDescendants verifies that
+// list_folders still returns the full readable subtree (including the
+// granted folder + all descendants) after the filter refactor.
+func TestMCP_Scoped_ListFolders_NestedGrantShowsDescendants(t *testing.T) {
+	tc := newTestClient(t)
+	tc.registerAndLogin(t)
+
+	workID := createFolderHelper(t, tc, "Work")
+	projResp := tc.do(t, http.MethodPost, "/api/v1/folders", map[string]interface{}{
+		"name":      "Projects",
+		"parent_id": workID,
+	})
+	require.Equal(t, http.StatusCreated, projResp.StatusCode)
+	var proj map[string]interface{}
+	require.NoError(t, json.NewDecoder(projResp.Body).Decode(&proj))
+	projResp.Body.Close()
+	projID := int64(proj["id"].(float64))
+	q3Resp := tc.do(t, http.MethodPost, "/api/v1/folders", map[string]interface{}{
+		"name":      "Q3",
+		"parent_id": projID,
+	})
+	require.Equal(t, http.StatusCreated, q3Resp.StatusCode)
+	q3Resp.Body.Close()
+	_ = createFolderHelper(t, tc, "Personal")
+
+	resp := tc.do(t, http.MethodPost, "/api/v1/account/tokens", map[string]interface{}{
+		"name":  "work-tree",
+		"scope": "readwrite",
+	})
+	defer resp.Body.Close()
+	var created map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&created))
+	tokenID := int64(created["id"].(float64))
+	raw := created["token"].(string)
+
+	permResp := tc.do(t, http.MethodPut, fmt.Sprintf("/api/v1/account/tokens/%d/permissions", tokenID), map[string]interface{}{
+		"folder_permissions": []map[string]interface{}{
+			{"folder_id": workID, "permission": "read"},
+		},
+	})
+	defer permResp.Body.Close()
+	require.Equal(t, http.StatusOK, permResp.StatusCode)
+
+	m := &mcpClient{testClient: tc, bearerToken: raw}
+	sessionID := m.initialize(t)
+
+	lr := m.post(t, rpc(1, "tools/call", map[string]interface{}{
+		"name":      "list_folders",
+		"arguments": map[string]interface{}{},
+	}), sessionID)
+	defer lr.Body.Close()
+	var lres map[string]interface{}
+	require.NoError(t, json.NewDecoder(lr.Body).Decode(&lres))
+	require.Nil(t, lres["error"])
+	text := lres["result"].(map[string]interface{})["content"].([]interface{})[0].(map[string]interface{})["text"].(string)
+	var folders []map[string]interface{}
+	require.NoError(t, json.Unmarshal([]byte(text), &folders))
+	names := make([]string, 0, len(folders))
+	for _, f := range folders {
+		names = append(names, f["name"].(string))
+	}
+	assert.Contains(t, names, "Work", "granted folder must be visible")
+	assert.Contains(t, names, "Projects", "descendant must be visible via cascade")
+	assert.Contains(t, names, "Q3", "grand-descendant must be visible via cascade")
+	assert.NotContains(t, names, "Personal", "ungranted sibling must stay hidden")
+}
