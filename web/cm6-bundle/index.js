@@ -310,8 +310,17 @@ function createEditor(parent, { onChange, theme } = {}) {
       // dispatch would record the note-switch as an undoable transaction, letting
       // Ctrl+Z bleed content from the previous note into the current one.
       view.setState(EditorState.create({ doc: text, extensions: makeExtensions() }));
-      // Reset scroll so switching notes always starts at the top.
+    },
+    scrollToTop() {
+      // Reset the DOM scroll position. We must also clear inputState.lastScrollTop
+      // because CM6's focus handler restores that saved value whenever scrollTop
+      // drops to 0, which would undo our reset the first time the user clicks into
+      // the editor after switching notes.
       view.scrollDOM.scrollTop = 0;
+      if (view.inputState) {
+        view.inputState.lastScrollTop = 0;
+        view.inputState.lastScrollLeft = 0;
+      }
     },
     setTheme(name) {
       currentTheme = name;

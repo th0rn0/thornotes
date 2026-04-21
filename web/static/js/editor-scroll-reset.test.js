@@ -2,56 +2,122 @@
 const { describe, test } = require('node:test');
 const assert = require('node:assert/strict');
 
-// Verify the scroll-reset contract: editor.setValue() must always reset the
-// CM6 scroller to the top so switching notes never inherits the previous note's
-// scroll position.
+// Verify the scroll-reset contract for note switching:
+//   - editor.scrollToTop() resets CM6's scrollDOM AND clears inputState.lastScrollTop
+//   - editor.setValue() does NOT reset scroll (in-note edits like checkbox toggles
+//     must preserve the user's scroll position)
 //
-// These tests replicate the setValue implementation from cm6-bundle/index.js
-// using a stub, making the contract explicit and runnable without a real browser.
+// The critical case is the CM6 focus-handler race: CM6's InputState saves scroll to
+// lastScrollTop on every scroll event, and its focus handler restores that value
+// whenever scrollTop drops to 0. scrollToTop() must clear lastScrollTop so the focus
+// handler has nothing to restore after a note switch.
 
 function makeEditorStub(initialScroll = 0) {
+  const inputState = { lastScrollTop: initialScroll, lastScrollLeft: 0 };
   const scrollDOM = { scrollTop: initialScroll };
-  const view = {
-    scrollDOM,
-    setState(_state) { /* CM6 setState — does NOT touch scrollTop */ },
-  };
-  // Mirror the setValue body from cm6-bundle/index.js exactly.
-  function setValue(text) {
-    view.setState({ doc: text });
-    view.scrollDOM.scrollTop = 0;
+
+  // Mirrors CM6's focus event handler (from @codemirror/view InputState):
+  //   !scrollTop && (lastScrollTop || lastScrollLeft) → restore
+  function simulateFocus() {
+    if (!scrollDOM.scrollTop && (inputState.lastScrollTop || inputState.lastScrollLeft)) {
+      scrollDOM.scrollTop = inputState.lastScrollTop;
+    }
   }
-  return { _view: view, setValue };
+
+  // Mirror setValue from cm6-bundle/index.js: setState only, no scroll side-effects.
+  function setValue(text) { void text; }
+
+  function scrollToTop() {
+    scrollDOM.scrollTop = 0;
+    if (inputState) {
+      inputState.lastScrollTop = 0;
+      inputState.lastScrollLeft = 0;
+    }
+  }
+
+  return { scrollDOM, inputState, simulateFocus, setValue, scrollToTop };
 }
 
-describe('editor scroll reset on note switch', () => {
-  test('scroll position is reset to 0 when switching notes', () => {
+describe('scrollToTop resets scroll on note switch', () => {
+  test('resets scrollTop to 0', () => {
     const ed = makeEditorStub(800);
-    assert.equal(ed._view.scrollDOM.scrollTop, 800, 'precondition: scroll is non-zero');
-    ed.setValue('# New note content');
-    assert.equal(ed._view.scrollDOM.scrollTop, 0);
+    assert.equal(ed.scrollDOM.scrollTop, 800, 'precondition: non-zero scroll');
+    ed.scrollToTop();
+    assert.equal(ed.scrollDOM.scrollTop, 0);
   });
 
-  test('scroll position is reset even when new content is empty', () => {
-    const ed = makeEditorStub(300);
-    ed.setValue('');
-    assert.equal(ed._view.scrollDOM.scrollTop, 0);
+  test('clears inputState.lastScrollTop to neutralise the focus-handler race', () => {
+    const ed = makeEditorStub(800);
+    ed.scrollToTop();
+    assert.equal(ed.inputState.lastScrollTop, 0);
+    assert.equal(ed.inputState.lastScrollLeft, 0);
+  });
+
+  test('focus handler does NOT restore old scroll after scrollToTop', () => {
+    const ed = makeEditorStub(800);
+    ed.setValue('# New note');
+    ed.scrollToTop();
+    ed.simulateFocus(); // user clicks into the editor after switching notes
+    assert.equal(ed.scrollDOM.scrollTop, 0, 'focus handler must not restore old scroll');
+  });
+
+  test('documents the race: without clearing lastScrollTop, focus handler restores old scroll', () => {
+    // This test pins the bug that existed before the fix.
+    const inputState = { lastScrollTop: 800, lastScrollLeft: 0 };
+    const scrollDOM = { scrollTop: 800 };
+
+    // Old broken approach: only set scrollTop=0, do not clear lastScrollTop.
+    scrollDOM.scrollTop = 0;
+
+    // CM6 focus handler fires when the user clicks into the editor.
+    if (!scrollDOM.scrollTop && (inputState.lastScrollTop || inputState.lastScrollLeft)) {
+      scrollDOM.scrollTop = inputState.lastScrollTop;
+    }
+    assert.equal(scrollDOM.scrollTop, 800, 'without fix, focus handler restores previous scroll');
   });
 
   test('multiple consecutive note switches all reset scroll', () => {
     const ed = makeEditorStub(0);
 
-    ed._view.scrollDOM.scrollTop = 1200;
+    ed.scrollDOM.scrollTop = 1200;
+    ed.inputState.lastScrollTop = 1200;
     ed.setValue('# Note A');
-    assert.equal(ed._view.scrollDOM.scrollTop, 0, 'first switch');
+    ed.scrollToTop();
+    assert.equal(ed.scrollDOM.scrollTop, 0, 'first switch');
 
-    ed._view.scrollDOM.scrollTop = 450;
+    ed.scrollDOM.scrollTop = 450;
+    ed.inputState.lastScrollTop = 450;
     ed.setValue('# Note B');
-    assert.equal(ed._view.scrollDOM.scrollTop, 0, 'second switch');
+    ed.scrollToTop();
+    assert.equal(ed.scrollDOM.scrollTop, 0, 'second switch');
   });
 
-  test('scroll stays at 0 when already at the top', () => {
+  test('works when already at zero', () => {
     const ed = makeEditorStub(0);
-    ed.setValue('Already at top');
-    assert.equal(ed._view.scrollDOM.scrollTop, 0);
+    ed.scrollToTop();
+    ed.simulateFocus();
+    assert.equal(ed.scrollDOM.scrollTop, 0);
+  });
+});
+
+describe('setValue does NOT reset scroll (in-note edits)', () => {
+  test('checkbox toggle preserves scroll position', () => {
+    const ed = makeEditorStub(600);
+    ed.setValue('- [x] done item\n- [ ] other item');
+    assert.equal(ed.scrollDOM.scrollTop, 600, 'scroll must not change during in-note edit');
+  });
+
+  test('inline edit commit preserves scroll position', () => {
+    const ed = makeEditorStub(1200);
+    ed.setValue('updated content');
+    assert.equal(ed.scrollDOM.scrollTop, 1200);
+  });
+
+  test('repeated in-note edits do not drift scroll position', () => {
+    const ed = makeEditorStub(400);
+    ed.setValue('edit 1');
+    ed.setValue('edit 2');
+    ed.setValue('edit 3');
+    assert.equal(ed.scrollDOM.scrollTop, 400);
   });
 });

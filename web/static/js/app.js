@@ -702,6 +702,7 @@ async function openNote(noteId, { historyMode = 'push' } = {}) {
   _loadingNote = true;
   editor.setValue(note.content);
   _loadingNote = false;
+  editor.scrollToTop();
   if (editorPreviewEl) editorPreviewEl.scrollTop = 0;
 
   // Update URL to reflect the open note.
