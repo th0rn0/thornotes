@@ -2,6 +2,11 @@
 
 All notable changes to thornotes are documented here.
 
+## [1.5.11.2] - 2026-04-21
+
+### Fixed
+- **`find_folders` MCP tool missed folders that inherited access from a granted ancestor two or more levels up.** An API token scoped to `Work` (with `Work/Projects/Q3` underneath) returned zero results when searching for `"Q3"`, because the filter was building its ancestor-chain map from the search subset, not the full folder tree. Token permissions now filter `find_folders` against the real tree so cascade access works as documented. `list_folders` was unaffected (always gets the full tree). Added 3 integration regression tests covering ancestor cascade, non-leak of ungranted siblings, and descendant visibility on nested grants.
+
 ## [1.5.11.1] - 2026-04-20
 
 ### Fixed
