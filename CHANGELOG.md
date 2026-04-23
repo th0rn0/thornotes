@@ -2,6 +2,11 @@
 
 All notable changes to thornotes are documented here.
 
+## [1.5.11.4] - 2026-04-23
+
+### Fixed
+- **Token list layout in the Account modal** — token key prefix is now always shown inline, with no show/hide toggle. Long token names and keys no longer truncate. Settings row alignment corrected.
+
 ## [1.5.11.3] - 2026-04-22
 
 ### Fixed
