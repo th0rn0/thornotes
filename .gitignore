@@ -8,5 +8,5 @@ notes-dev/
 *.tmp
 .gstack/
 coverage.out
-.claude/settings.local.json
+.claude/
 .context/
