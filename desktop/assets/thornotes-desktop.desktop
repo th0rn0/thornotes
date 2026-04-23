@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Thornotes
+Comment=Self-hosted Markdown notes
+Exec=thornotes-desktop
+Icon=thornotes-desktop
+Categories=Office;TextEditor;
+StartupNotify=true
+Terminal=false

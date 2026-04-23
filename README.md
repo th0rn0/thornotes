@@ -123,6 +123,92 @@ volumes:
   thornotes-db:
 ```
 
+## Running without Docker
+
+Pre-built binaries for Linux (amd64) are attached to every [GitHub release](https://github.com/th0rn0/thornotes/releases).
+
+### Quick start (Linux binary)
+
+```sh
+# Download the latest binary
+curl -fsSL -o thornotes https://github.com/th0rn0/thornotes/releases/latest/download/thornotes-linux-amd64
+chmod +x thornotes
+
+# Create a data directory and start
+mkdir -p ~/thornotes-data/notes
+./thornotes \
+  --addr :8080 \
+  --db ~/thornotes-data/thornotes.db \
+  --notes-root ~/thornotes-data/notes
+```
+
+Open [http://localhost:8080](http://localhost:8080), register an account, and start writing.
+
+### Running as a systemd service
+
+Save the binary to `/usr/local/bin/thornotes` and create a service unit:
+
+```ini
+# /etc/systemd/system/thornotes.service
+[Unit]
+Description=Thornotes note-taking server
+After=network.target
+
+[Service]
+Type=simple
+User=thornotes
+ExecStart=/usr/local/bin/thornotes \
+  --addr :8080 \
+  --db /var/lib/thornotes/thornotes.db \
+  --notes-root /var/lib/thornotes/notes
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```sh
+# Create the service user and data directory
+sudo useradd -r -s /bin/false thornotes
+sudo mkdir -p /var/lib/thornotes/notes
+sudo chown -R thornotes:thornotes /var/lib/thornotes
+
+sudo systemctl daemon-reload
+sudo systemctl enable --now thornotes
+```
+
+### Linux desktop app (AppImage)
+
+A native desktop window is available as an AppImage attached to each release. It opens a dedicated Thornotes window (WebKitGTK) pointed at your running server — no browser tab required.
+
+**Install:**
+
+1. Go to the [latest release](https://github.com/th0rn0/thornotes/releases/latest) and download `thornotes-desktop-v*-linux-amd64.AppImage`.
+2. Make it executable and move it somewhere on your PATH:
+
+```sh
+chmod +x thornotes-desktop-v*-linux-amd64.AppImage
+mkdir -p ~/.local/bin
+mv thornotes-desktop-v*-linux-amd64.AppImage ~/.local/bin/thornotes-desktop.AppImage
+```
+
+3. Run it:
+
+```sh
+~/.local/bin/thornotes-desktop.AppImage
+```
+
+**First launch:** A setup dialog appears asking for your server URL (default: `http://localhost:8080`) and an optional "Start on login" toggle. After saving, the window navigates directly to your server. Config is stored at `~/.config/thornotes/desktop.json`.
+
+**If the server is unreachable at startup:** A "Cannot connect" screen appears with a Retry button and a "Change URL" button that returns to the setup dialog.
+
+**Start on login:** The toggle in the setup dialog writes an XDG autostart entry to `~/.config/autostart/thornotes-desktop.desktop`. For this to survive moves, keep the AppImage at a stable path (e.g. `~/.local/bin/thornotes-desktop.AppImage`) before enabling it.
+
+**Session persistence:** WebKitGTK stores cookies in `~/.local/share/webkit/` — you will only need to log in once per install.
+
+**System requirements:** The AppImage bundles WebKitGTK 4.0 and GTK3 via `linuxdeploy`. Any glibc-compatible Linux distro with a display server (X11 or Wayland via XWayland) is supported. No external webkit package required.
+
 ## Configuration
 
 All options are available as environment variables and CLI flags.
@@ -494,6 +580,7 @@ CI will then:
 - Build and push multi-arch (`linux/amd64`, `linux/arm64`) images: `th0rn0/thornotes:latest` and `th0rn0/thornotes:v0.9.0.0`.
 - Run a smoke test — pulls the freshly pushed image, starts a container, and verifies HTTP 200 on `/`.
 - Create a GitHub release with the changelog section for that version as release notes (only after smoke test passes).
+- Build and attach a static `thornotes-linux-amd64` binary and a `thornotes-desktop-v0.9.0.0-linux-amd64.AppImage` to the release.
 
 ### Manual (no CI)
 

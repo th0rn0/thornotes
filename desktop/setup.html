@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Thornotes — Setup</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #1a1a2e;
+    color: #e0e0e0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+  }
+  .card {
+    background: #16213e;
+    border: 1px solid #2a2a4a;
+    border-radius: 12px;
+    padding: 40px;
+    width: 460px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+  }
+  .logo { font-size: 28px; font-weight: 700; color: #7c6cf7; margin-bottom: 8px; }
+  .subtitle { font-size: 14px; color: #888; margin-bottom: 32px; }
+  label { display: block; font-size: 13px; color: #aaa; margin-bottom: 6px; }
+  input[type="url"], input[type="text"] {
+    width: 100%;
+    background: #0f0f23;
+    border: 1px solid #2a2a4a;
+    border-radius: 6px;
+    color: #e0e0e0;
+    font-size: 14px;
+    padding: 10px 12px;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  input[type="url"]:focus, input[type="text"]:focus { border-color: #7c6cf7; }
+  input[type="url"].error { border-color: #e05c5c; }
+  .error-msg { color: #e05c5c; font-size: 12px; margin-top: 6px; min-height: 18px; }
+  .check-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 20px;
+    color: #ccc;
+    font-size: 14px;
+    cursor: pointer;
+  }
+  input[type="checkbox"] { width: 16px; height: 16px; accent-color: #7c6cf7; cursor: pointer; }
+  .check-hint { font-size: 12px; color: #666; margin-top: 4px; margin-left: 26px; }
+  .btn {
+    display: block;
+    width: 100%;
+    margin-top: 28px;
+    padding: 12px;
+    background: #7c6cf7;
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .btn:hover { background: #9580ff; }
+  .btn:disabled { background: #44406a; cursor: not-allowed; }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="logo">Thornotes</div>
+  <div class="subtitle">Connect to your Thornotes server</div>
+
+  <label for="url">Server URL</label>
+  <input type="url" id="url" placeholder="http://localhost:8080" autocomplete="off" spellcheck="false">
+  <div class="error-msg" id="url-error"></div>
+
+  <label class="check-row" for="autostart">
+    <input type="checkbox" id="autostart">
+    Start on login
+  </label>
+  <div class="check-hint">Writes a .desktop file to ~/.config/autostart/</div>
+
+  <button class="btn" id="save-btn" onclick="save()">Save &amp; Connect</button>
+</div>
+
+<script>
+(async function() {
+  try {
+    const cfg = await goGetConfig();
+    if (cfg.server_url) document.getElementById('url').value = cfg.server_url;
+    document.getElementById('autostart').checked = cfg.autostart || false;
+  } catch (_) {}
+})();
+
+function isValidURL(s) {
+  try {
+    const u = new URL(s);
+    return u.protocol === 'http:' || u.protocol === 'https:';
+  } catch (_) {
+    return false;
+  }
+}
+
+async function save() {
+  const urlEl = document.getElementById('url');
+  const errEl = document.getElementById('url-error');
+  const btn   = document.getElementById('save-btn');
+  const autostart = document.getElementById('autostart').checked;
+  const serverURL = urlEl.value.trim();
+
+  urlEl.classList.remove('error');
+  errEl.textContent = '';
+
+  if (!serverURL) {
+    urlEl.classList.add('error');
+    errEl.textContent = 'Server URL is required.';
+    return;
+  }
+  if (!isValidURL(serverURL)) {
+    urlEl.classList.add('error');
+    errEl.textContent = 'Enter a valid http:// or https:// URL.';
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Connecting…';
+
+  try {
+    const err = await goSaveConfig(serverURL, autostart);
+    if (err) {
+      errEl.textContent = err;
+      btn.disabled = false;
+      btn.textContent = 'Save & Connect';
+    }
+    // On success goSaveConfig navigates away — no further action needed.
+  } catch (e) {
+    errEl.textContent = String(e);
+    btn.disabled = false;
+    btn.textContent = 'Save & Connect';
+  }
+}
+
+document.getElementById('url').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') save();
+});
+</script>
+</body>
+</html>
