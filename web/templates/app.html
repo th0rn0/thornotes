@@ -197,8 +197,8 @@ body {
 .settings-section h3 { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-dim); margin-bottom: 10px; }
 .settings-row { display: flex; align-items: center; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border-light); }
 .settings-row:last-child { border-bottom: none; }
-.settings-row label { font-size: 12px; color: var(--text); margin-bottom: 0; display: inline; }
-.settings-row select { font-size: 11px; border: 1px solid var(--border); background: var(--bg-input); color: var(--text); padding: 3px 6px; cursor: pointer; width: auto; margin-bottom: 0; }
+.modal .settings-row label { font-size: 12px; color: var(--text); margin-bottom: 0; display: inline; }
+.modal .settings-row select { font-size: 11px; border: 1px solid var(--border); background: var(--bg-input); color: var(--text); padding: 3px 6px; cursor: pointer; width: auto; margin-bottom: 0; }
 /* Toggle switch */
 .toggle-wrap { display: flex; align-items: center; gap: 6px; }
 .toggle { position: relative; width: 32px; height: 18px; flex-shrink: 0; }
@@ -397,11 +397,7 @@ body {
 .token-item-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .token-name { font-size: 12px; font-weight: 500; display: flex; align-items: center; flex-wrap: wrap; gap: 4px; word-break: break-word; }
 .token-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.token-key { display: flex; align-items: center; gap: 5px; }
 .token-prefix { font-size: 11px; font-family: monospace; color: var(--text-mute); }
-.token-key-masked { font-size: 11px; font-family: monospace; color: var(--text-dim); letter-spacing: 2px; }
-.token-key-toggle { background: none; border: none; padding: 0; font-size: 10px; color: var(--text-dim); cursor: pointer; text-decoration: underline; }
-.token-key-toggle:hover { color: var(--text-mute); }
 .token-date { font-size: 10px; color: var(--text-dim); }
 .token-item-actions { display: flex; flex-direction: column; gap: 4px; flex-shrink: 0; }
 .token-revoke { background: none; border: 1px solid var(--border); padding: 4px 8px; font-size: 10px; cursor: pointer; color: var(--color-error); min-height: 26px; white-space: nowrap; }
