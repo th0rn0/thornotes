@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Thornotes — Cannot Connect</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #1a1a2e;
+    color: #e0e0e0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+  }
+  .card {
+    background: #16213e;
+    border: 1px solid #2a2a4a;
+    border-radius: 12px;
+    padding: 40px;
+    width: 460px;
+    text-align: center;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+  }
+  .icon { font-size: 48px; margin-bottom: 20px; }
+  h1 { font-size: 22px; font-weight: 700; margin-bottom: 10px; }
+  .url-display {
+    background: #0f0f23;
+    border: 1px solid #2a2a4a;
+    border-radius: 6px;
+    padding: 8px 12px;
+    font-size: 13px;
+    color: #aaa;
+    word-break: break-all;
+    margin: 16px 0 24px;
+  }
+  .actions { display: flex; gap: 12px; }
+  .btn {
+    flex: 1;
+    padding: 11px;
+    border: none;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .btn-primary { background: #7c6cf7; color: #fff; }
+  .btn-primary:hover { background: #9580ff; }
+  .btn-primary:disabled { background: #44406a; cursor: not-allowed; }
+  .btn-secondary { background: #2a2a4a; color: #ccc; }
+  .btn-secondary:hover { background: #3a3a5a; }
+  .status { font-size: 13px; color: #888; margin-top: 16px; min-height: 20px; }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="icon">⚠</div>
+  <h1>Cannot connect to server</h1>
+  <p style="color:#888;font-size:14px">Make sure your Thornotes server is running at:</p>
+  <div class="url-display" id="server-url">—</div>
+  <div class="actions">
+    <button class="btn btn-primary" id="retry-btn" onclick="retry()">Retry</button>
+    <button class="btn btn-secondary" onclick="changeURL()">Change URL</button>
+  </div>
+  <div class="status" id="status"></div>
+</div>
+
+<script>
+const params = new URLSearchParams(window.location.search);
+const serverURL = params.get('url') || '(unknown)';
+document.getElementById('server-url').textContent = serverURL;
+
+async function retry() {
+  const btn = document.getElementById('retry-btn');
+  const status = document.getElementById('status');
+  btn.disabled = true;
+  btn.textContent = 'Retrying…';
+  status.textContent = '';
+  try {
+    const ok = await goRetryConnect();
+    if (!ok) {
+      status.textContent = 'Still unreachable. Is the server running?';
+      btn.disabled = false;
+      btn.textContent = 'Retry';
+    }
+    // On success goRetryConnect navigates away — nothing more to do.
+  } catch (e) {
+    status.textContent = String(e);
+    btn.disabled = false;
+    btn.textContent = 'Retry';
+  }
+}
+
+async function changeURL() {
+  await goChangeURL();
+}
+</script>
+</body>
+</html>
