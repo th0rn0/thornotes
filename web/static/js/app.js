@@ -1599,7 +1599,10 @@ async function refreshTokenList() {
       <div class="token-item-info">
         <span class="token-name">${esc(t.name)}<span class="token-scope-badge ${esc(scope)}">${scopeLabel}</span>${scopedBadge}</span>
         <span class="token-meta">
-          <span class="token-prefix" title="Token prefix">${esc(t.prefix)}…</span>
+          <span class="token-key">
+            <span class="token-key-masked" data-prefix="${esc(t.prefix)}">••••••••</span>
+            <button class="token-key-toggle" data-action="toggle-token-key" title="Show/hide key">show</button>
+          </span>
           <span class="token-date">created ${created} · used ${used}</span>
         </span>
       </div>
@@ -2225,7 +2228,22 @@ document.getElementById('token-list').addEventListener('click', function(e) {
   const revokeBtn = e.target.closest('[data-action="revoke-token"]');
   if (revokeBtn) { revokeToken(Number(revokeBtn.dataset.tokenId)); return; }
   const permsBtn = e.target.closest('[data-action="edit-token-perms"]');
-  if (permsBtn) openTokenPermsModal(Number(permsBtn.dataset.tokenId));
+  if (permsBtn) { openTokenPermsModal(Number(permsBtn.dataset.tokenId)); return; }
+  const toggleBtn = e.target.closest('[data-action="toggle-token-key"]');
+  if (toggleBtn) {
+    const keyEl = toggleBtn.previousElementSibling;
+    const visible = keyEl.dataset.visible === 'true';
+    keyEl.dataset.visible = !visible;
+    if (visible) {
+      keyEl.textContent = '••••••••';
+      keyEl.className = 'token-key-masked';
+      toggleBtn.textContent = 'show';
+    } else {
+      keyEl.textContent = keyEl.dataset.prefix + '…';
+      keyEl.className = 'token-prefix';
+      toggleBtn.textContent = 'hide';
+    }
+  }
 });
 
 // Token permissions modal wiring.
