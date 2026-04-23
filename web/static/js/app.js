@@ -1596,11 +1596,17 @@ async function refreshTokenList() {
       ? `<span class="token-scope-badge scoped" title="Folder-scoped">${perms.length} folder${perms.length === 1 ? '' : 's'}</span>`
       : '';
     html += `<div class="token-item">
-      <span class="token-name">${esc(t.name)}<span class="token-scope-badge ${esc(scope)}">${scopeLabel}</span>${scopedBadge}</span>
-      <span class="token-prefix" title="Token prefix">${esc(t.prefix)}…</span>
-      <span class="token-date">created ${created} · used ${used}</span>
-      <button class="token-revoke" data-action="edit-token-perms" data-token-id="${t.id}">Permissions</button>
-      <button class="token-revoke" data-action="revoke-token" data-token-id="${t.id}">Revoke</button>
+      <div class="token-item-info">
+        <span class="token-name">${esc(t.name)}<span class="token-scope-badge ${esc(scope)}">${scopeLabel}</span>${scopedBadge}</span>
+        <span class="token-meta">
+          <span class="token-prefix" title="Token prefix">${esc(t.prefix)}…</span>
+          <span class="token-date">created ${created} · used ${used}</span>
+        </span>
+      </div>
+      <div class="token-item-actions">
+        <button class="token-revoke" data-action="edit-token-perms" data-token-id="${t.id}">Permissions</button>
+        <button class="token-revoke" data-action="revoke-token" data-token-id="${t.id}">Revoke</button>
+      </div>
     </div>`;
   }
   el.innerHTML = html;
