@@ -1,4 +1,4 @@
-package main
+package core
 
 import (
 	"encoding/json"
@@ -13,7 +13,7 @@ type Config struct {
 	Autostart bool   `json:"autostart"`
 }
 
-func configPath() (string, error) {
+func ConfigPath() (string, error) {
 	dir, err := os.UserConfigDir()
 	if err != nil {
 		return "", fmt.Errorf("user config dir: %w", err)
@@ -21,8 +21,10 @@ func configPath() (string, error) {
 	return filepath.Join(dir, "thornotes", "desktop.json"), nil
 }
 
-func loadConfig() (*Config, bool, error) {
-	path, err := configPath()
+// LoadConfig reads the config file. Returns (cfg, exists, err).
+// If the file does not exist, cfg has defaults and exists is false.
+func LoadConfig() (*Config, bool, error) {
+	path, err := ConfigPath()
 	if err != nil {
 		return nil, false, err
 	}
@@ -40,8 +42,9 @@ func loadConfig() (*Config, bool, error) {
 	return &cfg, true, nil
 }
 
-func saveConfig(cfg *Config) error {
-	path, err := configPath()
+// SaveConfig writes cfg atomically to the config file.
+func SaveConfig(cfg *Config) error {
+	path, err := ConfigPath()
 	if err != nil {
 		return err
 	}

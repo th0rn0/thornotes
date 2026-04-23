@@ -1,4 +1,4 @@
-package main
+package core
 
 import (
 	"fmt"
@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 )
 
-func autostartPath() (string, error) {
+func AutostartPath() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
@@ -14,8 +14,10 @@ func autostartPath() (string, error) {
 	return filepath.Join(home, ".config", "autostart", "thornotes-desktop.desktop"), nil
 }
 
-func setAutostart(enabled bool) error {
-	path, err := autostartPath()
+// SetAutostart writes or removes the XDG autostart .desktop file.
+// The Exec= path is determined via os.Executable().
+func SetAutostart(enabled bool) error {
+	path, err := AutostartPath()
 	if err != nil {
 		return err
 	}
