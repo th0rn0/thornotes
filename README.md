@@ -180,21 +180,34 @@ sudo systemctl enable --now thornotes
 
 ### Linux desktop app (AppImage)
 
-A native desktop window is also available as an AppImage attached to each release. It opens a dedicated thornotes window (using WebKitGTK) pointed at your running thornotes server — no browser tab required.
+A native desktop window is available as an AppImage attached to each release. It opens a dedicated Thornotes window (WebKitGTK) pointed at your running server — no browser tab required.
+
+**Install:**
+
+1. Go to the [latest release](https://github.com/th0rn0/thornotes/releases/latest) and download `thornotes-desktop-v*-linux-amd64.AppImage`.
+2. Make it executable and move it somewhere on your PATH:
 
 ```sh
-# Download and install
-curl -fsSL -o ~/.local/bin/thornotes-desktop.AppImage \
-  https://github.com/th0rn0/thornotes/releases/latest/download/thornotes-desktop-<version>-linux-amd64.AppImage
-chmod +x ~/.local/bin/thornotes-desktop.AppImage
+chmod +x thornotes-desktop-v*-linux-amd64.AppImage
+mkdir -p ~/.local/bin
+mv thornotes-desktop-v*-linux-amd64.AppImage ~/.local/bin/thornotes-desktop.AppImage
+```
 
-# Run
+3. Run it:
+
+```sh
 ~/.local/bin/thornotes-desktop.AppImage
 ```
 
-On first launch, a setup dialog asks for your server URL (default: `http://localhost:8080`) and an optional "start on login" toggle. After saving, the app navigates directly to your server. Config is stored at `~/.config/thornotes/desktop.json`.
+**First launch:** A setup dialog appears asking for your server URL (default: `http://localhost:8080`) and an optional "Start on login" toggle. After saving, the window navigates directly to your server. Config is stored at `~/.config/thornotes/desktop.json`.
 
-The app requires WebKitGTK 4.0 (`libwebkit2gtk-4.0`) to be installed on the host, or the AppImage bundles its own copy (built with `linuxdeploy-plugin-gtk`).
+**If the server is unreachable at startup:** A "Cannot connect" screen appears with a Retry button and a "Change URL" button that returns to the setup dialog.
+
+**Start on login:** The toggle in the setup dialog writes an XDG autostart entry to `~/.config/autostart/thornotes-desktop.desktop`. For this to survive moves, keep the AppImage at a stable path (e.g. `~/.local/bin/thornotes-desktop.AppImage`) before enabling it.
+
+**Session persistence:** WebKitGTK stores cookies in `~/.local/share/webkit/` — you will only need to log in once per install.
+
+**System requirements:** The AppImage bundles WebKitGTK 4.0 and GTK3 via `linuxdeploy`. Any glibc-compatible Linux distro with a display server (X11 or Wayland via XWayland) is supported. No external webkit package required.
 
 ## Configuration
 

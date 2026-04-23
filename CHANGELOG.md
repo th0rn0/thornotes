@@ -2,6 +2,14 @@
 
 All notable changes to thornotes are documented here.
 
+## [1.5.12.0] - 2026-04-23
+
+### Added
+- **Linux desktop app** — native WebKitGTK window (`desktop/`) that points at your Thornotes server. Distributed as an AppImage attached to each release. First-run setup dialog collects server URL and optional start-on-login. "Cannot connect" overlay with Retry and Change URL actions. Config stored at `~/.config/thornotes/desktop.json`; autostart entry written to `~/.config/autostart/thornotes-desktop.desktop`.
+- **Static Linux server binary** — pre-built `thornotes-linux-amd64` (CGO-disabled, no libc dependencies) attached to each GitHub release for non-Docker installs.
+- **Non-Docker installation docs** — README now covers: quick-start binary, systemd service unit, and AppImage desktop app install with full first-run and session-persistence details.
+- **CI: `build-linux-binary` and `build-desktop` steps** — tag builds now produce and attach the server binary and desktop AppImage to the GitHub release.
+
 ## [1.5.11.4] - 2026-04-23
 
 ### Fixed
