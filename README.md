@@ -29,6 +29,8 @@ A self-hosted Markdown note-taking app with file-as-canonical storage. Every not
 - Daily journal with multi-journal support
 - Import `.md` files or `.zip` archives (folder structure preserved)
 
+For a full walkthrough of all features, see the **[How-To Guide](docs/how-to.md)**.
+
 ## Quick start with Docker
 
 The image is published for `linux/amd64` and `linux/arm64` (Raspberry Pi, NAS, Apple Silicon via Rosetta).
