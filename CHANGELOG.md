@@ -2,6 +2,11 @@
 
 All notable changes to thornotes are documented here.
 
+## [1.5.12.1] - 2026-04-24
+
+### Added
+- **How-To Guide** (`docs/how-to.md`) — comprehensive walkthrough covering all features: editor, folders, tags, search, sharing, journals, version history, import, themes, API tokens, MCP server, desktop app, and keyboard shortcuts.
+
 ## [1.5.12.0] - 2026-04-23
 
 ### Added
