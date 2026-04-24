@@ -6,33 +6,152 @@ Thornotes is a self-hosted markdown notes app. Every note is a real `.md` file o
 
 ## Table of Contents
 
-1. [Getting Started](#getting-started)
-2. [Creating Notes](#creating-notes)
-3. [The Editor](#the-editor)
-4. [Organizing with Folders](#organizing-with-folders)
-5. [Using Tags](#using-tags)
-6. [Search](#search)
-7. [Sharing Notes](#sharing-notes)
-8. [Journals](#journals)
-9. [Version History](#version-history)
-10. [Import](#import)
-11. [Themes](#themes)
-12. [API Tokens](#api-tokens)
-13. [MCP Server (AI Integration)](#mcp-server-ai-integration)
-14. [Desktop App](#desktop-app)
-15. [Keyboard Shortcuts](#keyboard-shortcuts)
+1. [Installation](#installation)
+2. [Getting Started — Web Interface](#getting-started--web-interface)
+3. [Desktop App](#desktop-app)
+4. [Creating Notes](#creating-notes)
+5. [The Editor](#the-editor)
+6. [Organizing with Folders](#organizing-with-folders)
+7. [Using Tags](#using-tags)
+8. [Search](#search)
+9. [Sharing Notes](#sharing-notes)
+10. [Journals](#journals)
+11. [Version History](#version-history)
+12. [Import](#import)
+13. [Themes](#themes)
+14. [API Tokens](#api-tokens)
+15. [MCP Server (AI Integration)](#mcp-server-ai-integration)
+16. [Keyboard Shortcuts](#keyboard-shortcuts)
 
 ---
 
-## Getting Started
+## Installation
+
+Thornotes is a server application — you run it once and access it from any browser (or the desktop app). Pick the method that fits your setup.
+
+### Option 1: Docker (recommended)
+
+The quickest way to get running. Requires [Docker](https://docs.docker.com/get-docker/).
+
+```sh
+docker run -d \
+  --name thornotes \
+  -v thornotes-data:/data \
+  -p 8080:8080 \
+  th0rn0/thornotes
+```
+
+Open [http://localhost:8080](http://localhost:8080) and register your account.
+
+For persistent configuration or MariaDB, use Docker Compose — see the [README](../README.md#docker-compose) for full examples.
+
+### Option 2: Linux binary
+
+Pre-built static binaries are attached to every [release](https://github.com/th0rn0/thornotes/releases/latest). No runtime dependencies — just download and run.
+
+```sh
+# Download
+curl -fsSL -o thornotes https://github.com/th0rn0/thornotes/releases/latest/download/thornotes-linux-amd64
+chmod +x thornotes
+
+# Create a data directory and start
+mkdir -p ~/thornotes-data/notes
+./thornotes \
+  --addr :8080 \
+  --db ~/thornotes-data/thornotes.db \
+  --notes-root ~/thornotes-data/notes
+```
+
+Open [http://localhost:8080](http://localhost:8080) and register your account.
+
+To run as a background service, see the [systemd setup](../README.md#running-as-a-systemd-service) in the README.
+
+### Option 3: Build from source
+
+Requires Go 1.26+.
+
+```sh
+git clone https://github.com/th0rn0/thornotes
+cd thornotes
+make build
+./thornotes --addr :8080 --db thornotes.db --notes-root notes
+```
+
+### After installation — first steps
+
+1. Open the server URL in a browser.
+2. Click **Register** to create your account.
+3. Once you have an account, disable public registration so no one else can sign up:
+
+   ```sh
+   # Docker
+   docker run ... -e THORNOTES_ALLOW_REGISTRATION=false ...
+   # Binary
+   ./thornotes --allow-registration=false ...
+   ```
+
+4. Optionally install the [Desktop App](#desktop-app) for a native window experience.
+
+---
+
+## Getting Started — Web Interface
 
 Open Thornotes in your browser. If this is your first time, you'll see the login screen.
 
 ![Login screen](./screenshot-login.png)
 
-**First run:** Click **Register** to create an account. Once you have at least one account, you can disable registration via the `--allow-registration=false` flag (or `THORNOTES_ALLOW_REGISTRATION=false` env var) to prevent new sign-ups.
+Click **Register** to create an account. After logging in you'll land on the main interface: the folder tree on the left, note list in the middle, and editor on the right.
 
-After logging in you'll land on the main interface: the folder tree on the left, note list in the middle, and editor on the right.
+---
+
+## Desktop App
+
+The Linux desktop app gives you a dedicated native window for Thornotes — no browser tab needed. It requires a running Thornotes server (Docker, binary, or remote). The server URL is configured on first launch and stored locally.
+
+### Download
+
+Go to the [latest release](https://github.com/th0rn0/thornotes/releases/latest) and download `thornotes-desktop-vX.X.X.X-linux-amd64.AppImage`.
+
+The AppImage is self-contained — WebKitGTK and all required libraries are bundled inside. No system packages need to be installed.
+
+**System requirements:** Any glibc-compatible Linux distro with a display server (X11 or Wayland via XWayland). Tested on GNOME, KDE, and most common desktop environments.
+
+### Install and run
+
+```sh
+chmod +x thornotes-desktop-*.AppImage
+mkdir -p ~/.local/bin
+mv thornotes-desktop-*.AppImage ~/.local/bin/thornotes-desktop.AppImage
+~/.local/bin/thornotes-desktop.AppImage
+```
+
+Moving the AppImage to a stable path before enabling "Start on login" ensures the autostart entry keeps working even if you re-download a new version over the same filename.
+
+### First-time setup
+
+On first launch a setup dialog appears:
+
+- **Server URL** — enter the address of your Thornotes server, e.g. `http://localhost:8080` or `https://notes.example.com`. The app tests the URL before saving.
+- **Start on login** — tick this to add Thornotes to your XDG autostart (`~/.config/autostart/thornotes-desktop.desktop`). The app launches in the background whenever you log in.
+
+Click **Save**. The app navigates to your server and shows the full Thornotes interface.
+
+### Session persistence
+
+WebKitGTK stores session cookies in `~/.local/share/webkit/`. You only need to log in once — subsequent launches open directly to your notes.
+
+### Cannot connect
+
+If the server is unreachable at startup, a "Cannot connect" overlay appears with two options:
+
+- **Retry** — try the same URL again (useful if the server is still booting).
+- **Change URL** — return to the setup dialog to point the app at a different server.
+
+### Changing the server URL
+
+Click the **settings icon** in the corner of the app window at any time to reopen the setup dialog and update the URL or toggle the login setting.
+
+Config is stored at `~/.config/thornotes/desktop.json`. You can edit it directly or delete it to reset to first-run state.
 
 ---
 
@@ -308,36 +427,6 @@ Notes are also exposed as MCP resources at `note://{id}`. AI clients that suppor
 ### Token-Scoped Access
 
 MCP respects all API token permissions. A read-only token can only use read tools. A folder-scoped token only sees the permitted folders. The AI assistant cannot access anything the token isn't permitted to see.
-
----
-
-## Desktop App
-
-Thornotes ships a Linux desktop app as an AppImage — a self-contained executable that runs without installation.
-
-### Download and Run
-
-1. Download `thornotes-desktop-vX.X.X.X-linux-amd64.AppImage` from the [releases page](https://github.com/th0rn0/thornotes/releases).
-2. Make it executable:
-   ```bash
-   chmod +x thornotes-desktop-*.AppImage
-   ```
-3. Run it:
-   ```bash
-   ./thornotes-desktop-*.AppImage
-   ```
-
-### First-Time Setup
-
-On first launch a setup dialog asks for your Thornotes server URL (e.g. `http://localhost:8080` or `https://notes.example.com`). Enter the address and click **Save**.
-
-The app opens a native window showing the full Thornotes interface. Your session persists between restarts — you won't need to log in again.
-
-### Start on Login
-
-In the setup dialog, enable **Start on login** to add Thornotes to your XDG autostart. It will launch silently in the background whenever you log in to your desktop.
-
-To change the server URL later, click the settings icon in the corner of the app window.
 
 ---
 

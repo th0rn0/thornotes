@@ -29,8 +29,6 @@ A self-hosted Markdown note-taking app with file-as-canonical storage. Every not
 - Daily journal with multi-journal support
 - Import `.md` files or `.zip` archives (folder structure preserved)
 
-For a full walkthrough of all features, see the **[How-To Guide](docs/how-to.md)**.
-
 ## Quick start with Docker
 
 The image is published for `linux/amd64` and `linux/arm64` (Raspberry Pi, NAS, Apple Silicon via Rosetta).
@@ -43,7 +41,9 @@ docker run -d \
   th0rn0/thornotes
 ```
 
-Open [http://localhost:8080](http://localhost:8080), register an account, and start writing.
+Open [http://localhost:8080](http://localhost:8080) and register your account. Once you've signed up, set `THORNOTES_ALLOW_REGISTRATION=false` and restart to close public sign-up.
+
+For a full walkthrough of all features, see the **[How-To Guide](docs/how-to.md)**.
 
 ### Docker Compose
 
@@ -144,7 +144,7 @@ mkdir -p ~/thornotes-data/notes
   --notes-root ~/thornotes-data/notes
 ```
 
-Open [http://localhost:8080](http://localhost:8080), register an account, and start writing.
+Open [http://localhost:8080](http://localhost:8080) and register your account.
 
 ### Running as a systemd service
 

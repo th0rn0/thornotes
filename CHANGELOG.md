@@ -2,6 +2,12 @@
 
 All notable changes to thornotes are documented here.
 
+## [1.5.12.2] - 2026-04-24
+
+### Changed
+- **Documentation** — how-to guide now includes a full Installation section (Docker, binary, build from source), an expanded Desktop App section (setup dialog, session persistence, cannot-connect screen, config file location), and a tips section covering post-install hardening. README quick-start links to the how-to guide and clarifies the first-run registration flow.
+- **Release notes** — each GitHub release now includes a Downloads table explaining what each attached file is and links to the how-to guide.
+
 ## [1.5.12.1] - 2026-04-24
 
 ### Added
