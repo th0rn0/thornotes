@@ -455,25 +455,7 @@ steps:
         from_secret: github_token
     commands:
       - apk add -q curl jq
-      - |
-        UPLOAD_URL=$(curl -s --fail \
-          -H "Authorization: Bearer $GITHUB_TOKEN" \
-          "https://api.github.com/repos/$DRONE_REPO/releases/tags/$DRONE_TAG" \
-          | jq -r '.upload_url' | sed 's/{?name,label}//')
-        [ -n "$UPLOAD_URL" ] && [ "$UPLOAD_URL" != "null" ] || { echo "ERROR: no upload_url from GitHub API"; exit 1; }
-        curl -s --fail -X POST \
-          -H "Authorization: Bearer $GITHUB_TOKEN" \
-          -H "Content-Type: application/octet-stream" \
-          --data-binary @"thornotes-linux-amd64" \
-          "${UPLOAD_URL}?name=thornotes-linux-amd64"
-        APPIMAGE=$(ls thornotes-desktop-${DRONE_TAG}-linux-amd64.AppImage 2>/dev/null || true)
-        if [ -n "$APPIMAGE" ]; then
-          curl -s --fail -X POST \
-            -H "Authorization: Bearer $GITHUB_TOKEN" \
-            -H "Content-Type: application/octet-stream" \
-            --data-binary @"$APPIMAGE" \
-            "${UPLOAD_URL}?name=${APPIMAGE}"
-        fi
+      - 'UPLOAD_URL=$(curl -s --fail -H "Authorization: Bearer $GITHUB_TOKEN" "https://api.github.com/repos/$DRONE_REPO/releases/tags/$DRONE_TAG" | jq -r ".upload_url" | sed "s/{?name,label}//") && if [ -z "$UPLOAD_URL" ] || [ "$UPLOAD_URL" = "null" ]; then echo "ERROR: no upload_url from GitHub API"; exit 1; fi && curl -s --fail -X POST -H "Authorization: Bearer $GITHUB_TOKEN" -H "Content-Type: application/octet-stream" --data-binary @thornotes-linux-amd64 "$UPLOAD_URL?name=thornotes-linux-amd64" && APPIMAGE=$(ls thornotes-desktop-${DRONE_TAG}-linux-amd64.AppImage 2>/dev/null || true) && if [ -n "$APPIMAGE" ]; then curl -s --fail -X POST -H "Authorization: Bearer $GITHUB_TOKEN" -H "Content-Type: application/octet-stream" --data-binary @"$APPIMAGE" "$UPLOAD_URL?name=$APPIMAGE"; fi'
     when:
       event:
         - tag
