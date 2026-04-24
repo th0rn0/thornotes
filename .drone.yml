@@ -443,7 +443,7 @@ steps:
         from_secret: github_token
     commands:
       - apk add -q curl jq
-      - VERSION=${DRONE_TAG#v} && awk "/^## \[$VERSION\]/{found=1; next} found && /^## \[/{exit} found{print}" CHANGELOG.md > /tmp/body.txt && curl -s --fail -X POST -H "Authorization: Bearer $GITHUB_TOKEN" -H "Content-Type: application/json" "https://api.github.com/repos/$DRONE_REPO/releases" -d "{\"tag_name\":\"$DRONE_TAG\",\"name\":\"$DRONE_TAG\",\"body\":$(jq -Rs . /tmp/body.txt)}"
+      - 'VERSION=${DRONE_TAG#v} && awk "/^## \[$VERSION\]/{found=1; next} found && /^## \[/{exit} found{print}" CHANGELOG.md > /tmp/body.txt && curl -s --fail -X POST -H "Authorization: Bearer $GITHUB_TOKEN" -H "Content-Type: application/json" "https://api.github.com/repos/$DRONE_REPO/releases" -d "{\"tag_name\":\"$DRONE_TAG\",\"name\":\"$DRONE_TAG\",\"body\":$(jq -Rs . /tmp/body.txt)}"'
     when:
       event:
         - tag
