@@ -443,9 +443,9 @@ steps:
         from_secret: github_token
     commands:
       - apk add -q curl jq
-      - VERSION=${DRONE_TAG#v}
-      - BODY=$(awk "/^## \\[${VERSION}\\]/{found=1; next} found && /^## \\[/{exit} found{print}" CHANGELOG.md)
       - |
+        VERSION=${DRONE_TAG#v}
+        BODY=$(awk "/^## \[$VERSION\]/{found=1; next} found && /^## \[/{exit} found{print}" CHANGELOG.md)
         curl -s --fail -X POST \
           -H "Authorization: Bearer $GITHUB_TOKEN" \
           -H "Content-Type: application/json" \
