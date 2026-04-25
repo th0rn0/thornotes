@@ -428,7 +428,7 @@ steps:
       - curl -fsSL -o /usr/local/bin/linuxdeploy https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage && chmod +x /usr/local/bin/linuxdeploy
       - curl -fsSL -o /usr/local/bin/linuxdeploy-plugin-gtk https://raw.githubusercontent.com/linuxdeploy/linuxdeploy-plugin-gtk/master/linuxdeploy-plugin-gtk.sh && chmod +x /usr/local/bin/linuxdeploy-plugin-gtk
       - curl -fsSL -o /usr/local/bin/appimagetool https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage && chmod +x /usr/local/bin/appimagetool
-      - OUTPUT="thornotes-desktop-${DRONE_TAG}-linux-amd64.AppImage" linuxdeploy --appdir AppDir --plugin gtk --output appimage
+      - OUTPUT="thornotes-desktop-${DRONE_TAG}-linux-amd64.AppImage" linuxdeploy --appdir AppDir --plugin gtk --exclude-library 'libwebkit2gtk-4.0.so.37' --exclude-library 'libjavascriptcoregtk-4.0.so.18' --exclude-library 'libwebkit2gtkinjectedbundle.so' --output appimage
     when:
       event:
         - tag

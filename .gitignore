@@ -10,4 +10,5 @@ notes-dev/
 coverage.out
 .claude/
 .context/
+.playwright-mcp/
 desktop/coverage.html

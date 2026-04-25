@@ -2,6 +2,11 @@
 
 All notable changes to thornotes are documented here.
 
+## [1.5.12.3] - 2026-04-25
+
+### Fixed
+- **Desktop AppImage on non-Debian distros (Arch, CachyOS, Fedora, etc.)** — the bundled `libwebkit2gtk-4.0` had the Debian helper path (`/usr/lib/x86_64-linux-gnu/webkit2gtk-4.0/`) hardcoded, causing `WebKitNetworkProcess` to fail on distros with a different layout. WebKit and its helper libraries are now excluded from the AppImage bundle so the system's WebKit is used, which always knows where its own helpers live. Requires `webkit2gtk` (or distro equivalent) installed as a system package — the Desktop App section of the how-to guide now lists install commands for common distros.
+
 ## [1.5.12.2] - 2026-04-24
 
 ### Changed
