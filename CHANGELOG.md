@@ -2,6 +2,11 @@
 
 All notable changes to thornotes are documented here.
 
+## [1.5.12.6] - 2026-04-25
+
+### Fixed
+- **Desktop AppImage WebKit bundling (final)** — replaced the bwrap bind-mount approach (which failed on Arch/CachyOS because `/usr/lib/x86_64-linux-gnu/` doesn't exist, so bwrap can't create the mount point) with a binary patch: the hardcoded helper path `/usr/lib/x86_64-linux-gnu/webkit2gtk-4.0` is patched in the bundled `libwebkit2gtk-4.0.so` to `/tmp/webkit-tn4` (same byte length with null padding), and AppRun creates a symlink at that path pointing at the bundled helpers before launch. No bwrap, no system packages required.
+
 ## [1.5.12.5] - 2026-04-25
 
 ### Fixed
