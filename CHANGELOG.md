@@ -2,6 +2,11 @@
 
 All notable changes to thornotes are documented here.
 
+## [1.5.12.5] - 2026-04-25
+
+### Fixed
+- **Desktop AppImage is now fully self-contained** — webkit2gtk and its helper processes (`WebKitNetworkProcess`, `WebKitWebProcess`) are bundled inside the AppImage. A bundled `bwrap` (bubblewrap) binary is used to bind-mount the helpers at the absolute path the bundled webkit library expects, making the AppImage work on any distro without requiring any system packages.
+
 ## [1.5.12.4] - 2026-04-25
 
 ### Fixed

@@ -112,16 +112,9 @@ The Linux desktop app gives you a dedicated native window for Thornotes — no b
 
 Go to the [latest release](https://github.com/th0rn0/thornotes/releases/latest) and download `thornotes-desktop-vX.X.X.X-linux-amd64.AppImage`.
 
-The AppImage bundles most dependencies but uses the **system WebKit2GTK** to avoid path issues across distros. Install it once with your package manager:
+The AppImage is fully self-contained — WebKitGTK and all required libraries are bundled inside. No system packages need to be installed.
 
-| Distro | Command |
-|--------|---------|
-| Arch / CachyOS / Manjaro | `sudo pacman -S webkit2gtk` |
-| Ubuntu / Debian | `sudo apt install libwebkit2gtk-4.0-37` |
-| Fedora | `sudo dnf install webkit2gtk4.0` |
-| openSUSE | `sudo zypper install libwebkit2gtk-4_0-37` |
-
-**System requirements:** Any glibc-compatible Linux distro with WebKit2GTK 4.0 and a display server (X11 or Wayland via XWayland). Tested on GNOME, KDE, and most common desktop environments.
+**System requirements:** Any glibc-compatible Linux distro with a display server (X11 or Wayland via XWayland) and a kernel with unprivileged user namespaces enabled (the default on all major distributions since ~2016). Tested on GNOME, KDE, and most common desktop environments.
 
 ### Install and run
 
