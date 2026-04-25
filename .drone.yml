@@ -430,7 +430,7 @@ steps:
       - curl -fsSL -o /usr/local/bin/appimagetool https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage && chmod +x /usr/local/bin/appimagetool
       - linuxdeploy --appdir AppDir --plugin gtk
       - mkdir -p AppDir/usr/lib/x86_64-linux-gnu/webkit2gtk-4.0 && cp /usr/lib/x86_64-linux-gnu/webkit2gtk-4.0/WebKitNetworkProcess /usr/lib/x86_64-linux-gnu/webkit2gtk-4.0/WebKitWebProcess AppDir/usr/lib/x86_64-linux-gnu/webkit2gtk-4.0/ && (cp /usr/lib/x86_64-linux-gnu/webkit2gtk-4.0/libwebkit2gtkinjectedbundle.so AppDir/usr/lib/x86_64-linux-gnu/webkit2gtk-4.0/ 2>/dev/null || true)
-      - find AppDir/usr/lib -name 'libwebkit2gtk-4.0.so.37.*' ! -type l -exec perl -0777 -i -pe 's|/usr/lib/x86_64-linux-gnu/webkit2gtk-4\.0\x00|/tmp/webkit-tn4\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00|g' {} +
+      - find AppDir/usr/lib -name 'libwebkit2gtk-4.0.so*' ! -type l -exec perl -0777 -i -pe 's|/usr/lib/x86_64-linux-gnu/webkit2gtk-4\.0\x00|/tmp/webkit-tn4\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00|g' {} +
       - mv AppDir/AppRun AppDir/AppRun.original && printf '#!/bin/sh\nHERE="$(dirname "$(readlink -f "$0")")"\nexport APPDIR="${APPDIR:-$HERE}"\nln -sfn "$APPDIR/usr/lib/x86_64-linux-gnu/webkit2gtk-4.0" /tmp/webkit-tn4\nexec "$APPDIR/AppRun.original" "$@"\n' > AppDir/AppRun && chmod +x AppDir/AppRun
       - ARCH=x86_64 appimagetool AppDir "thornotes-desktop-${DRONE_TAG}-linux-amd64.AppImage"
     when:

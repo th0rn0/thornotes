@@ -2,6 +2,11 @@
 
 All notable changes to thornotes are documented here.
 
+## [1.5.12.7] - 2026-04-25
+
+### Fixed
+- **Desktop AppImage webkit binary patch** — glob `libwebkit2gtk-4.0.so.37.*` missed the file when linuxdeploy deploys it as the SONAME name `libwebkit2gtk-4.0.so.37` (no version suffix). Broadened to `libwebkit2gtk-4.0.so*` to match regardless of how linuxdeploy names it.
+
 ## [1.5.12.6] - 2026-04-25
 
 ### Fixed
