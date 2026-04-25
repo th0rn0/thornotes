@@ -2,6 +2,12 @@
 
 All notable changes to thornotes are documented here.
 
+## [1.5.12.8] - 2026-04-25
+
+### Changed
+- **Desktop App** — removed the Linux AppImage. The how-to guide now documents using Chrome/Edge (PWA install), Firefox (dedicated window / `.desktop` shortcut), and Safari (Add to Dock) to pin Thornotes as a standalone desktop app.
+- **CI** — removed `build-desktop` step and AppImage upload from the release pipeline.
+
 ## [1.5.12.7] - 2026-04-25
 
 ### Fixed

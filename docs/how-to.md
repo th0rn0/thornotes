@@ -106,52 +106,50 @@ Click **Register** to create an account. After logging in you'll land on the mai
 
 ## Desktop App
 
-The Linux desktop app gives you a dedicated native window for Thornotes — no browser tab needed. It requires a running Thornotes server (Docker, binary, or remote). The server URL is configured on first launch and stored locally.
+Thornotes is a web app, so any browser can pin it as a standalone desktop app that opens in its own window without browser tabs or toolbars. No download required — just open your Thornotes server URL and follow the steps for your browser.
 
-### Download
+### Chrome / Chromium / Edge (recommended)
 
-Go to the [latest release](https://github.com/th0rn0/thornotes/releases/latest) and download `thornotes-desktop-vX.X.X.X-linux-amd64.AppImage`.
+Chrome and Edge give the best standalone experience: a dedicated window with no browser UI.
 
-The AppImage is fully self-contained — WebKitGTK and all required libraries are bundled inside. No system packages need to be installed.
+1. Open your Thornotes URL (e.g. `http://localhost:8080`)
+2. Log in
+3. Click the **install icon** (⊕) in the right side of the address bar — or open the menu (⋮) and choose **Install Thornotes** (Chrome) / **Apps → Install this site as an app** (Edge)
+4. Click **Install** in the dialog
 
-**System requirements:** Any glibc-compatible Linux distro with a display server (X11 or Wayland via XWayland) and a kernel with unprivileged user namespaces enabled (the default on all major distributions since ~2016). Tested on GNOME, KDE, and most common desktop environments.
+Thornotes now appears in your app launcher and taskbar like any other app. You can also right-click the taskbar entry and enable **Start on login**.
 
-### Install and run
+> If you don't see the install icon, open `chrome://flags` and ensure **Desktop PWA** is enabled.
 
+### Firefox
+
+Firefox doesn't support installing PWAs directly, but you can open Thornotes in a dedicated window without any browser chrome:
+
+**Option A — Open as app window:**
+1. Open your Thornotes URL
+2. Press `Alt` to show the menu bar → **Tools → Open in New Window Without Toolbars**
+
+**Option B — Create a launcher shortcut (Linux):**
 ```sh
-chmod +x thornotes-desktop-*.AppImage
-mkdir -p ~/.local/bin
-mv thornotes-desktop-*.AppImage ~/.local/bin/thornotes-desktop.AppImage
-~/.local/bin/thornotes-desktop.AppImage
+# Replace the URL with your Thornotes server address
+cat > ~/.local/share/applications/thornotes.desktop << 'EOF'
+[Desktop Entry]
+Name=Thornotes
+Exec=firefox --new-window http://localhost:8080
+Icon=firefox
+Type=Application
+Categories=Utility;
+EOF
 ```
+Then run `update-desktop-database ~/.local/share/applications` to make it appear in your launcher.
 
-Moving the AppImage to a stable path before enabling "Start on login" ensures the autostart entry keeps working even if you re-download a new version over the same filename.
+### Safari (macOS)
 
-### First-time setup
+1. Open your Thornotes URL in Safari
+2. Go to **File → Add to Dock…** (macOS Sonoma and later) or **File → Add to Home Screen** (earlier versions)
+3. Edit the name if you like and click **Add**
 
-On first launch a setup dialog appears:
-
-- **Server URL** — enter the address of your Thornotes server, e.g. `http://localhost:8080` or `https://notes.example.com`. The app tests the URL before saving.
-- **Start on login** — tick this to add Thornotes to your XDG autostart (`~/.config/autostart/thornotes-desktop.desktop`). The app launches in the background whenever you log in.
-
-Click **Save**. The app navigates to your server and shows the full Thornotes interface.
-
-### Session persistence
-
-WebKitGTK stores session cookies in `~/.local/share/webkit/`. You only need to log in once — subsequent launches open directly to your notes.
-
-### Cannot connect
-
-If the server is unreachable at startup, a "Cannot connect" overlay appears with two options:
-
-- **Retry** — try the same URL again (useful if the server is still booting).
-- **Change URL** — return to the setup dialog to point the app at a different server.
-
-### Changing the server URL
-
-Click the **settings icon** in the corner of the app window at any time to reopen the setup dialog and update the URL or toggle the login setting.
-
-Config is stored at `~/.config/thornotes/desktop.json`. You can edit it directly or delete it to reset to first-run state.
+Thornotes appears in your Dock and opens in its own minimal window.
 
 ---
 

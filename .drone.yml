@@ -407,36 +407,6 @@ steps:
       event:
         - tag
 
-# ── Linux Desktop AppImage ────────────────────────────────────────────────────
-# Builds the WebKitGTK desktop app and packages it as an AppImage.
-# Only runs on v* tags.
-
-  - name: build-desktop
-    image: golang:1.26-bookworm
-    environment:
-      APPIMAGE_EXTRACT_AND_RUN: "1"
-      DEBIAN_FRONTEND: noninteractive
-    commands:
-      - apt-get update -qq && apt-get install -y -qq gcc pkg-config libwebkit2gtk-4.0-dev libgtk-3-dev curl file dpkg-dev
-      - mkdir -p build AppDir/usr/bin AppDir/usr/share/icons/hicolor/256x256/apps
-      - cd desktop && go build -ldflags="-s -w" -o ../build/thornotes-desktop . && cd ..
-      - cp build/thornotes-desktop AppDir/usr/bin/thornotes-desktop
-      - cp desktop/assets/thornotes-desktop.png AppDir/usr/share/icons/hicolor/256x256/apps/thornotes-desktop.png
-      - cp desktop/assets/thornotes-desktop.desktop AppDir/
-      - cp desktop/assets/thornotes-desktop.png AppDir/thornotes-desktop.png
-      - printf '#!/bin/sh\nexec "$APPDIR/usr/bin/thornotes-desktop" "$@"\n' > AppDir/AppRun && chmod +x AppDir/AppRun
-      - curl -fsSL -o /usr/local/bin/linuxdeploy https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage && chmod +x /usr/local/bin/linuxdeploy
-      - curl -fsSL -o /usr/local/bin/linuxdeploy-plugin-gtk https://raw.githubusercontent.com/linuxdeploy/linuxdeploy-plugin-gtk/master/linuxdeploy-plugin-gtk.sh && chmod +x /usr/local/bin/linuxdeploy-plugin-gtk
-      - curl -fsSL -o /usr/local/bin/appimagetool https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage && chmod +x /usr/local/bin/appimagetool
-      - linuxdeploy --appdir AppDir --plugin gtk
-      - mkdir -p AppDir/usr/lib/x86_64-linux-gnu/webkit2gtk-4.0 && cp /usr/lib/x86_64-linux-gnu/webkit2gtk-4.0/WebKitNetworkProcess /usr/lib/x86_64-linux-gnu/webkit2gtk-4.0/WebKitWebProcess AppDir/usr/lib/x86_64-linux-gnu/webkit2gtk-4.0/ && (cp /usr/lib/x86_64-linux-gnu/webkit2gtk-4.0/libwebkit2gtkinjectedbundle.so AppDir/usr/lib/x86_64-linux-gnu/webkit2gtk-4.0/ 2>/dev/null || true)
-      - find AppDir/usr/lib -name 'libwebkit2gtk-4.0.so*' ! -type l -exec perl -0777 -i -pe 's|/usr/lib/x86_64-linux-gnu/webkit2gtk-4\.0\x00|/tmp/webkit-tn4\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00|g' {} +
-      - mv AppDir/AppRun AppDir/AppRun.original && printf '#!/bin/sh\nHERE="$(dirname "$(readlink -f "$0")")"\nexport APPDIR="${APPDIR:-$HERE}"\nln -sfn "$APPDIR/usr/lib/x86_64-linux-gnu/webkit2gtk-4.0" /tmp/webkit-tn4\nexec "$APPDIR/AppRun.original" "$@"\n' > AppDir/AppRun && chmod +x AppDir/AppRun
-      - ARCH=x86_64 appimagetool AppDir "thornotes-desktop-${DRONE_TAG}-linux-amd64.AppImage"
-    when:
-      event:
-        - tag
-
 # ── GitHub Release ────────────────────────────────────────────────────────────
 # Only runs on v* tags.
 
@@ -447,7 +417,7 @@ steps:
         from_secret: github_token
     commands:
       - apk add -q curl jq
-      - 'VERSION=${DRONE_TAG#v} && awk "/^## \[$VERSION\]/{found=1; next} found && /^## \[/{exit} found{print}" CHANGELOG.md > /tmp/body.txt && printf "\n\n## Downloads\n\n| File | Description |\n|------|-------------|\n| \`thornotes-linux-amd64\` | Static server binary for Linux (amd64). No dependencies — just download, chmod +x, and run. |\n| \`thornotes-desktop-%s-linux-amd64.AppImage\` | Linux desktop app (WebKitGTK native window). Requires a running Thornotes server. |\n\nSee the [How-To Guide](https://github.com/$DRONE_REPO/blob/main/docs/how-to.md) for installation and usage instructions.\n" "$DRONE_TAG" >> /tmp/body.txt && PAYLOAD="{\"tag_name\":\"$DRONE_TAG\",\"name\":\"$DRONE_TAG\",\"body\":$(jq -Rs . /tmp/body.txt)}" && HTTP=$(curl -s -o /tmp/rel.json -w "%{http_code}" -X POST -H "Authorization: Bearer $GITHUB_TOKEN" -H "Content-Type: application/json" "https://api.github.com/repos/$DRONE_REPO/releases" -d "$PAYLOAD") && echo "create HTTP $HTTP" && if [ "$HTTP" = "422" ]; then RID=$(curl -s -H "Authorization: Bearer $GITHUB_TOKEN" "https://api.github.com/repos/$DRONE_REPO/releases/tags/$DRONE_TAG" | jq -r .id) && curl -s --fail -X PATCH -H "Authorization: Bearer $GITHUB_TOKEN" -H "Content-Type: application/json" "https://api.github.com/repos/$DRONE_REPO/releases/$RID" -d "$PAYLOAD" > /dev/null && echo "updated existing release"; elif [ "$HTTP" != "201" ]; then cat /tmp/rel.json; exit 1; fi'
+      - 'VERSION=${DRONE_TAG#v} && awk "/^## \[$VERSION\]/{found=1; next} found && /^## \[/{exit} found{print}" CHANGELOG.md > /tmp/body.txt && printf "\n\n## Downloads\n\n| File | Description |\n|------|-------------|\n| \`thornotes-linux-amd64\` | Static server binary for Linux (amd64). No dependencies — just download, chmod +x, and run. |\n\nSee the [How-To Guide](https://github.com/$DRONE_REPO/blob/main/docs/how-to.md) for installation and usage instructions.\n" >> /tmp/body.txt && PAYLOAD="{\"tag_name\":\"$DRONE_TAG\",\"name\":\"$DRONE_TAG\",\"body\":$(jq -Rs . /tmp/body.txt)}" && HTTP=$(curl -s -o /tmp/rel.json -w "%{http_code}" -X POST -H "Authorization: Bearer $GITHUB_TOKEN" -H "Content-Type: application/json" "https://api.github.com/repos/$DRONE_REPO/releases" -d "$PAYLOAD") && echo "create HTTP $HTTP" && if [ "$HTTP" = "422" ]; then RID=$(curl -s -H "Authorization: Bearer $GITHUB_TOKEN" "https://api.github.com/repos/$DRONE_REPO/releases/tags/$DRONE_TAG" | jq -r .id) && curl -s --fail -X PATCH -H "Authorization: Bearer $GITHUB_TOKEN" -H "Content-Type: application/json" "https://api.github.com/repos/$DRONE_REPO/releases/$RID" -d "$PAYLOAD" > /dev/null && echo "updated existing release"; elif [ "$HTTP" != "201" ]; then cat /tmp/rel.json; exit 1; fi'
     when:
       event:
         - tag
@@ -459,7 +429,7 @@ steps:
         from_secret: github_token
     commands:
       - apk add -q curl jq
-      - 'UPLOAD_URL=$(curl -s --fail -H "Authorization: Bearer $GITHUB_TOKEN" "https://api.github.com/repos/$DRONE_REPO/releases/tags/$DRONE_TAG" | jq -r ".upload_url" | sed "s/{?name,label}//") && if [ -z "$UPLOAD_URL" ] || [ "$UPLOAD_URL" = "null" ]; then echo "ERROR: no upload_url from GitHub API"; exit 1; fi && curl -s --fail -X POST -H "Authorization: Bearer $GITHUB_TOKEN" -H "Content-Type: application/octet-stream" --data-binary @thornotes-linux-amd64 "$UPLOAD_URL?name=thornotes-linux-amd64" && APPIMAGE=$(ls thornotes-desktop-${DRONE_TAG}-linux-amd64.AppImage 2>/dev/null || true) && if [ -n "$APPIMAGE" ]; then curl -s --fail -X POST -H "Authorization: Bearer $GITHUB_TOKEN" -H "Content-Type: application/octet-stream" --data-binary @"$APPIMAGE" "$UPLOAD_URL?name=$APPIMAGE"; fi'
+      - 'UPLOAD_URL=$(curl -s --fail -H "Authorization: Bearer $GITHUB_TOKEN" "https://api.github.com/repos/$DRONE_REPO/releases/tags/$DRONE_TAG" | jq -r ".upload_url" | sed "s/{?name,label}//") && if [ -z "$UPLOAD_URL" ] || [ "$UPLOAD_URL" = "null" ]; then echo "ERROR: no upload_url from GitHub API"; exit 1; fi && curl -s --fail -X POST -H "Authorization: Bearer $GITHUB_TOKEN" -H "Content-Type: application/octet-stream" --data-binary @thornotes-linux-amd64 "$UPLOAD_URL?name=thornotes-linux-amd64"'
     when:
       event:
         - tag
