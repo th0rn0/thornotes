@@ -2,6 +2,11 @@
 
 All notable changes to thornotes are documented here.
 
+## [1.5.12.4] - 2026-04-25
+
+### Fixed
+- **Desktop AppImage WebKit bundling (take 2)** — `--exclude-library` in linuxdeploy matches against the SONAME but linuxdeploy copies the fully-versioned filename (e.g. `libwebkit2gtk-4.0.so.37.78.4`), so the pattern silently missed and webkit was still bundled. Switched to an explicit `rm` of webkit and javascriptcoregtk libs from AppDir after linuxdeploy runs but before appimagetool packages, which is reliable regardless of naming.
+
 ## [1.5.12.3] - 2026-04-25
 
 ### Fixed
