@@ -508,7 +508,7 @@ async function resolveDeepLink(pathname) {
 }
 
 // ── Note ops ───────────────────────────────────────────────────────────────
-async function openNote(noteId, { historyMode = 'push' } = {}) {
+async function openNote(noteId, { historyMode = 'push', isNew = false } = {}) {
   const note = await api('GET', `/api/v1/notes/${noteId}`);
   currentNote = note;
   if (isMobile()) closeSidebar();
@@ -692,11 +692,6 @@ async function openNote(noteId, { historyMode = 'push' } = {}) {
 
     // Restore line numbers preference on first editor init.
     applyLineNumbers();
-    // Restore split/preview mode preference.
-    const savedMode = localStorage.getItem('editorViewMode');
-    if (savedMode === 'split') toggleEditorSplit();
-    else if (savedMode === 'preview') toggleEditorPreview();
-    else if (savedMode === 'previewedit') toggleEditorPreviewEdit();
   }
 
   _loadingNote = true;
@@ -704,6 +699,7 @@ async function openNote(noteId, { historyMode = 'push' } = {}) {
   _loadingNote = false;
   editor.scrollToTop();
   if (editorPreviewEl) editorPreviewEl.scrollTop = 0;
+  applyNoteOpenView(isNew);
 
   // Update URL to reflect the open note.
   const deepLink = noteDeepLink(note);
@@ -1154,6 +1150,28 @@ function toggleEditorPreviewEdit() {
   }
 }
 
+// ── Default note view ──────────────────────────────────────────────────────
+// Applies the correct editor view when a note is opened.  New notes always
+// open in editor mode; existing notes use the global defaultNoteView setting.
+function applyNoteOpenView(isNew) {
+  const targetView = isNew ? 'editor' : (localStorage.getItem('defaultNoteView') || 'editor');
+  if (targetView === 'preview') {
+    if (editorSplitOpen) toggleEditorSplit();
+    if (editorPreviewEditOpen) toggleEditorPreviewEdit();
+    if (!editorPreviewOpen) {
+      toggleEditorPreview();
+    } else {
+      // Preview already open — re-render with the new note's content.
+      renderPreviewContent(editor.getValue());
+      if (editorPreviewEl) editorPreviewEl.scrollTop = 0;
+    }
+  } else {
+    if (editorPreviewOpen) toggleEditorPreview();
+    if (editorSplitOpen) toggleEditorSplit();
+    if (editorPreviewEditOpen) toggleEditorPreviewEdit();
+  }
+}
+
 // ── Markdown table formatter ──────────────────────────────────────────────
 
 function _tableParseRow(text) {
@@ -1319,7 +1337,7 @@ async function submitNewNote() {
     } else {
       rootNotes = await api('GET', '/api/v1/notes/root').catch(() => rootNotes);
     }
-    await openNote(note.id);
+    await openNote(note.id, { isNew: true });
   } catch (e) {
     document.getElementById('new-note-error').textContent = e.message || 'Failed to create note.';
   }
@@ -1948,6 +1966,8 @@ function openSettings() {
   if (sel) sel.value = VALID_THEMES.indexOf(saved) !== -1 ? saved : 'auto';
   const acToggle = document.getElementById('auto-collapse-toggle');
   if (acToggle) acToggle.checked = localStorage.getItem('autoCollapse') !== 'false';
+  const viewSel = document.getElementById('default-note-view-select');
+  if (viewSel) viewSel.value = localStorage.getItem('defaultNoteView') || 'editor';
   const lintToggle = document.getElementById('auto-lint-toggle');
   if (lintToggle) lintToggle.checked = localStorage.getItem('autoLint') === 'true';
 }
@@ -2508,6 +2528,9 @@ document.getElementById('auto-collapse-toggle').addEventListener('change', funct
   localStorage.setItem('autoCollapse', this.checked ? 'true' : 'false');
   if (this.checked) _resetAutoCollapseTimer();
   else if (_autoCollapseTimer) { clearTimeout(_autoCollapseTimer); _autoCollapseTimer = null; }
+});
+document.getElementById('default-note-view-select').addEventListener('change', function() {
+  localStorage.setItem('defaultNoteView', this.value);
 });
 document.getElementById('auto-lint-toggle').addEventListener('change', function() {
   localStorage.setItem('autoLint', this.checked ? 'true' : 'false');

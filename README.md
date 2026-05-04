@@ -23,6 +23,7 @@ A self-hosted Markdown note-taking app with file-as-canonical storage. Every not
 - Live sync — edits made directly to `.md` files on disk are detected and pushed to open browser tabs via SSE
 - Git-backed version history — opt-in; every save, delete, and folder rename becomes a commit so you can preview and restore any previous version
 - Multi-theme: Light, Dark, Catppuccin, Nord, Tokyo Night, Solarized — each with per-theme syntax highlighting tuned for that palette
+- **Default note view setting** — choose whether notes open in Markdown editor or rendered Preview by default; configurable per-device in Settings; new notes always open in editor regardless of this setting
 - **Markdown formatting toolbar** — bold, italic, heading, blockquote, ordered and unordered lists, link, table (with column-alignment formatter), undo/redo
 - **Right-click context menu** in the editor — bold, italic, blockquote, list, link, and table formatting available on selection
 - Line numbers toggle in the editor toolbar; character and line count in the status bar
