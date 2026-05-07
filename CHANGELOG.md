@@ -2,6 +2,11 @@
 
 All notable changes to thornotes are documented here.
 
+## [1.5.12.9] - 2026-05-07
+
+### Fixed
+- **Journal timezone resolution** — `time.LoadLocation` now works in Docker and other environments without `/usr/share/zoneinfo`. Importing `time/tzdata` embeds the IANA timezone database directly in the binary, so timezones like `Europe/London` resolve correctly regardless of the host system's timezone data.
+
 ## [1.5.12.8] - 2026-04-25
 
 ### Changed
