@@ -724,6 +724,15 @@ function buildNoteTitleMap() {
   return map;
 }
 
+// Sanitize HTML produced from markdown before it ever reaches innerHTML.
+// Defense-in-depth against stored XSS: even though CSP blocks inline event
+// handlers, a malicious note (e.g. injected via a compromised API token or
+// imported zip) could otherwise smuggle DOM-clobbering payloads or links
+// with javascript: hrefs that some browser quirks still execute.
+function renderMarkdownSafe(markdown) {
+  return DOMPurify.sanitize(marked.parse(markdown));
+}
+
 // Replace [[Note Title]] wikilinks with markdown links before parsing.
 // Known titles resolve to #tn-<id> fragments (intercepted by click handler).
 // Unknown titles render as a styled dead link.
@@ -756,9 +765,8 @@ function renderPreviewContent(content) {
     return;
   }
   const processed = processWikilinks(content);
-  const html = marked.parse(processed);
   const tmp = document.createElement('div');
-  tmp.innerHTML = html;
+  tmp.innerHTML = renderMarkdownSafe(processed);
   _applyPreviewPostProcess(tmp);
   editorPreviewEl.innerHTML = tmp.innerHTML;
 }
@@ -772,7 +780,7 @@ function renderPreviewEditContent(rawContent) {
   // Render the full document (wikilinks + hljs) into a temp container.
   const processed = processWikilinks(rawContent);
   const tmp = document.createElement('div');
-  tmp.innerHTML = marked.parse(processed);
+  tmp.innerHTML = renderMarkdownSafe(processed);
   _applyPreviewPostProcess(tmp);
 
   // Build an index: non-space token positions in _previewEditBlocks.
@@ -822,7 +830,7 @@ function openPreviewEditInlineEditor(block, idx) {
     const raw = ta.value;
     const processed = processWikilinks(raw);
     const tmp = document.createElement('div');
-    tmp.innerHTML = marked.parse(processed);
+    tmp.innerHTML = renderMarkdownSafe(processed);
     _applyPreviewPostProcess(tmp);
     liveEl.innerHTML = tmp.innerHTML;
   }

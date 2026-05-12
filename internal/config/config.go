@@ -10,17 +10,17 @@ import (
 )
 
 type Config struct {
-	Addr              string
-	DBDriver          string // "sqlite" (default) or "mysql"
-	DBPath            string // SQLite file path (ignored when DBDriver=mysql)
-	DBHost            string // MySQL/MariaDB host (used when DBDriver=mysql)
-	DBName            string // MySQL/MariaDB database name (used when DBDriver=mysql)
-	DBUser            string // MySQL/MariaDB username (used when DBDriver=mysql)
-	DBPassword        string // MySQL/MariaDB password (used when DBDriver=mysql)
-	NotesRoot         string
-	AllowRegistration bool
-	SecureCookies     bool       // set true when serving over HTTPS
-	TrustedProxy      *net.IPNet // nil means trust nothing (direct connections only)
+	Addr               string
+	DBDriver           string // "sqlite" (default) or "mysql"
+	DBPath             string // SQLite file path (ignored when DBDriver=mysql)
+	DBHost             string // MySQL/MariaDB host (used when DBDriver=mysql)
+	DBName             string // MySQL/MariaDB database name (used when DBDriver=mysql)
+	DBUser             string // MySQL/MariaDB username (used when DBDriver=mysql)
+	DBPassword         string // MySQL/MariaDB password (used when DBDriver=mysql)
+	NotesRoot          string
+	AllowRegistration  bool
+	SecureCookies      bool       // set true when serving over HTTPS
+	TrustedProxy       *net.IPNet // nil means trust nothing (direct connections only)
 	MaxContentBytes    int64
 	WatchInterval      time.Duration // 0 disables the disk watcher
 	SkipReconciliation bool          // skip startup hash-check scan

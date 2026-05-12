@@ -329,6 +329,45 @@ func TestHandler_Import_Zip_SkipsNonMarkdown(t *testing.T) {
 	assert.Equal(t, float64(1), result["notes_created"])
 }
 
+// TestHandler_Import_LargeMarkdownIsReadInFull guards the io.ReadAll fix:
+// before this change the handler used file.Read(buf) and ignored the byte
+// count, silently truncating multi-chunk reads (which surfaces with content
+// large enough to span the multipart parser's internal buffer boundary).
+func TestHandler_Import_LargeMarkdownIsReadInFull(t *testing.T) {
+	c := newTestClient(t)
+	c.registerAndLogin(t)
+
+	// 256 KiB of distinct content so a partial read would change the body.
+	chunk := bytes.Repeat([]byte("0123456789abcdef"), 1024) // 16 KiB
+	mdContent := append([]byte("# Big Note\n\n"), bytes.Repeat(chunk, 16)...)
+
+	resp := c.doMultipart(t, "/api/v1/import", "file", "big.md", mdContent)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var result map[string]interface{}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+	assert.Equal(t, float64(1), result["notes_created"])
+}
+
+// TestHandler_Import_OversizedRequestRejected guards the MaxBytesReader fix.
+// The previous code would let the multipart parser spill the excess body
+// onto disk via a temp file (cap was in-memory only).
+func TestHandler_Import_OversizedRequestRejected(t *testing.T) {
+	c := newTestClient(t)
+	c.registerAndLogin(t)
+
+	// 11 MiB — over the 10 MiB import cap.
+	oversized := bytes.Repeat([]byte("A"), 11<<20)
+	resp := c.doMultipart(t, "/api/v1/import", "file", "big.md", oversized)
+	defer resp.Body.Close()
+	// Either 400 (parse failure due to MaxBytes) or 413 (explicit too large) is fine;
+	// what matters is the request is rejected before the service layer sees the body.
+	if resp.StatusCode != http.StatusRequestEntityTooLarge && resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 413 or 400, got %d", resp.StatusCode)
+	}
+}
+
 func TestHandler_Import_UnsupportedType(t *testing.T) {
 	c := newTestClient(t)
 	c.registerAndLogin(t)

@@ -221,9 +221,9 @@ func TestService_ImportZip_WithFolder(t *testing.T) {
 	ctx := context.Background()
 
 	data := makeZip(t, map[string]string{
-		"Work/todo.md":     "# Todo",
-		"Work/meeting.md":  "# Meeting",
-		"personal.md":      "# Personal",
+		"Work/todo.md":    "# Todo",
+		"Work/meeting.md": "# Meeting",
+		"personal.md":     "# Personal",
 	})
 	result, err := svc.ImportZip(ctx, userID, "test-uuid", data)
 	require.NoError(t, err)

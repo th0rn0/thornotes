@@ -12,8 +12,8 @@ import (
 )
 
 const (
-	rateLimitRequests = 10           // max requests
-	rateLimitWindow   = 15 * 60      // per 15 minutes (in seconds), expressed as token refill
+	rateLimitRequests = 10      // max requests
+	rateLimitWindow   = 15 * 60 // per 15 minutes (in seconds), expressed as token refill
 	rateLimitCleanup  = 30 * time.Minute
 )
 

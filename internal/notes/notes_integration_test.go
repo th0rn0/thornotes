@@ -45,7 +45,7 @@ func newTestStackFull(t *testing.T) *serviceStack {
 	searchRepo := sqlite_repo.NewSearchRepo(pool.ReadDB, pool.WriteDB)
 
 	ctx := context.Background()
-	user, err := userRepo.Create(ctx, "testuser", "$2a$12$fakehash0000000000000000000000000000000000000000000000", "test-uuid-" + "testuser")
+	user, err := userRepo.Create(ctx, "testuser", "$2a$12$fakehash0000000000000000000000000000000000000000000000", "test-uuid-"+"testuser")
 	require.NoError(t, err)
 
 	svc := notes.NewService(noteRepo, folderRepo, searchRepo, sqlite_repo.NewJournalRepo(pool.ReadDB, pool.WriteDB), fs)
@@ -69,7 +69,7 @@ func newTestStack(t *testing.T) (svc *notes.Service, userID int64) {
 	searchRepo := sqlite_repo.NewSearchRepo(pool.ReadDB, pool.WriteDB)
 
 	ctx := context.Background()
-	user, err := userRepo.Create(ctx, "testuser", "$2a$12$fakehash0000000000000000000000000000000000000000000000", "test-uuid-" + "testuser")
+	user, err := userRepo.Create(ctx, "testuser", "$2a$12$fakehash0000000000000000000000000000000000000000000000", "test-uuid-"+"testuser")
 	require.NoError(t, err)
 
 	svc = notes.NewService(noteRepo, folderRepo, searchRepo, sqlite_repo.NewJournalRepo(pool.ReadDB, pool.WriteDB), fs)
@@ -501,7 +501,7 @@ func TestService_Reconcile(t *testing.T) {
 	searchRepo := sqlite_repo.NewSearchRepo(pool.ReadDB, pool.WriteDB)
 
 	ctx := context.Background()
-	user, err := userRepo.Create(ctx, "testuser2", "$2a$12$fakehash0000000000000000000000000000000000000000000000", "test-uuid-" + "testuser2")
+	user, err := userRepo.Create(ctx, "testuser2", "$2a$12$fakehash0000000000000000000000000000000000000000000000", "test-uuid-"+"testuser2")
 	require.NoError(t, err)
 
 	svc := notes.NewService(noteRepo, folderRepo, searchRepo, sqlite_repo.NewJournalRepo(pool.ReadDB, pool.WriteDB), fs)
@@ -556,7 +556,7 @@ func TestService_Reconcile_MissingFile(t *testing.T) {
 	searchRepo := sqlite_repo.NewSearchRepo(pool.ReadDB, pool.WriteDB)
 
 	ctx := context.Background()
-	user, err := userRepo.Create(ctx, "testuser3", "$2a$12$fakehash000000000000000000000000000000000000000000000", "test-uuid-" + "testuser3")
+	user, err := userRepo.Create(ctx, "testuser3", "$2a$12$fakehash000000000000000000000000000000000000000000000", "test-uuid-"+"testuser3")
 	require.NoError(t, err)
 
 	svc := notes.NewService(noteRepo, folderRepo, searchRepo, sqlite_repo.NewJournalRepo(pool.ReadDB, pool.WriteDB), fs)

@@ -136,8 +136,8 @@ func (h *AccountHandler) UpdateTokenPermissions(c *gin.Context) {
 	// json.RawMessage on FolderPermissions so we can tell "omitted" apart
 	// from "explicitly empty" (the latter is a request to clear the list).
 	var body struct {
-		Name              *string                       `json:"name"`
-		Scope             string                        `json:"scope"`
+		Name              *string                        `json:"name"`
+		Scope             string                         `json:"scope"`
 		FolderPermissions *[]model.TokenFolderPermission `json:"folder_permissions"`
 	}
 	if err := readJSON(c, &body); err != nil {

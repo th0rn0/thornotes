@@ -1778,4 +1778,3 @@ func TestHandler_Journals_List_Unauthenticated(t *testing.T) {
 	defer resp.Body.Close()
 	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
 }
-

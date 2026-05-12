@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -121,6 +122,36 @@ func TestCSRF_NoSessionCookie(t *testing.T) {
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
 	assert.Equal(t, http.StatusForbidden, rr.Code)
+}
+
+func TestSweepExpiredCSRFTokens_RemovesExpired(t *testing.T) {
+	live := "sweep-live-session"
+	stale := "sweep-stale-session"
+
+	_, err := GenerateCSRFToken(live)
+	require.NoError(t, err)
+	// Inject a stale entry directly (cannot rely on time.Sleep for a week).
+	csrfStore.Store(stale, csrfEntry{token: "old", expires: time.Now().Add(-time.Hour)})
+
+	SweepExpiredCSRFTokens()
+
+	_, liveOK := loadValidCSRFEntry(live)
+	assert.True(t, liveOK, "live entry must survive sweep")
+
+	_, staleOK := loadValidCSRFEntry(stale)
+	assert.False(t, staleOK, "stale entry must be evicted")
+}
+
+func TestLoadValidCSRFEntry_ExpiredEntryIsRejected(t *testing.T) {
+	expired := "expired-session"
+	csrfStore.Store(expired, csrfEntry{token: "anything", expires: time.Now().Add(-time.Second)})
+
+	_, ok := loadValidCSRFEntry(expired)
+	assert.False(t, ok)
+
+	// And expiry sweep should have removed the entry on read.
+	_, raw := csrfStore.Load(expired)
+	assert.False(t, raw, "expired entry must be deleted on load")
 }
 
 func TestCSRF_InvalidateToken(t *testing.T) {
