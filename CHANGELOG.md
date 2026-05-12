@@ -2,6 +2,11 @@
 
 All notable changes to thornotes are documented here.
 
+## [1.5.13.1] - 2026-05-12
+
+### Fixed
+- **Folder delete cascades to notes** — deleting a folder now removes every note it (and any descendant folder) contains, instead of orphaning child notes to the root with stale disk paths. The DB schema's `notes.folder_id` foreign key is `ON DELETE SET NULL`, so the previous `DeleteFolder` implementation (which assumed a cascade) left ghost rows in root pointing at files the on-disk `RemoveDir` had just wiped. `DeleteFolder` now walks the folder + descendants explicitly and deletes their notes before dropping the folder row. Added `TestService_DeleteFolder_RemovesChildNotesRecursively` as a regression guard.
+
 ## [1.5.13.0] - 2026-05-12
 
 ### Changed
