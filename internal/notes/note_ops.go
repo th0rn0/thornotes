@@ -95,25 +95,43 @@ func (s *Service) ListAllNotes(ctx context.Context, userID int64) ([]*model.Note
 
 // UpdateNoteContent saves new content using optimistic concurrency.
 // expectedHash must match the current content_hash in the DB.
+//
+// File write and DB update are serialised per note via lockNote so that two
+// concurrent saves cannot leave the disk and DB pointing at different content
+// (the "loser of optimistic conflict still wins on disk" race).
 func (s *Service) UpdateNoteContent(ctx context.Context, userID, noteID int64, content, expectedHash string) (string, error) {
 	if int64(len(content)) > 1<<20 {
 		return "", &apperror.AppError{Code: 413, Message: "content exceeds 1 MB limit"}
 	}
 
+	mu := s.lockNote(noteID)
+	mu.Lock()
+	defer mu.Unlock()
+
 	newHash := HashContent(content)
 
-	// Write file first.
 	note, err := s.notes.GetByID(ctx, userID, noteID)
 	if err != nil {
 		return "", err
+	}
+
+	// Re-check optimistic concurrency BEFORE touching the file. If the caller's
+	// expectedHash doesn't match the current DB hash, reject the write outright
+	// instead of clobbering the file with stale content.
+	if note.ContentHash != expectedHash {
+		return "", apperror.ErrConflict
 	}
 
 	if err := s.fs.Write(note.DiskPath, content); err != nil {
 		return "", apperror.Internal("write note file", err)
 	}
 
-	// Optimistic concurrency update.
 	if err := s.notes.UpdateContent(ctx, userID, noteID, content, newHash, expectedHash); err != nil {
+		// File write succeeded but DB write failed. Roll the file back to the
+		// content we know matches expectedHash so disk and DB stay in sync.
+		if rollbackErr := s.fs.Write(note.DiskPath, note.Content); rollbackErr != nil {
+			log.Warn().Err(rollbackErr).Int64("id", noteID).Msg("rollback file after failed db update")
+		}
 		return "", err
 	}
 
@@ -122,16 +140,23 @@ func (s *Service) UpdateNoteContent(ctx context.Context, userID, noteID int64, c
 
 // UpdateNoteMetadata updates the title and/or tags of a note.
 // When the title changes the slug is recomputed; if the slug differs the note
-// file is renamed on disk and disk_path is updated in the DB.
+// file is renamed on disk and disk_path is updated in the DB. If the DB update
+// fails after the disk rename, the rename is rolled back so disk and DB stay
+// in sync.
 func (s *Service) UpdateNoteMetadata(ctx context.Context, userID int64, userUUID string, noteID int64, title string, tags []string) error {
+	mu := s.lockNote(noteID)
+	mu.Lock()
+	defer mu.Unlock()
+
 	note, err := s.notes.GetByID(ctx, userID, noteID)
 	if err != nil {
 		return err
 	}
+	renamed := false
+	oldDiskPath := note.DiskPath
 	if title != "" && title != note.Title {
 		newSlug := slugify(title)
 		if newSlug != note.Slug {
-			// Determine the containing folder's disk path (empty string = root).
 			var folderPath string
 			if note.FolderID != nil {
 				folder, err := s.folders.GetByID(ctx, userID, *note.FolderID)
@@ -146,13 +171,22 @@ func (s *Service) UpdateNoteMetadata(ctx context.Context, userID int64, userUUID
 			}
 			note.Slug = newSlug
 			note.DiskPath = newDiskPath
+			renamed = true
 		}
 		note.Title = title
 	}
 	if tags != nil {
 		note.Tags = tags
 	}
-	return s.notes.Update(ctx, note)
+	if err := s.notes.Update(ctx, note); err != nil {
+		if renamed {
+			if rbErr := s.fs.RenameFile(note.DiskPath, oldDiskPath); rbErr != nil {
+				log.Warn().Err(rbErr).Str("from", note.DiskPath).Str("to", oldDiskPath).Msg("rollback note rename after failed db update")
+			}
+		}
+		return err
+	}
+	return nil
 }
 
 // MoveNote moves a note to newFolderID (nil = root). It:

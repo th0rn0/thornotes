@@ -195,7 +195,12 @@ func main() {
 			log.Warn().Err(reconcileErr).Msg("startup reconcile: list users")
 		} else {
 			for _, uid := range userIDs {
-				if err := notesSvc.Reconcile(context.Background(), uid); err != nil {
+				user, err := userRepo.GetByID(context.Background(), uid)
+				if err != nil {
+					log.Warn().Err(err).Int64("user_id", uid).Msg("startup reconcile: get user")
+					continue
+				}
+				if _, err := notesSvc.Reconcile(context.Background(), user); err != nil {
 					log.Warn().Err(err).Int64("user_id", uid).Msg("startup reconcile error")
 				}
 			}

@@ -58,6 +58,7 @@ type FolderTreeItem struct {
 	ID         int64  `json:"id"`
 	ParentID   *int64 `json:"parent_id"`
 	Name       string `json:"name"`
+	DiskPath   string `json:"disk_path"`
 	ChildCount int    `json:"child_count"`
 	NoteCount  int    `json:"note_count"`
 }
@@ -70,10 +71,15 @@ type SearchResult struct {
 	Tags    []string `json:"tags"`
 }
 
-// NoteWatchRecord is a lightweight projection used by the disk watcher.
-// It contains only the fields needed to detect content changes.
+// NoteWatchRecord is a lightweight projection used by the disk watcher and
+// the filesystem reconciliation walk. Slug and FolderID are needed by the
+// reconciler to detect a stale disk_path (e.g. a parent folder was renamed
+// but the descendant cascade DB update failed) and repair it instead of
+// destroying the row.
 type NoteWatchRecord struct {
 	ID          int64
+	FolderID    *int64
+	Slug        string
 	DiskPath    string
 	ContentHash string
 }

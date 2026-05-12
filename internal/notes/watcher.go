@@ -9,12 +9,14 @@ import (
 	"github.com/th0rn0/thornotes/internal/repository"
 )
 
-// Watch polls the filesystem every interval and reconciles all notes for all users.
-// When a user's notes have changed on disk, the hub is notified so connected SSE
-// clients can refresh. Exits when ctx is cancelled.
+// Watch polls the filesystem every interval and reconciles all notes for all
+// users. When a user's on-disk tree has drifted from the DB (content changed,
+// files added, files removed, folders renamed), the hub is notified so
+// connected SSE clients refresh.
 //
-// This is the runtime counterpart to the startup Reconcile call: Reconcile runs
-// once at boot, Watch runs continuously while the server is up.
+// This is the runtime counterpart to the startup Reconcile call: Reconcile
+// runs once at boot, Watch runs continuously while the server is up. Both
+// share the same disk-walk + diff implementation in reconcile.go.
 func Watch(ctx context.Context, interval time.Duration, notesSvc *Service, userRepo repository.UserRepository, h *hub.Hub) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -36,46 +38,19 @@ func reconcileAllUsers(ctx context.Context, notesSvc *Service, userRepo reposito
 		return
 	}
 	for _, userID := range ids {
-		changed, err := reconcileUserForWatch(ctx, notesSvc, userID)
+		user, err := userRepo.GetByID(ctx, userID)
+		if err != nil {
+			log.Warn().Err(err).Int64("user_id", userID).Msg("watcher: get user")
+			continue
+		}
+		changed, err := notesSvc.Reconcile(ctx, user)
 		if err != nil {
 			log.Warn().Err(err).Int64("user_id", userID).Msg("watcher: reconcile user")
 			continue
 		}
 		if changed > 0 {
-			log.Info().Int64("user_id", userID).Int("notes_updated", changed).Msg("watcher: disk changes detected")
+			log.Info().Int64("user_id", userID).Int("changes", changed).Msg("watcher: disk changes detected")
 			h.Notify(userID, "notes_changed")
 		}
 	}
-}
-
-// reconcileUserForWatch reads all of a user's notes from disk, compares content
-// hashes, and updates the DB for any that have changed. Returns the count updated.
-func reconcileUserForWatch(ctx context.Context, svc *Service, userID int64) (int, error) {
-	records, err := svc.notes.ListAllForWatch(ctx, userID)
-	if err != nil {
-		return 0, err
-	}
-
-	updated := 0
-	for _, rec := range records {
-		fileContent, err := svc.fs.Read(rec.DiskPath)
-		if err != nil {
-			// File missing from disk is not an error we want to surface — note may
-			// have been deleted via the API between list and read.
-			continue
-		}
-
-		fileHash := HashContent(fileContent)
-		if fileHash == rec.ContentHash {
-			continue
-		}
-
-		log.Info().Int64("id", rec.ID).Str("disk_path", rec.DiskPath).Msg("watcher: updating changed note")
-		if err := svc.notes.UpdateContent(ctx, userID, rec.ID, fileContent, fileHash, rec.ContentHash); err != nil {
-			log.Warn().Err(err).Int64("id", rec.ID).Msg("watcher: update content")
-			continue
-		}
-		updated++
-	}
-	return updated, nil
 }

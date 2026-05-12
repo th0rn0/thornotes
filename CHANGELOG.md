@@ -2,6 +2,17 @@
 
 All notable changes to thornotes are documented here.
 
+## [Unreleased]
+
+### Fixed
+- **File-first contract honoured for the full disk lifecycle.** The disk watcher and the startup reconciler now walk `notesRoot/<userUUID>/` recursively instead of just iterating known DB rows, so files added directly to disk (`rsync`, `git pull`, drag-drop, external editor) appear in the UI, files deleted on disk are removed from the index, and folder rename / move cascades that fail their descendant DB update self-heal on the next poll. The new algorithm lives in `internal/notes/reconcile.go` and is shared by `Service.Reconcile` (startup) and the polling watcher. The README and CHANGELOG previously advertised this behaviour for external editors; it now matches the docs across the full lifecycle.
+- **Two-tab save race no longer overwrites the accepted save.** `UpdateNoteContent` now takes a striped per-note mutex and re-checks the optimistic-concurrency hash *before* touching the file. Previously, the loser of a concurrent save still wrote its content to disk before the DB rejected it; the watcher then silently backfilled the DB with the loser's content, undoing the winner. The lock and pre-write hash check eliminate both halves of that race. Regression: `TestUpdateNoteContent_RejectsStaleHash` and `TestUpdateNoteContent_ConcurrentSavesConverge`.
+- **`UpdateNoteMetadata` rolls back the disk rename when the DB Update fails.** Renaming a note used to leave the file at the new disk_path when the DB update half failed, producing a 404-on-click ghost row. The rename is now reverted on DB failure so disk and DB stay in sync. Regression: `TestUpdateNoteMetadata_RollsBackRenameOnDBFailure`.
+- **`Service.Reconcile` signature changed from `(ctx, userID)` to `(ctx, *model.User)` and now returns the number of changes applied.** The reconciler needs the user's UUID to scope its filesystem walk. Callers in `cmd/thornotes/main.go` and the watcher were updated accordingly; tests now fetch the user via `userRepo.GetByID` before calling Reconcile.
+
+### Internal
+- `model.NoteWatchRecord` gained `Slug` and `FolderID` fields (needed by the reconciler to detect a stale-disk_path case and repair it in place rather than delete-and-reinsert). `model.FolderTreeItem` gained `DiskPath` for the same reason. SQLite and MySQL `ListAllForWatch` and `Tree` SELECTs were updated to project the new columns.
+
 ## [1.5.13.2] - 2026-05-12
 
 ### Security

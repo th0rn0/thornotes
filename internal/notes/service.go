@@ -5,19 +5,26 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"path/filepath"
+	"sync"
 
 	"github.com/rs/zerolog/log"
 	"github.com/th0rn0/thornotes/internal/model"
 	"github.com/th0rn0/thornotes/internal/repository"
 )
 
+// noteLockStripes bounds memory for per-note serialisation. A note's ID is
+// mapped to one of N mutexes; same ID always lands on the same mutex, different
+// IDs may collide but the contention is bounded and harmless.
+const noteLockStripes = 64
+
 // Service coordinates note and folder operations across the FileStore and repositories.
 type Service struct {
-	notes    repository.NoteRepository
-	folders  repository.FolderRepository
-	search   repository.SearchRepository
-	journals repository.JournalRepository
-	fs       *FileStore
+	notes      repository.NoteRepository
+	folders    repository.FolderRepository
+	search     repository.SearchRepository
+	journals   repository.JournalRepository
+	fs         *FileStore
+	noteLocks  [noteLockStripes]sync.Mutex
 }
 
 func NewService(
@@ -36,53 +43,55 @@ func NewService(
 	}
 }
 
+// lockNote returns the striped mutex for noteID. Callers must Lock/Unlock.
+// Held across the (file write + DB write) pair so concurrent saves and the
+// disk watcher cannot interleave on the same note.
+func (s *Service) lockNote(noteID int64) *sync.Mutex {
+	if noteID < 0 {
+		noteID = -noteID
+	}
+	return &s.noteLocks[noteID%noteLockStripes]
+}
+
 // HashContent returns the SHA-256 hex digest of content.
 func HashContent(content string) string {
 	return fmt.Sprintf("%x", sha256.Sum256([]byte(content)))
 }
 
-// Reconcile compares every note's content_hash against the file on disk.
-// If they differ, the file is authoritative and the DB is updated.
-// This runs at startup to recover from any partial DB writes.
-func (s *Service) Reconcile(ctx context.Context, userID int64) error {
-	// Use ListAllForWatch to cover all notes, not just root-level ones.
-	records, err := s.notes.ListAllForWatch(ctx, userID)
+// Reconcile performs a full bidirectional sync between disk and DB for a
+// single user. The on-disk note tree is the source of truth: notes/folders
+// that exist on disk but not in the DB are inserted, DB rows whose files
+// have disappeared are deleted (after a repair attempt that handles the
+// folder-rename cascade-failure case), and content drift is hash-compared
+// in the disk-wins direction.
+//
+// This runs at startup, and is also the implementation behind the polling
+// disk watcher. Callers pass a fully populated *model.User so that the
+// reconciler can scope its filesystem walk to the user's UUID directory.
+// See reconcile.go for the algorithm.
+func (s *Service) Reconcile(ctx context.Context, user *model.User) (int, error) {
+	if user == nil {
+		return 0, fmt.Errorf("reconcile: user is nil")
+	}
+	log.Info().Int64("user_id", user.ID).Msg("reconcile: starting")
+	result, err := s.reconcileUserFromDisk(ctx, user)
 	if err != nil {
-		return err
+		return 0, err
 	}
-
-	total := len(records)
-	if total == 0 {
-		return nil
+	if result.total() > 0 {
+		log.Info().
+			Int64("user_id", user.ID).
+			Int("notes_created", result.NotesCreated).
+			Int("notes_deleted", result.NotesDeleted).
+			Int("notes_updated", result.NotesUpdated).
+			Int("notes_repaired", result.NotesPathRepaired).
+			Int("folders_created", result.FoldersCreated).
+			Int("folders_deleted", result.FoldersDeleted).
+			Int("folders_repaired", result.FoldersRepaired).
+			Msg("reconcile: changes applied")
 	}
-
-	log.Info().Int64("user_id", userID).Int("total", total).Msg("reconcile: starting")
-
-	reconciled := 0
-	for i, rec := range records {
-		if i > 0 && i%100 == 0 {
-			log.Info().Int64("user_id", userID).Int("progress", i).Int("total", total).Msg("reconcile: progress")
-		}
-
-		fileContent, err := s.fs.Read(rec.DiskPath)
-		if err != nil {
-			log.Warn().Str("disk_path", rec.DiskPath).Int64("id", rec.ID).Msg("reconcile: note file missing")
-			continue
-		}
-
-		fileHash := HashContent(fileContent)
-		if fileHash != rec.ContentHash {
-			log.Info().Int64("id", rec.ID).Str("disk_path", rec.DiskPath).Msg("reconcile: updating stale note")
-			if err := s.notes.UpdateContent(ctx, userID, rec.ID, fileContent, fileHash, rec.ContentHash); err != nil {
-				log.Warn().Err(err).Int64("id", rec.ID).Msg("reconcile: update content")
-			} else {
-				reconciled++
-			}
-		}
-	}
-
-	log.Info().Int64("user_id", userID).Int("total", total).Int("updated", reconciled).Msg("reconcile: complete")
-	return nil
+	log.Info().Int64("user_id", user.ID).Int("total_changes", result.total()).Msg("reconcile: complete")
+	return result.total(), nil
 }
 
 // notesDiskPath returns the relative disk path for a note.

@@ -127,7 +127,7 @@ func scanNoteListItems(rows *sql.Rows) ([]*model.NoteListItem, error) {
 
 func (r *NoteRepo) ListAllForWatch(ctx context.Context, userID int64) ([]*model.NoteWatchRecord, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, disk_path, content_hash FROM notes WHERE user_id = ?`, userID)
+		`SELECT id, folder_id, slug, disk_path, content_hash FROM notes WHERE user_id = ?`, userID)
 	if err != nil {
 		return nil, fmt.Errorf("list notes for watch: %w", err)
 	}
@@ -136,7 +136,7 @@ func (r *NoteRepo) ListAllForWatch(ctx context.Context, userID int64) ([]*model.
 	var records []*model.NoteWatchRecord
 	for rows.Next() {
 		rec := &model.NoteWatchRecord{}
-		if err := rows.Scan(&rec.ID, &rec.DiskPath, &rec.ContentHash); err != nil {
+		if err := rows.Scan(&rec.ID, &rec.FolderID, &rec.Slug, &rec.DiskPath, &rec.ContentHash); err != nil {
 			return nil, err
 		}
 		records = append(records, rec)

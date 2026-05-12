@@ -541,7 +541,7 @@ notes/
       project.md
 ```
 
-The file is always the authoritative copy. If you edit a file directly (external editor, `git checkout`, `rsync`), thornotes detects the change within `THORNOTES_WATCH_INTERVAL` and syncs the database and any open browser tabs automatically.
+The file is always the authoritative copy. If you edit, add, remove, or rename files directly (external editor, `git checkout`, `rsync`, drag-drop in your file manager), thornotes detects the change within `THORNOTES_WATCH_INTERVAL`, syncs the database to match, and pushes a refresh to any open browser tabs. New files appear in the tree, deleted files disappear, and content edits are picked up — the on-disk note tree is the source of truth.
 
 ## Building from source
 
