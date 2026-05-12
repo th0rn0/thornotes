@@ -16,6 +16,7 @@ All notable changes to thornotes are documented here.
 
 ### Internal
 - `gofmt -w` over ten files that had drifted from canonical formatting. No behaviour change.
+- **CI image pins.** The `golang:1.26` floating tag was caching as 1.26.2 on the Drone runner with `GOTOOLCHAIN=local`, which refused to honour the new `go 1.26.3` directive in `go.mod`. Pinned the test step (`.drone.yml`), the linux-binary build step, and the `Dockerfile` build stage to `golang:1.26.3` / `golang:1.26.3-alpine` / `golang:1.26.3-bookworm` so a stale runner cache can't break the build.
 
 ## [1.5.13.1] - 2026-05-12
 

@@ -1,5 +1,9 @@
 # ── Build stage ───────────────────────────────────────────────────────────────
-FROM golang:1.26-alpine AS builder
+# Pinned to 1.26.3: go.mod requires >= 1.26.3 (security patches for
+# html/template and x/net HTTP/2). A floating golang:1.26-alpine tag can
+# resolve to a stale 1.26.2 on CI runners with GOTOOLCHAIN=local, which
+# breaks the build with "go.mod requires go >= 1.26.3".
+FROM golang:1.26.3-alpine AS builder
 
 WORKDIR /build
 
