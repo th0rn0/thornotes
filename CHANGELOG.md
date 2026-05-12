@@ -2,6 +2,21 @@
 
 All notable changes to thornotes are documented here.
 
+## [1.5.13.2] - 2026-05-12
+
+### Security
+- **Editor preview now sanitised with DOMPurify** — every `marked.parse()` result in `app.js` is run through `DOMPurify.sanitize()` before reaching `innerHTML`, matching what the public share view already did. CSP `script-src 'self'` already blocked inline event handlers, so this is defense-in-depth, but it closes the gap where a note seeded by a compromised API token or an imported zip could ship a payload that relied on browser quirks. `purify.min.js` is now also loaded by the main app shell.
+- **Import handler rejects oversized requests before disk spill** — `/api/v1/import` now wraps the request body in `http.MaxBytesReader` before `ParseMultipartForm`. Previously the cap only bounded the in-memory portion; everything above spilled to a temp file, which was a disk-fill vector on small self-hosted VPSes.
+- **Import handler reads the full upload** — replaced the buggy `file.Read(buf)` (which ignored the returned byte count and could silently truncate multi-chunk reads) with `io.ReadAll(io.LimitReader(...))` plus an explicit size guard. Adds regression tests for both the partial-read path and the oversized-request rejection.
+- **Go toolchain bumped to 1.26.3** — clears `GO-2026-4980` and `GO-2026-4982`, two `html/template` escaper-bypass XSS issues that govulncheck flagged as reachable from `internal/handler/share.go`'s `ExecuteTemplate` call.
+- **`golang.org/x/net` upgraded to v0.54.0** — clears `GO-2026-4918` (HTTP/2 infinite loop on a crafted `SETTINGS_MAX_FRAME_SIZE`).
+- **`filippo.io/edwards25519` upgraded to v1.2.0** — clears `GO-2026-4503`.
+- **CSRF token map now bounded** — each entry is stamped with a 7-day TTL (matches `sessionTTL` in `internal/auth`) and evicted on read. A new `SweepExpiredCSRFTokens()` is called from the existing hourly cleanup goroutine in `cmd/thornotes/main.go`, so long-running instances no longer accumulate one map entry per session that expired without an explicit logout.
+- **CSP hardened** — added `object-src 'none'`, `base-uri 'self'`, `form-action 'self'`, and `frame-ancestors 'none'` to the response policy. `frame-ancestors` supersedes `X-Frame-Options: DENY` for modern browsers; the rest close base-tag injection, form-action redirect XSS, and `<object>`/`<embed>` attack surface.
+
+### Internal
+- `gofmt -w` over ten files that had drifted from canonical formatting. No behaviour change.
+
 ## [1.5.13.1] - 2026-05-12
 
 ### Fixed
