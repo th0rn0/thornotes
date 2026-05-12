@@ -1,6 +1,31 @@
 # thornotes — TODOS
 
+## UI / UX
+
+---
+
+### Journal: Trillium-style layout
+Redesign the journal UI to match the Trillium Notes journal experience — date-based navigation in a sidebar, each day's entry as a full-page editor, clean typography with no markdown toolbar clutter. Reference: https://trilium.cc
+
+---
+
 ## V2 (deferred)
+
+---
+
+### Full git sync / backup
+End-to-end git-based sync and backup for the notes tree. Today `--enable-git-history` records per-edit commits locally; this expands that into a usable sync/backup story:
+- Configure a remote (HTTPS or SSH) — push commits on a schedule and/or after each save.
+- Pull on startup (and optionally periodically) to ingest remote changes; reconcile against the disk watcher so external edits surface as `notes_changed` SSE events.
+- Conflict handling: surface merge conflicts in the UI rather than silently clobbering; offer "keep mine / keep remote / open in editor".
+- Backup mode (write-only): periodic push with no pull, for users who only want off-box durability.
+- Settings UI for remote URL, credentials (token or SSH key path), push cadence, and enable/disable. Secrets stored encrypted at rest.
+- Same git history endpoints continue to work; restore-from-history is the recovery path for a single note, full clone is the recovery path for the whole tree.
+
+---
+
+### Encrypted / passworded notes
+Allow individual notes or folders to be locked with a password. The note content would be encrypted at rest (e.g. AES-256-GCM with a key derived from the password via Argon2id). The UI would prompt for the password to decrypt and display the note; the server never sees the plaintext key. Encrypted notes would be stored with an `encrypted: true` flag in the DB and a ciphertext blob on disk.
 
 ---
 

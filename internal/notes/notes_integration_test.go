@@ -316,6 +316,48 @@ func TestService_DeleteFolder(t *testing.T) {
 	assert.Empty(t, tree)
 }
 
+func TestService_DeleteFolder_RemovesChildNotesRecursively(t *testing.T) {
+	stack := newTestStackFull(t)
+	svc, userID := stack.svc, stack.userID
+	ctx := context.Background()
+
+	parent, err := svc.CreateFolder(ctx, userID, "test-uuid", nil, "Parent")
+	require.NoError(t, err)
+	child, err := svc.CreateFolder(ctx, userID, "test-uuid", &parent.ID, "Child")
+	require.NoError(t, err)
+
+	rootNote, err := svc.CreateNote(ctx, userID, "test-uuid", nil, "Stays In Root", nil)
+	require.NoError(t, err)
+	parentNote, err := svc.CreateNote(ctx, userID, "test-uuid", &parent.ID, "In Parent", nil)
+	require.NoError(t, err)
+	childNote, err := svc.CreateNote(ctx, userID, "test-uuid", &child.ID, "In Child", nil)
+	require.NoError(t, err)
+
+	require.NoError(t, svc.DeleteFolder(ctx, userID, parent.ID))
+
+	// Folder rows gone.
+	tree, err := svc.FolderTree(ctx, userID)
+	require.NoError(t, err)
+	assert.Empty(t, tree)
+
+	// Notes inside the deleted folder (and its child) must be gone, NOT relocated to root.
+	_, err = svc.GetNote(ctx, userID, parentNote.ID)
+	require.Error(t, err, "note inside deleted folder should be gone")
+	_, err = svc.GetNote(ctx, userID, childNote.ID)
+	require.Error(t, err, "note inside nested deleted folder should be gone")
+
+	// Unrelated root note must still exist.
+	got, err := svc.GetNote(ctx, userID, rootNote.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "Stays In Root", got.Title)
+
+	// Root listing should contain exactly the surviving root note — no orphans.
+	rootNotes, err := svc.ListNotes(ctx, userID, nil)
+	require.NoError(t, err)
+	require.Len(t, rootNotes, 1)
+	assert.Equal(t, rootNote.ID, rootNotes[0].ID)
+}
+
 func TestService_Search(t *testing.T) {
 	svc, userID := newTestStack(t)
 	ctx := context.Background()

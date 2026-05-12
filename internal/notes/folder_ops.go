@@ -175,7 +175,9 @@ func (s *Service) isFolderDescendant(ctx context.Context, userID, ancestorID, ca
 	}
 }
 
-// DeleteFolder removes a folder and all its contents (cascade in DB via ON DELETE CASCADE).
+// DeleteFolder removes a folder and every note it (or any descendant folder) contains.
+// notes.folder_id is ON DELETE SET NULL in the schema, so DB cascade alone would orphan
+// child notes to the root — we explicitly delete them first.
 func (s *Service) DeleteFolder(ctx context.Context, userID, folderID int64) error {
 	folder, err := s.folders.GetByID(ctx, userID, folderID)
 	if err != nil {
@@ -183,14 +185,58 @@ func (s *Service) DeleteFolder(ctx context.Context, userID, folderID int64) erro
 	}
 	diskPath := folder.DiskPath
 
-	// DB deletion cascades to child folders and notes.
+	descendantIDs, err := s.collectDescendantFolderIDs(ctx, userID, folderID)
+	if err != nil {
+		return err
+	}
+
+	for _, fid := range descendantIDs {
+		fid := fid
+		childNotes, err := s.notes.ListByFolder(ctx, userID, &fid)
+		if err != nil {
+			return err
+		}
+		for _, n := range childNotes {
+			if err := s.notes.Delete(ctx, userID, n.ID); err != nil {
+				return err
+			}
+		}
+	}
+
+	// DB deletion cascades to child folder rows.
 	if err := s.folders.Delete(ctx, userID, folderID); err != nil {
 		return err
 	}
 
-	// Remove directory from disk after DB is consistent.
+	// RemoveDir wipes the on-disk directory tree (including any note files within it).
 	_ = s.fs.RemoveDir(diskPath)
 	return nil
+}
+
+// collectDescendantFolderIDs returns rootID followed by every descendant folder ID,
+// using a single Tree() query and an in-memory BFS.
+func (s *Service) collectDescendantFolderIDs(ctx context.Context, userID, rootID int64) ([]int64, error) {
+	tree, err := s.folders.Tree(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	childrenByParent := map[int64][]int64{}
+	for _, f := range tree {
+		if f.ParentID != nil {
+			childrenByParent[*f.ParentID] = append(childrenByParent[*f.ParentID], f.ID)
+		}
+	}
+	out := []int64{rootID}
+	queue := []int64{rootID}
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+		for _, child := range childrenByParent[current] {
+			out = append(out, child)
+			queue = append(queue, child)
+		}
+	}
+	return out, nil
 }
 
 // FindFoldersByName returns folders whose name contains query (case-insensitive).
