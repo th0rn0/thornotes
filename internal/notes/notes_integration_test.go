@@ -15,6 +15,7 @@ import (
 
 	"github.com/th0rn0/thornotes/internal/apperror"
 	"github.com/th0rn0/thornotes/internal/db"
+	"github.com/th0rn0/thornotes/internal/model"
 	"github.com/th0rn0/thornotes/internal/notes"
 	sqlite_repo "github.com/th0rn0/thornotes/internal/repository/sqlite"
 )
@@ -23,6 +24,7 @@ import (
 // direct access to the pool or filesystem root.
 type serviceStack struct {
 	svc      *notes.Service
+	user     *model.User
 	userID   int64
 	pool     *db.Pool
 	notesDir string
@@ -45,11 +47,11 @@ func newTestStackFull(t *testing.T) *serviceStack {
 	searchRepo := sqlite_repo.NewSearchRepo(pool.ReadDB, pool.WriteDB)
 
 	ctx := context.Background()
-	user, err := userRepo.Create(ctx, "testuser", "$2a$12$fakehash0000000000000000000000000000000000000000000000", "test-uuid-"+"testuser")
+	user, err := userRepo.Create(ctx, "testuser", "$2a$12$fakehash0000000000000000000000000000000000000000000000", "test-uuid")
 	require.NoError(t, err)
 
 	svc := notes.NewService(noteRepo, folderRepo, searchRepo, sqlite_repo.NewJournalRepo(pool.ReadDB, pool.WriteDB), fs)
-	return &serviceStack{svc: svc, userID: user.ID, pool: pool, notesDir: fsDir}
+	return &serviceStack{svc: svc, user: user, userID: user.ID, pool: pool, notesDir: fsDir}
 }
 
 func newTestStack(t *testing.T) (svc *notes.Service, userID int64) {
@@ -69,7 +71,7 @@ func newTestStack(t *testing.T) (svc *notes.Service, userID int64) {
 	searchRepo := sqlite_repo.NewSearchRepo(pool.ReadDB, pool.WriteDB)
 
 	ctx := context.Background()
-	user, err := userRepo.Create(ctx, "testuser", "$2a$12$fakehash0000000000000000000000000000000000000000000000", "test-uuid-"+"testuser")
+	user, err := userRepo.Create(ctx, "testuser", "$2a$12$fakehash0000000000000000000000000000000000000000000000", "test-uuid")
 	require.NoError(t, err)
 
 	svc = notes.NewService(noteRepo, folderRepo, searchRepo, sqlite_repo.NewJournalRepo(pool.ReadDB, pool.WriteDB), fs)
@@ -501,7 +503,7 @@ func TestService_Reconcile(t *testing.T) {
 	searchRepo := sqlite_repo.NewSearchRepo(pool.ReadDB, pool.WriteDB)
 
 	ctx := context.Background()
-	user, err := userRepo.Create(ctx, "testuser2", "$2a$12$fakehash0000000000000000000000000000000000000000000000", "test-uuid-"+"testuser2")
+	user, err := userRepo.Create(ctx, "testuser2", "$2a$12$fakehash0000000000000000000000000000000000000000000000", "test-uuid")
 	require.NoError(t, err)
 
 	svc := notes.NewService(noteRepo, folderRepo, searchRepo, sqlite_repo.NewJournalRepo(pool.ReadDB, pool.WriteDB), fs)
@@ -515,7 +517,7 @@ func TestService_Reconcile(t *testing.T) {
 	require.NoError(t, err)
 
 	// Run reconcile.
-	err = svc.Reconcile(ctx, user.ID)
+	_, err = svc.Reconcile(ctx, user)
 	require.NoError(t, err)
 
 	// Verify DB was updated.
@@ -526,17 +528,16 @@ func TestService_Reconcile(t *testing.T) {
 }
 
 func TestService_Reconcile_ProgressLogging(t *testing.T) {
-	// Verify Reconcile completes without error when there are > 100 notes
-	// (exercises the progress-log branch at i%100==0).
-	svc, userID := newTestStack(t)
+	// Verify Reconcile completes without error when there are > 100 notes.
+	st := newTestStackFull(t)
 	ctx := context.Background()
 
 	for i := range 105 {
-		_, err := svc.CreateNote(ctx, userID, "test-uuid", nil, fmt.Sprintf("note-%03d", i), nil)
+		_, err := st.svc.CreateNote(ctx, st.userID, "test-uuid", nil, fmt.Sprintf("note-%03d", i), nil)
 		require.NoError(t, err)
 	}
 
-	err := svc.Reconcile(ctx, userID)
+	_, err := st.svc.Reconcile(ctx, st.user)
 	require.NoError(t, err)
 }
 
@@ -556,7 +557,7 @@ func TestService_Reconcile_MissingFile(t *testing.T) {
 	searchRepo := sqlite_repo.NewSearchRepo(pool.ReadDB, pool.WriteDB)
 
 	ctx := context.Background()
-	user, err := userRepo.Create(ctx, "testuser3", "$2a$12$fakehash000000000000000000000000000000000000000000000", "test-uuid-"+"testuser3")
+	user, err := userRepo.Create(ctx, "testuser3", "$2a$12$fakehash000000000000000000000000000000000000000000000", "test-uuid")
 	require.NoError(t, err)
 
 	svc := notes.NewService(noteRepo, folderRepo, searchRepo, sqlite_repo.NewJournalRepo(pool.ReadDB, pool.WriteDB), fs)
@@ -568,8 +569,9 @@ func TestService_Reconcile_MissingFile(t *testing.T) {
 	absPath := filepath.Join(fsDir, note.DiskPath)
 	require.NoError(t, os.Remove(absPath))
 
-	// Reconcile should not error — it just logs a warning and continues.
-	err = svc.Reconcile(ctx, user.ID)
+	// Reconcile should not error — a file gone from disk is reconciled by
+	// deleting the DB row (file-first semantics).
+	_, err = svc.Reconcile(ctx, user)
 	require.NoError(t, err)
 }
 
@@ -655,10 +657,10 @@ func TestService_Reconcile_DBError(t *testing.T) {
 	st := newTestStackFull(t)
 	ctx := context.Background()
 
-	// Close readDB to make ListByFolder fail.
+	// Close readDB to make ListAllForWatch fail.
 	st.pool.ReadDB.Close()
 
-	err := st.svc.Reconcile(ctx, st.userID)
+	_, err := st.svc.Reconcile(ctx, st.user)
 	require.Error(t, err)
 }
 

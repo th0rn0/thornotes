@@ -74,6 +74,7 @@ func (r *FolderRepo) Tree(ctx context.Context, userID int64) ([]*model.FolderTre
 			f.id,
 			f.parent_id,
 			f.name,
+			f.disk_path,
 			(SELECT COUNT(*) FROM folders c WHERE c.parent_id = f.id) AS child_count,
 			(SELECT COUNT(*) FROM notes n WHERE n.folder_id = f.id) AS note_count
 		FROM folders f
@@ -87,7 +88,7 @@ func (r *FolderRepo) Tree(ctx context.Context, userID int64) ([]*model.FolderTre
 	var items []*model.FolderTreeItem
 	for rows.Next() {
 		item := &model.FolderTreeItem{}
-		if err := rows.Scan(&item.ID, &item.ParentID, &item.Name, &item.ChildCount, &item.NoteCount); err != nil {
+		if err := rows.Scan(&item.ID, &item.ParentID, &item.Name, &item.DiskPath, &item.ChildCount, &item.NoteCount); err != nil {
 			return nil, err
 		}
 		items = append(items, item)
