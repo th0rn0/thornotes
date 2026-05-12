@@ -403,8 +403,8 @@ Journals turn thornotes into a daily writing tool. A journal is a named containe
 
 ### What a journal is
 
-- A journal is just a name plus a root folder on disk with the same name.
-- Each entry is a normal `.md` note filed under `{journalName}/{year}/{month}/YYYY-MM-DD.md` — e.g. `Personal/2026/04/2026-04-18.md`.
+- A journal is a name plus a folder under the shared top-level `Journals/` directory.
+- Each entry is a normal `.md` note filed under `Journals/{journalName}/{year}/{MM - Month}/{DD - Weekday}.md` — e.g. `Journals/Personal/2025/01 - January/07 - Tuesday.md`.
 - Today's entry is auto-tagged with `journal entry` and the journal name, so you can find all entries with `find_notes_by_tag` or the tag filter in the UI.
 - The folder tree is materialised on first use, so entries remain accessible through the normal folder sidebar even without the journals UI.
 
@@ -418,15 +418,15 @@ Journals turn thornotes into a daily writing tool. A journal is a named containe
 
 Click **Today** in the sidebar. thornotes:
 
-1. Ensures the `{journal}/{year}/{month}/` folders exist.
+1. Ensures the `Journals/{journal}/{year}/{MM - Month}/` folders exist.
 2. Looks up today's date in the user's local timezone (the browser sends its IANA timezone via the `tz` query param).
-3. Returns the existing entry if there is one, or creates a fresh `YYYY-MM-DD.md` note with the `journal entry` + journal-name tags.
+3. Returns the existing entry if there is one, or creates a fresh `{DD - Weekday}.md` note with the `journal entry` + journal-name tags.
 
 Clicking **Today** repeatedly on the same day always returns the same note — it is idempotent.
 
 ### Removing a journal
 
-Removing a journal from the manage modal deletes only the journal *record*. The root folder, year/month folders, and every entry you have written are kept — they remain available in the normal folder tree, and you can re-create a journal with the same name later to reattach the shortcut.
+Removing a journal from the manage modal deletes only the journal *record*. The `Journals/{name}` folder, year/month folders, and every entry you have written are kept — they remain available in the normal folder tree, and you can re-create a journal with the same name later to reattach the shortcut.
 
 ### API
 

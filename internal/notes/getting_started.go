@@ -52,7 +52,7 @@ Type in the search bar to full-text search across all your notes. Filter by tag 
 
 ## Daily journal
 
-Use the **Journal** section in the sidebar to keep a daily journal. Create a journal with **+ Journal** — each entry is automatically named with today's date (` + "`YYYY-MM-DD`" + `) and filed under ` + "`{journal name}/{year}/{month}/`" + `.
+Use the **Journal** section in the sidebar to keep a daily journal. Create a journal with **+ Journal** — every entry is filed under ` + "`Journals/{journal name}/{year}/{MM - Month}/{DD - Weekday}.md`" + ` (e.g. ` + "`Journals/Personal/2025/01 - January/07 - Tuesday.md`" + `).
 
 You can have multiple named journals (e.g. "Personal", "Work").
 

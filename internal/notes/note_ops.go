@@ -13,16 +13,25 @@ import (
 
 // CreateNote creates a new note, writes the file, then saves to DB.
 func (s *Service) CreateNote(ctx context.Context, userID int64, userUUID string, folderID *int64, title string, tags []string) (*model.Note, error) {
+	return s.createNoteWithSlug(ctx, userID, userUUID, folderID, title, slugify(title), tags)
+}
+
+// createNoteWithSlug is the shared core of note creation. It validates input,
+// resolves the parent folder path, writes the file, and inserts the DB row.
+// Callers that need full control over the on-disk filename (e.g. the journal
+// flow, which uses pretty names like "06 - Tuesday") pass an explicit slug
+// instead of relying on slugify.
+func (s *Service) createNoteWithSlug(ctx context.Context, userID int64, userUUID string, folderID *int64, title, slug string, tags []string) (*model.Note, error) {
 	if len(title) == 0 || len(title) > 500 {
 		return nil, apperror.BadRequest("title must be 1–500 characters")
+	}
+	if slug == "" {
+		return nil, apperror.BadRequest("note slug must be non-empty")
 	}
 	if tags == nil {
 		tags = []string{}
 	}
 
-	slug := slugify(title)
-
-	// Determine disk path.
 	var folderPath string
 	if folderID != nil {
 		folder, err := s.folders.GetByID(ctx, userID, *folderID)
