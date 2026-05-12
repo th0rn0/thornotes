@@ -2,6 +2,11 @@
 
 All notable changes to thornotes are documented here.
 
+## [1.5.13.0] - 2026-05-12
+
+### Changed
+- **Journal folder layout** — journal entries are now filed under a shared top-level `Journals/` directory, with named month and day folders. New path: `Journals/{journal name}/{YYYY}/{MM - Month}/{DD - Weekday}.md` — e.g. `Journals/Personal/2025/01 - January/07 - Tuesday.md`. The previous layout (`{journal name}/{YYYY}/{MM}/YYYY-MM-DD.md`) scattered journal roots next to ordinary top-level folders and used opaque numeric month directories. Existing entries on disk are not migrated — clicking **Today** after upgrading materialises the new layout on first use, and old entries remain reachable through the normal folder tree.
+
 ## [1.5.12.9] - 2026-05-07
 
 ### Fixed
