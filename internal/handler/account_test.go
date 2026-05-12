@@ -22,8 +22,8 @@ import (
 
 type fakeAPITokenRepo struct {
 	tokens []*model.APIToken
-	byRaw  map[string]*model.APIToken                // raw token → stored token
-	perms  map[int64][]model.TokenFolderPermission   // token ID → permissions
+	byRaw  map[string]*model.APIToken              // raw token → stored token
+	perms  map[int64][]model.TokenFolderPermission // token ID → permissions
 	nextID int64
 	err    error // if set, all mutating calls return this
 }

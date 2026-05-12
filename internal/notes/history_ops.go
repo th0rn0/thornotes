@@ -83,4 +83,3 @@ func (s *Service) NoteRestoreAt(ctx context.Context, userID, noteID int64, sha, 
 	}
 	return newHash, nil
 }
-

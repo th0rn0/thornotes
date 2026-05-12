@@ -45,6 +45,12 @@ func TestSecureHeaders_SetsExpectedHeaders(t *testing.T) {
 	assert.Contains(t, csp, "style-src 'self' 'unsafe-inline'")
 	assert.Contains(t, csp, "img-src 'self' data:")
 	assert.Contains(t, csp, "font-src 'self'")
+	// Hardening directives: clickjacking, base-tag injection, form redirect,
+	// object/embed and similar must all be locked down.
+	assert.Contains(t, csp, "object-src 'none'")
+	assert.Contains(t, csp, "base-uri 'self'")
+	assert.Contains(t, csp, "form-action 'self'")
+	assert.Contains(t, csp, "frame-ancestors 'none'")
 }
 
 func TestSecureHeaders_CallsNextHandler(t *testing.T) {

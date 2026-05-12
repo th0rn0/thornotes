@@ -6,13 +6,27 @@ import (
 	"encoding/hex"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
 
-const csrfTokenBytes = 32
+const (
+	csrfTokenBytes = 32
+	// csrfTokenTTL bounds how long a CSRF entry stays in memory after its
+	// last refresh. It matches the session TTL in internal/auth (7 days) so
+	// that a CSRF entry can never outlive the session it protects. Without
+	// this bound the in-memory map grows unboundedly when sessions expire
+	// without an explicit logout (which is the common case).
+	csrfTokenTTL = 7 * 24 * time.Hour
+)
 
-// csrfStore maps session token → CSRF token.
+type csrfEntry struct {
+	token   string
+	expires time.Time
+}
+
+// csrfStore maps session token → csrfEntry.
 // A real multi-instance deployment would use the DB, but for single-binary
 // self-hosted deployment this is sufficient.
 var csrfStore sync.Map
@@ -24,8 +38,27 @@ func GenerateCSRFToken(sessionToken string) (string, error) {
 		return "", err
 	}
 	token := hex.EncodeToString(b)
-	csrfStore.Store(sessionToken, token)
+	csrfStore.Store(sessionToken, csrfEntry{token: token, expires: time.Now().Add(csrfTokenTTL)})
 	return token, nil
+}
+
+// loadValidCSRFEntry returns the live CSRF token for sessionToken, or
+// ("", false) if the entry is missing or expired. Expired entries are
+// removed in-line so they don't accumulate.
+func loadValidCSRFEntry(sessionToken string) (string, bool) {
+	raw, ok := csrfStore.Load(sessionToken)
+	if !ok {
+		return "", false
+	}
+	entry, ok := raw.(csrfEntry)
+	if !ok {
+		return "", false
+	}
+	if !entry.expires.IsZero() && time.Now().After(entry.expires) {
+		csrfStore.Delete(sessionToken)
+		return "", false
+	}
+	return entry.token, true
 }
 
 // CSRFMiddleware validates the X-CSRF-Token header against the session's stored token.
@@ -51,14 +84,13 @@ func CSRFMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		stored, ok := csrfStore.Load(cookie.Value)
+		stored, ok := loadValidCSRFEntry(cookie.Value)
 		if !ok {
 			http.Error(w, `{"error":"csrf token not found"}`, http.StatusForbidden)
 			return
 		}
 
-		storedStr, _ := stored.(string)
-		if subtle.ConstantTimeCompare([]byte(provided), []byte(storedStr)) != 1 {
+		if subtle.ConstantTimeCompare([]byte(provided), []byte(stored)) != 1 {
 			http.Error(w, `{"error":"invalid csrf token"}`, http.StatusForbidden)
 			return
 		}
@@ -89,14 +121,13 @@ func CSRFGinMiddleware() gin.HandlerFunc {
 			return
 		}
 
-		stored, ok := csrfStore.Load(cookie)
+		stored, ok := loadValidCSRFEntry(cookie)
 		if !ok {
 			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "csrf token not found"})
 			return
 		}
 
-		storedStr, _ := stored.(string)
-		if subtle.ConstantTimeCompare([]byte(provided), []byte(storedStr)) != 1 {
+		if subtle.ConstantTimeCompare([]byte(provided), []byte(stored)) != 1 {
 			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "invalid csrf token"})
 			return
 		}
@@ -108,4 +139,22 @@ func CSRFGinMiddleware() gin.HandlerFunc {
 // InvalidateCSRFToken removes the CSRF token for a session (call on logout).
 func InvalidateCSRFToken(sessionToken string) {
 	csrfStore.Delete(sessionToken)
+}
+
+// SweepExpiredCSRFTokens removes every entry whose expiry has passed. Intended
+// to be called on a ticker by long-running processes so that the in-memory map
+// reclaims slots from sessions that timed out without an explicit logout.
+func SweepExpiredCSRFTokens() {
+	now := time.Now()
+	csrfStore.Range(func(k, v any) bool {
+		entry, ok := v.(csrfEntry)
+		if !ok {
+			csrfStore.Delete(k)
+			return true
+		}
+		if !entry.expires.IsZero() && now.After(entry.expires) {
+			csrfStore.Delete(k)
+		}
+		return true
+	})
 }

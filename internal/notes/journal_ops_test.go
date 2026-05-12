@@ -9,11 +9,11 @@ import (
 
 func TestJournalPathSegments(t *testing.T) {
 	tests := []struct {
-		name        string
-		when        time.Time
-		wantYear    string
-		wantMonth   string
-		wantDay     string
+		name      string
+		when      time.Time
+		wantYear  string
+		wantMonth string
+		wantDay   string
 	}{
 		{
 			name:      "tuesday in january",

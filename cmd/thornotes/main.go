@@ -181,6 +181,7 @@ func main() {
 			if err := sessionRepo.DeleteExpired(context.Background()); err != nil {
 				log.Warn().Err(err).Msg("delete expired sessions")
 			}
+			security.SweepExpiredCSRFTokens()
 		}
 	}()
 
