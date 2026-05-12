@@ -275,7 +275,7 @@ Journals are for regular writing — daily logs, work diaries, mood tracking. Ea
 
 **Create a journal:** Click **Journals** in the sidebar, then **+ New Journal**. Give it a name (e.g. "Daily", "Work Log").
 
-**Write today's entry:** Select your journal from the dropdown, then click **Today**. Thornotes creates the entry at `{journal}/{year}/{month}/YYYY-MM-DD.md` and opens it in the editor. Click Today on the same day and you get the same note back.
+**Write today's entry:** Select your journal from the dropdown, then click **Today**. Thornotes creates the entry at `Journals/{journal}/{year}/{MM - Month}/{DD - Weekday}.md` (e.g. `Journals/Personal/2025/01 - January/07 - Tuesday.md`) and opens it in the editor. Click Today on the same day and you get the same note back.
 
 Entries are automatically tagged with `journal entry` and the journal name, so you can find them via the tag browser even without navigating the folder tree.
 

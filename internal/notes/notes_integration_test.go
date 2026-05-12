@@ -760,6 +760,86 @@ func TestService_TodayEntry_NotFoundJournal(t *testing.T) {
 	assert.ErrorIs(t, err, apperror.ErrNotFound)
 }
 
+// TestService_TodayEntry_DiskPathFormat verifies that today's entry lives at
+// "{uuid}/Journals/{name}/{YYYY}/{MM - Month}/{DD - Weekday}.md" and that the
+// matching file actually exists on disk. This is the canonical guard for the
+// new on-disk layout — if anyone tweaks the formatting, this test catches it.
+func TestService_TodayEntry_DiskPathFormat(t *testing.T) {
+	stack := newTestStackFull(t)
+	ctx := context.Background()
+
+	j, err := stack.svc.CreateJournal(ctx, stack.userID, "test-uuid", "Personal")
+	require.NoError(t, err)
+
+	note, err := stack.svc.TodayEntry(ctx, stack.userID, "test-uuid", j.ID, time.UTC)
+	require.NoError(t, err)
+
+	now := time.Now().UTC()
+	expectedDayFile := fmt.Sprintf("%02d - %s", now.Day(), now.Weekday().String())
+	expectedMonthDir := fmt.Sprintf("%02d - %s", int(now.Month()), now.Month().String())
+	expectedYearDir := now.Format("2006")
+
+	expectedDiskPath := filepath.Join(
+		"test-uuid",
+		notes.JournalsRootFolderName,
+		"Personal",
+		expectedYearDir,
+		expectedMonthDir,
+		expectedDayFile+".md",
+	)
+	assert.Equal(t, expectedDiskPath, note.DiskPath)
+	assert.Equal(t, expectedDayFile, note.Slug)
+	assert.Equal(t, expectedDayFile, note.Title)
+
+	// File must exist on disk under notesDir.
+	absPath := filepath.Join(stack.notesDir, expectedDiskPath)
+	_, err = os.Stat(absPath)
+	assert.NoError(t, err, "expected journal entry file to exist at %s", absPath)
+}
+
+// TestService_CreateJournal_NestsUnderJournalsRoot verifies that creating a
+// journal places its folder under the shared "Journals" root rather than at
+// the user's notes root.
+func TestService_CreateJournal_NestsUnderJournalsRoot(t *testing.T) {
+	stack := newTestStackFull(t)
+	ctx := context.Background()
+
+	_, err := stack.svc.CreateJournal(ctx, stack.userID, "test-uuid", "Work")
+	require.NoError(t, err)
+
+	expectedDir := filepath.Join(stack.notesDir, "test-uuid", notes.JournalsRootFolderName, "Work")
+	info, err := os.Stat(expectedDir)
+	require.NoError(t, err, "expected Journals/Work directory at %s", expectedDir)
+	assert.True(t, info.IsDir())
+
+	// The old layout (top-level "{uuid}/Work" without the Journals root) must
+	// no longer be created.
+	oldDir := filepath.Join(stack.notesDir, "test-uuid", "Work")
+	_, err = os.Stat(oldDir)
+	assert.True(t, os.IsNotExist(err), "old top-level journal folder should not exist")
+}
+
+// TestService_TodayEntry_SharesJournalsRoot verifies that multiple journals
+// for the same user share a single "Journals" root folder rather than each
+// creating their own.
+func TestService_TodayEntry_SharesJournalsRoot(t *testing.T) {
+	stack := newTestStackFull(t)
+	ctx := context.Background()
+
+	_, err := stack.svc.CreateJournal(ctx, stack.userID, "test-uuid", "Personal")
+	require.NoError(t, err)
+	_, err = stack.svc.CreateJournal(ctx, stack.userID, "test-uuid", "Work")
+	require.NoError(t, err)
+
+	personalDir := filepath.Join(stack.notesDir, "test-uuid", notes.JournalsRootFolderName, "Personal")
+	workDir := filepath.Join(stack.notesDir, "test-uuid", notes.JournalsRootFolderName, "Work")
+
+	_, err = os.Stat(personalDir)
+	require.NoError(t, err)
+	_, err = os.Stat(workDir)
+	require.NoError(t, err)
+}
+
 // ─── Getting Started tests ────────────────────────────────────────────────────
 
 func TestService_CreateGettingStartedNote_CreatesNote(t *testing.T) {
