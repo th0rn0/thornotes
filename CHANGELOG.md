@@ -2,7 +2,7 @@
 
 All notable changes to thornotes are documented here.
 
-## [Unreleased]
+## [1.5.13.3] - 2026-05-12
 
 ### Fixed
 - **File-first contract honoured for the full disk lifecycle.** The disk watcher and the startup reconciler now walk `notesRoot/<userUUID>/` recursively instead of just iterating known DB rows, so files added directly to disk (`rsync`, `git pull`, drag-drop, external editor) appear in the UI, files deleted on disk are removed from the index, and folder rename / move cascades that fail their descendant DB update self-heal on the next poll. The new algorithm lives in `internal/notes/reconcile.go` and is shared by `Service.Reconcile` (startup) and the polling watcher. The README and CHANGELOG previously advertised this behaviour for external editors; it now matches the docs across the full lifecycle.
