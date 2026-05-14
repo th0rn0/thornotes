@@ -2,6 +2,16 @@
 
 All notable changes to thornotes are documented here.
 
+## [1.5.13.4] - 2026-05-14
+
+### Security
+- **API token scope-leakage hardened against effective post-update state.** `PUT /api/v1/account/tokens/:id/permissions` previously only rejected a write grant under read scope when both `scope` and `folder_permissions` arrived in the same request body. Two bypass shapes survived: (a) `{"scope":"read"}` alone left stale folder write grants intact under a now-read-scoped token, and (b) `{"folder_permissions":[{permission:"write"}]}` alone added write grants to an already read-scoped token. Both paths produced an internally inconsistent DB row that no current code consults at enforcement time — the MCP global write-tool gate at `internal/handler/mcp.go:556` checks `user.TokenScope` per request and blocks every write tool when `scope=="read"` regardless of folder grants — but would over-grant on any future code path that consulted only folder permissions. The handler now computes the effective post-update state from the union of (request body, currently stored token + perms) and returns `400 Bad Request` if any write folder grant would coexist with `scope=read`. The same `ListByUser` lookup that loads the current state doubles as the cross-user ownership probe so the subsequent unscoped `ListPermissions(tokenID)` cannot leak across users; an explicit `404 Not Found` is returned for non-owned token IDs. Inline comment documents the residual TOCTOU window (best-effort under concurrent writes from the same user) and points future maintainers at the authoritative MCP gate.
+- **MCP scope-gate contract pinned by parametric tests.** `TestMCP_ReadOnlyToken_RejectsAllWriteTools` walks every name in the `writeTools` allowlist (9 tools) and asserts JSON-RPC error code `-32001` with `"read-only"` in the message; `TestMCP_ReadOnlyToken_AllowsReadTools` walks every read tool (7) and asserts the scope gate never fires for them. `require.Len` sentinels on both tables force the suite to fail if a future tool addition or rename skips the test update.
+- **Cross-user ownership boundary on token edits.** `TestUpdateTokenPermissions_NotOwnedReturns404` now seeds the cross-user target token with distinctive `name`/`scope`/`folder_permissions` values and asserts they survive byte-for-byte after the rejected request; a future regression that returns 404 while still calling `SetName` / `SetScope` / `SetPermissions` would be caught.
+
+### Internal
+- README's API tokens section now documents that the read-vs-write invariant is enforced on update against the effective post-update state, not just on create, with the matching `400 Bad Request` response.
+
 ## [1.5.13.3] - 2026-05-12
 
 ### Fixed
