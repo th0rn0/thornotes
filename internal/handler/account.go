@@ -160,18 +160,77 @@ func (h *AccountHandler) UpdateTokenPermissions(c *gin.Context) {
 			}
 		}
 	}
-	// Mirror the create-time rule: a read-only token must not carry any
-	// folder-level write grants. Downgrading scope with stale write grants
-	// still on file would silently over-grant at enforcement time.
-	if body.Scope == "read" && body.FolderPermissions != nil {
-		for _, p := range *body.FolderPermissions {
+
+	// Enforce the create-time invariant across the full state, not just the
+	// fields in this request body: after the update completes, a token with
+	// scope="read" must have zero folder-level write grants. Two leak paths
+	// were possible before this check:
+	//
+	//   1. {"scope":"read"} with no folder_permissions field — old write
+	//      grants survive the scope change.
+	//   2. {"folder_permissions":[{permission:"write"}]} with no scope field
+	//      — write grant is added to an already read-scoped token.
+	//
+	// Both reduce to "what's the effective end state?", so we compute it
+	// here. ListByUser also doubles as the ownership check for tokenID
+	// (so the ListPermissions read below cannot leak across users).
+	userTokens, err := h.tokens.ListByUser(c.Request.Context(), user.ID)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	var current *model.APIToken
+	for _, t := range userTokens {
+		if t.ID == tokenID {
+			current = t
+			break
+		}
+	}
+	if current == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "token not found"})
+		return
+	}
+	effectiveScope := body.Scope
+	if effectiveScope == "" {
+		effectiveScope = current.Scope
+	}
+	if effectiveScope == "read" {
+		var effectivePerms []model.TokenFolderPermission
+		if body.FolderPermissions != nil {
+			effectivePerms = *body.FolderPermissions
+		} else {
+			existing, err := h.tokens.ListPermissions(c.Request.Context(), tokenID)
+			if err != nil {
+				writeError(c, err)
+				return
+			}
+			effectivePerms = existing
+		}
+		for _, p := range effectivePerms {
 			if p.Permission == "write" {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "cannot grant write on a read-only token; set scope=\"readwrite\" first"})
+				c.JSON(http.StatusBadRequest, gin.H{"error": "cannot grant write on a read-only token; set scope=\"readwrite\" first or remove write grants"})
 				return
 			}
 		}
 	}
 
+	// The check above is best-effort: two concurrent PUTs from the same
+	// user (e.g. two browser tabs, two desktop clients, or a script holding
+	// a session cookie) can each pass the effective-state check on
+	// overlapping reads and then both write, leaving the row in
+	// {scope=read, write-grant=*}. That state has no exploit surface today
+	// because the MCP write-tool gate at handler/mcp.go:556 reads
+	// user.TokenScope per request and blocks every write tool when
+	// scope=="read" regardless of folder grants — that gate is the
+	// authoritative scope check. Defense-in-depth only. If a future
+	// caller starts reading folder permissions without re-checking
+	// TokenScope, push the invariant into the repo as a transactional
+	// check on SetScope / SetPermissions. The ListPermissions read at
+	// line 202 is similarly unscoped at the SQL level (see
+	// repository/sqlite/api_tokens.go:163) and is only safe today because
+	// the linear-scan ownership check above runs first; pushing the
+	// invariant repo-side should also add a user_id filter there to
+	// remove the implicit handler-side coupling.
 	if body.Name != nil {
 		if err := h.tokens.SetName(c.Request.Context(), user.ID, tokenID, strings.TrimSpace(*body.Name)); err != nil {
 			writeError(c, err)

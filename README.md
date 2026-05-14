@@ -283,7 +283,7 @@ All three endpoints require `Authorization: Bearer <token>`.
 - Permissions **cascade to descendants**: a `write` grant on `Work` covers `Work/Projects` and `Work/Projects/Q3`, unless an inner folder carries its own (tighter) grant.
 - A grant on the root (the implicit "/" row) covers unfiled notes and acts as the fallback for folders with no direct grant.
 - Notes inherit from their folder — you cannot set permissions on individual notes.
-- `write` implies `read`. You cannot grant `write` on a token whose global scope is `read`.
+- `write` implies `read`. You cannot grant `write` on a token whose global scope is `read`. The same rule is enforced on update: `PUT …/permissions` returns `400 Bad Request` for any request whose effective post-update state would be `scope=read` with one or more `write` folder grants. Clear stale write grants in the same request when downgrading scope, or remove them first.
 - Listings (`list_notes`, `list_folders`, `search_notes`, `list_tags`, `find_notes_by_tag`, `find_folders`, and the MCP `resources/list`) are automatically filtered so the client only sees allowed folders.
 
 Permissions can also be managed via the API:

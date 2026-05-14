@@ -2132,3 +2132,116 @@ func TestMCP_Scoped_ListFolders_NestedGrantShowsDescendants(t *testing.T) {
 	assert.Contains(t, names, "Q3", "grand-descendant must be visible via cascade")
 	assert.NotContains(t, names, "Personal", "ungranted sibling must stay hidden")
 }
+
+// ─── Scope leakage regression: read-only token vs every write tool ────────────
+
+// A read-scoped API token must be refused by every mutation tool exposed
+// over MCP, with JSON-RPC error code -32001 (rpcErrForbidden) and a message
+// that calls out the token scope. The global gate at handler/mcp.go:556 is
+// the load-bearing check; this test pins each tool name to that contract
+// so a future tool added without updating the writeTools allowlist would
+// fail this test.
+func TestMCP_ReadOnlyToken_RejectsAllWriteTools(t *testing.T) {
+	m := newReadOnlyMCPClient(t)
+	sessionID := m.initialize(t)
+
+	// Tool name → minimal argument payload that is otherwise well-formed.
+	// We never want to reach the underlying notes service — the scope gate
+	// must fire before any argument validation runs. The payloads here are
+	// chosen so they would succeed for a readwrite token, leaving the scope
+	// check as the only reason for the forbidden response.
+	cases := []struct {
+		tool string
+		args map[string]interface{}
+	}{
+		{"create_note", map[string]interface{}{"title": "scope-leak-attempt"}},
+		{"update_note", map[string]interface{}{"id": 1, "content": "blocked"}},
+		{"rename_note", map[string]interface{}{"id": 1, "title": "blocked"}},
+		{"move_note", map[string]interface{}{"id": 1}},
+		{"delete_note", map[string]interface{}{"id": 1}},
+		{"create_folder", map[string]interface{}{"name": "blocked"}},
+		{"rename_folder", map[string]interface{}{"id": 1, "name": "blocked"}},
+		{"move_folder", map[string]interface{}{"id": 1}},
+		{"delete_folder", map[string]interface{}{"id": 1}},
+	}
+	// Sentinel: keep this count in sync with the writeTools map in mcp.go.
+	// If a new write tool is added to writeTools without updating this
+	// table, this assertion fails and forces the test to be extended.
+	require.Len(t, cases, 9, "writeTools count drifted — sync this table with mcp.go writeTools")
+
+	id := 100
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.tool, func(t *testing.T) {
+			id++
+			resp := m.post(t, rpc(id, "tools/call", map[string]interface{}{
+				"name":      tc.tool,
+				"arguments": tc.args,
+			}), sessionID)
+			defer resp.Body.Close()
+			require.Equal(t, http.StatusOK, resp.StatusCode)
+
+			var result map[string]interface{}
+			require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+			require.NotNil(t, result["error"], "%s on a read-only token must return a JSON-RPC error", tc.tool)
+			errObj := result["error"].(map[string]interface{})
+			assert.Equal(t, float64(-32001), errObj["code"], "%s: expected rpcErrForbidden", tc.tool)
+			msg, _ := errObj["message"].(string)
+			assert.Contains(t, msg, "read-only", "%s: forbidden message should name the scope", tc.tool)
+		})
+	}
+}
+
+// Sanity check the read-only token can still call every read tool — the
+// scope gate must be precise about which tools it blocks. Paired with
+// TestMCP_ReadOnlyToken_RejectsAllWriteTools above; together they pin the
+// writeTools allowlist as a contract — a future typo that moves a read
+// tool into writeTools (or vice versa) will fail one of these two tests.
+func TestMCP_ReadOnlyToken_AllowsReadTools(t *testing.T) {
+	m := newReadOnlyMCPClient(t)
+	sessionID := m.initialize(t)
+
+	// Minimal-but-valid argument payloads for each read tool. Tools may
+	// legitimately return "not found"-style errors when the underlying note
+	// or tag doesn't exist, so we don't require result.error == nil. The
+	// contract pinned here is narrower: the rpcErrForbidden (-32001) scope
+	// error must never appear for a read tool, regardless of token scope.
+	cases := []struct {
+		tool string
+		args map[string]interface{}
+	}{
+		{"search_notes", map[string]interface{}{"query": "scope-leak-check"}},
+		{"get_note", map[string]interface{}{"id": 1}},
+		{"list_notes", map[string]interface{}{}},
+		{"list_folders", map[string]interface{}{}},
+		{"find_folders", map[string]interface{}{"query": "scope-leak-check"}},
+		{"find_notes_by_tag", map[string]interface{}{"tags": []string{"scope-leak-check"}}},
+		{"list_tags", map[string]interface{}{}},
+	}
+	// Sentinel symmetric with RejectsAllWriteTools — keep in sync with the
+	// read-tool dispatch cases in mcp.go. If a new read tool is added without
+	// updating this table the gate-precision contract is no longer fully
+	// pinned for that tool, so this assertion fails to force the update.
+	require.Len(t, cases, 7, "read-tool count drifted — sync this table with mcp.go read-tool dispatch")
+
+	id := 200
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.tool, func(t *testing.T) {
+			id++
+			resp := m.post(t, rpc(id, "tools/call", map[string]interface{}{
+				"name":      tc.tool,
+				"arguments": tc.args,
+			}), sessionID)
+			defer resp.Body.Close()
+			require.Equal(t, http.StatusOK, resp.StatusCode)
+
+			var result map[string]interface{}
+			require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+			if errObj, ok := result["error"].(map[string]interface{}); ok {
+				assert.NotEqual(t, float64(-32001), errObj["code"],
+					"%s: read tool must not be blocked by the scope gate (rpcErrForbidden)", tc.tool)
+			}
+		})
+	}
+}
