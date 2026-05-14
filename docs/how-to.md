@@ -448,6 +448,6 @@ MCP respects all API token permissions. A read-only token can only use read tool
 
 **Context endpoint for AI.** `GET /api/v1/notes/context` returns all your notes concatenated into one block — useful for feeding your full knowledge base to an LLM in a single request. Optionally scope it to a folder with `?folder_id=123`. Truncates at 200,000 characters.
 
-**Disable registration after setup.** Once you've created your account(s), restart Thornotes with `--allow-registration=false` (or `THORNOTES_ALLOW_REGISTRATION=false`) to close public sign-up.
+**Disable registration after setup.** Once you've created your account(s), restart Thornotes with `--allow-registration=false` (or `THORNOTES_ALLOW_REGISTRATION=false`) to close public sign-up. The "Create account" link disappears from the auth screen, the register form is removed from the DOM, and `POST /api/v1/auth/register` returns `404 Not Found` — there is no UI or API path into registration on a closed instance, including for the very first user. Always start fresh instances with the flag on (the default), register your admin account, then restart with the flag off.
 
 **HTTPS in production.** Set `THORNOTES_SECURE_COOKIES=true` when running behind a TLS reverse proxy. This sets the `Secure` flag on session cookies. Also set `THORNOTES_TRUSTED_PROXY` to the CIDR of your proxy so rate limiting works correctly.

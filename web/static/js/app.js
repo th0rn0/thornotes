@@ -58,6 +58,33 @@ let currentFolderViewId = null; // folder ID currently shown in folder view (nul
 const AUTO_SAVE_DELAY_MS = 1500;
 
 // ── Init ───────────────────────────────────────────────────────────────────
+//
+// applyRegistrationConfig reads GET /api/v1/auth/config (unauth) and shapes
+// the auth screen accordingly. If the server reports allow_registration=true
+// (open instance OR closed-but-empty bootstrap window) we reveal the
+// "Create account" link the template hides by default. If the server
+// reports false — or the request fails entirely — we fail closed: the
+// register form is removed from the DOM, the link stays hidden, and the
+// user has no path from the UI to a POST /register that would 404 anyway.
+async function applyRegistrationConfig() {
+  let allow = false;
+  try {
+    const cfg = await api('GET', '/api/v1/auth/config');
+    allow = !!cfg.allow_registration;
+  } catch (_) {
+    // Network/permission error reading the config endpoint — fail closed.
+    allow = false;
+  }
+  const wrap = document.getElementById('show-register-wrap');
+  const form = document.getElementById('auth-form-register');
+  if (allow) {
+    if (wrap) wrap.style.display = '';
+  } else {
+    if (wrap) wrap.remove();
+    if (form) form.remove();
+  }
+}
+
 (async function init() {
   try {
     const me = await api('GET', '/api/v1/auth/me');
@@ -69,6 +96,10 @@ const AUTO_SAVE_DELAY_MS = 1500;
     showApp();
     await resolveDeepLink(window.location.pathname).catch(() => {});
   } catch {
+    // The user is unauthenticated. Decide whether the "Create account"
+    // affordance should appear BEFORE the auth screen renders so the user
+    // never sees a flash of the link on a closed instance.
+    await applyRegistrationConfig();
     showAuth();
   }
 })();
@@ -2002,15 +2033,19 @@ function _resetAutoCollapseTimer() {
 _resetAutoCollapseTimer();
 
 // ── Event bindings (replaces inline onclick/onchange/oninput attrs) ─────────
-// Auth
+// Auth.
+// Register-form wirings use optional chaining because init() removes the
+// register form + link entirely from the DOM on closed instances. The
+// elements are gone by the time event handlers would matter; the IDs simply
+// resolve to null and the wirings no-op.
 document.getElementById('login-btn').addEventListener('click', login);
 document.getElementById('login-username').addEventListener('keydown', e => { if (e.key === 'Enter') login(); });
 document.getElementById('login-password').addEventListener('keydown', e => { if (e.key === 'Enter') login(); });
-document.getElementById('show-register-link').addEventListener('click', showRegister);
-document.getElementById('register-btn').addEventListener('click', register);
-document.getElementById('reg-username').addEventListener('keydown', e => { if (e.key === 'Enter') register(); });
-document.getElementById('reg-password').addEventListener('keydown', e => { if (e.key === 'Enter') register(); });
-document.getElementById('show-login-link').addEventListener('click', showLogin);
+document.getElementById('show-register-link')?.addEventListener('click', showRegister);
+document.getElementById('register-btn')?.addEventListener('click', register);
+document.getElementById('reg-username')?.addEventListener('keydown', e => { if (e.key === 'Enter') register(); });
+document.getElementById('reg-password')?.addEventListener('keydown', e => { if (e.key === 'Enter') register(); });
+document.getElementById('show-login-link')?.addEventListener('click', showLogin);
 
 // Topbar
 document.querySelector('.topbar-menu-btn').addEventListener('click', toggleSidebar);

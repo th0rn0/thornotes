@@ -41,6 +41,14 @@ type testClient struct {
 }
 
 func newTestClient(t *testing.T) *testClient {
+	return newTestClientWithRegistration(t, true)
+}
+
+// newTestClientWithRegistration spins up a full router-backed test server
+// with the given allowRegistration flag. Use this for tests that need to
+// exercise the closed-instance gate on the register endpoint; existing
+// tests keep using newTestClient (registration open) unchanged.
+func newTestClientWithRegistration(t *testing.T, allowRegistration bool) *testClient {
 	t.Helper()
 	dir := t.TempDir()
 	pool, err := db.Open(filepath.Join(dir, "test.db"))
@@ -58,7 +66,7 @@ func newTestClient(t *testing.T) *testClient {
 	searchRepo := sqlite.NewSearchRepo(pool.ReadDB, pool.WriteDB)
 	apiTokenRepo := sqlite.NewAPITokenRepo(pool.ReadDB, pool.WriteDB)
 
-	authSvc := auth.NewServiceForTest(userRepo, sessionRepo, true)
+	authSvc := auth.NewServiceForTest(userRepo, sessionRepo, allowRegistration)
 	notesSvc := notes.NewService(noteRepo, folderRepo, searchRepo, sqlite.NewJournalRepo(pool.ReadDB, pool.WriteDB), fs)
 	rateLimiter := security.NewAuthRateLimiter(nil)
 	t.Cleanup(rateLimiter.Stop)
@@ -171,6 +179,115 @@ func TestHandler_Register_ShortPassword(t *testing.T) {
 	})
 	defer resp.Body.Close()
 	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+}
+
+// ─── Disable-registration gate ───────────────────────────────────────────────
+
+// GET /api/v1/auth/config exposes the same predicate the route gate uses,
+// so the SPA on init can decide whether to render the "Create account" link
+// without ever attempting the POST. These tests pin the three states the
+// SPA needs to handle: open instance, closed instance pre-bootstrap, closed
+// instance post-bootstrap.
+
+func TestHandler_AuthConfig_OpenInstance(t *testing.T) {
+	c := newTestClientWithRegistration(t, true)
+	resp := c.do(t, http.MethodGet, "/api/v1/auth/config", nil)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var result map[string]bool
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+	assert.True(t, result["allow_registration"], "open instance must advertise allow_registration=true")
+}
+
+func TestHandler_AuthConfig_ClosedInstance_NoUsers(t *testing.T) {
+	// Closed means closed regardless of user count. The pre-existing
+	// "first user can register even with the flag off" bootstrap window
+	// was removed: advertising it over a public /config endpoint turned a
+	// closed-empty internet-exposed instance into a drive-by admin-takeover
+	// target. Operators bootstrap fresh instances via the documented flow
+	// (start with --allow-registration=true, register, restart closed).
+	c := newTestClientWithRegistration(t, false)
+	resp := c.do(t, http.MethodGet, "/api/v1/auth/config", nil)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var result map[string]bool
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+	assert.False(t, result["allow_registration"], "closed instance reports closed even with zero users — no bootstrap window")
+}
+
+// The closed-with-users scenario was previously covered separately because
+// the bootstrap window made empty-vs-populated meaningfully different. Now
+// that closed means closed regardless of user count, the _NoUsers test
+// above and _RefusesFirstUser below fully pin the contract — adding a
+// "closed with one user" variant would test the same predicate again.
+
+// /api/v1/auth/config must NOT be rate-limited the way /login is. The
+// endpoint exposes a single config bool with no auth side effects, so
+// burning the per-IP auth bucket on every page load would let a noisy
+// neighbor on a shared IP exhaust the limit and fail-close the register
+// form on the OPEN instance for every honest visitor on that IP. This
+// test fires 15 rapid /config requests from the same client and asserts
+// they all return 200 — the auth rate-limiter would 429 after 10.
+func TestHandler_AuthConfig_NotRateLimited(t *testing.T) {
+	c := newTestClientWithRegistration(t, true)
+	for i := 0; i < 15; i++ {
+		resp := c.do(t, http.MethodGet, "/api/v1/auth/config", nil)
+		require.Equal(t, http.StatusOK, resp.StatusCode, "config request %d/15 must not be rate-limited (would lock honest visitors out of register on shared IPs)", i+1)
+		resp.Body.Close()
+	}
+}
+
+// Closed instance + zero users used to have a "bootstrap window" allowing
+// the first user through. That was removed for security (see
+// TestHandler_AuthConfig_ClosedInstance_NoUsers). A closed instance refuses
+// every registration regardless of user count; the documented bootstrap
+// flow is to start with the flag on, register, then restart closed.
+func TestHandler_Register_ClosedInstance_RefusesFirstUser(t *testing.T) {
+	c := newTestClientWithRegistration(t, false)
+	resp := c.do(t, http.MethodPost, "/api/v1/auth/register", map[string]string{
+		"username": "admin",
+		"password": "longenoughpassword123!",
+	})
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode, "closed instance must refuse first user — no bootstrap window")
+}
+
+// The route-gate predicate and the /config predicate must never disagree.
+// If the SPA reads config=closed, the POST must 404; if config=open, the
+// POST must reach the validation layer. This test pins the contract: the
+// two endpoints share a single source of truth (Service.RegistrationOpen).
+func TestHandler_Register_GateMatchesConfig_OpenInstance(t *testing.T) {
+	c := newTestClientWithRegistration(t, true)
+	cfgResp := c.do(t, http.MethodGet, "/api/v1/auth/config", nil)
+	var cfg map[string]bool
+	require.NoError(t, json.NewDecoder(cfgResp.Body).Decode(&cfg))
+	cfgResp.Body.Close()
+	require.True(t, cfg["allow_registration"])
+	// Register matches: short password → 400 (got past the gate, hit validation).
+	regResp := c.do(t, http.MethodPost, "/api/v1/auth/register", map[string]string{
+		"username": "admin",
+		"password": "short",
+	})
+	regResp.Body.Close()
+	require.Equal(t, http.StatusBadRequest, regResp.StatusCode, "open config must let the request reach validation")
+}
+
+func TestHandler_Register_GateMatchesConfig_ClosedInstance(t *testing.T) {
+	c := newTestClientWithRegistration(t, false)
+	cfgResp := c.do(t, http.MethodGet, "/api/v1/auth/config", nil)
+	var cfg map[string]bool
+	require.NoError(t, json.NewDecoder(cfgResp.Body).Decode(&cfg))
+	cfgResp.Body.Close()
+	require.False(t, cfg["allow_registration"])
+	// Register matches: short password is unreachable — the gate fires first.
+	regResp := c.do(t, http.MethodPost, "/api/v1/auth/register", map[string]string{
+		"username": "admin",
+		"password": "short",
+	})
+	regResp.Body.Close()
+	require.Equal(t, http.StatusNotFound, regResp.StatusCode, "closed config must short-circuit before validation runs")
 }
 
 func TestHandler_Login(t *testing.T) {

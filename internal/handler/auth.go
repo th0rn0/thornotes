@@ -24,7 +24,37 @@ type registerRequest struct {
 	Password string `json:"password"`
 }
 
+// Config is an unauthenticated endpoint the SPA reads on init to decide
+// whether the "Create account" affordance should be rendered. Mirrors the
+// route-gate predicate in Register exactly so the UI and the route never
+// disagree: if this returns false the register form is removed from the DOM
+// AND Register short-circuits with 404 for any direct caller.
+func (h *AuthHandler) Config(c *gin.Context) {
+	open, err := h.svc.RegistrationOpen(c.Request.Context())
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"allow_registration": open})
+}
+
 func (h *AuthHandler) Register(c *gin.Context) {
+	// Closed-instance gate. Short-circuit before any request parsing so a
+	// closed instance presents zero attack surface here — no body read, no
+	// validation, no rate-limit-detectable side effects beyond what the
+	// rateMW middleware already imposes. 404 matches the "page can't even
+	// be accessed" UX contract, identical to what the user sees when they
+	// navigate to a route that doesn't exist.
+	open, err := h.svc.RegistrationOpen(c.Request.Context())
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	if !open {
+		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+		return
+	}
+
 	var req registerRequest
 	if err := readJSON(c, &req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})

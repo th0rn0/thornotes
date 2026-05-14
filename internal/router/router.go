@@ -95,6 +95,18 @@ func New(
 	// Auth endpoints.
 	authGroup := r.Group("/api/v1/auth")
 	{
+		// Unauth: lets the SPA decide whether to render the register form.
+		// Intentionally NOT behind rateMW: the auth rate-limiter is per-IP
+		// with a small burst, and /config is read by every unauth page load
+		// alongside /me. Sharing the bucket with /login meant a noisy
+		// neighbor on a NAT/CGNAT/corp-proxy IP could exhaust the limit and
+		// fail-close the register form on the OPEN instance for every
+		// honest visitor on that IP until the bucket refilled (90s). The
+		// endpoint exposes a single config bool with no auth side effects,
+		// so it doesn't need the per-IP burst protection. The same
+		// predicate drives the route gate inside authH.Register below, so
+		// a false here is guaranteed to be a 404 on the POST.
+		authGroup.GET("/config", authH.Config)
 		authGroup.POST("/register", rateMW, authH.Register)
 		authGroup.POST("/login", rateMW, authH.Login)
 		authGroup.POST("/logout", sessionMW, authH.Logout)
