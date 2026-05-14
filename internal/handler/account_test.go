@@ -635,6 +635,160 @@ func TestUpdateTokenPermissions_InvalidPermission(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, rr.Code)
 }
 
+// Regression: a scope-only downgrade to "read" used to leave stale folder-level
+// write grants behind. The global MCP write-tool gate catches the actual
+// exploit attempt today, but the data-integrity contract still requires the
+// invariant to hold — and a future code path that consults CanWrite without
+// re-checking TokenScope would be exploitable.
+func TestUpdateTokenPermissions_ScopeOnlyDowngrade_RefusedWithStaleWriteGrants(t *testing.T) {
+	user := &model.User{ID: 1, Username: "alice"}
+	repo := newFakeAPITokenRepo()
+	tok, err := repo.Create(context.Background(), 1, "t", "tn_stalewrite", "readwrite")
+	require.NoError(t, err)
+	folderID := int64(9)
+	require.NoError(t, repo.SetPermissions(context.Background(), 1, tok.ID, []model.TokenFolderPermission{
+		{FolderID: &folderID, Permission: "write"},
+	}))
+
+	r := newAccountRouter(user, repo)
+	body := strings.NewReader(`{"scope":"read"}`)
+	req := httptest.NewRequest(http.MethodPut, fmt.Sprintf("/tokens/%d/permissions", tok.ID), body)
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	require.Equal(t, http.StatusBadRequest, rr.Code)
+	// The token must NOT have been downgraded — the rejection happens before
+	// any mutation runs.
+	kept, err := repo.GetByToken(context.Background(), "tn_stalewrite")
+	require.NoError(t, err)
+	assert.Equal(t, "readwrite", kept.Scope)
+}
+
+// Regression: an already read-scoped token used to accept new folder-level
+// write grants when the request body omitted the "scope" field (the old
+// validation only fired when body.Scope == "read"). Effective state must
+// be enforced, not just the fields supplied this call.
+func TestUpdateTokenPermissions_AddWriteGrant_RefusedOnReadScopedToken(t *testing.T) {
+	user := &model.User{ID: 1, Username: "alice"}
+	repo := newFakeAPITokenRepo()
+	tok, err := repo.Create(context.Background(), 1, "t", "tn_addwrite", "read")
+	require.NoError(t, err)
+
+	r := newAccountRouter(user, repo)
+	body := strings.NewReader(`{"folder_permissions":[{"folder_id":9,"permission":"write"}]}`)
+	req := httptest.NewRequest(http.MethodPut, fmt.Sprintf("/tokens/%d/permissions", tok.ID), body)
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	require.Equal(t, http.StatusBadRequest, rr.Code)
+	// No permissions should have been written.
+	perms, err := repo.ListPermissions(context.Background(), tok.ID)
+	require.NoError(t, err)
+	assert.Empty(t, perms)
+}
+
+// A scope downgrade to "read" with only read grants in place is fine — the
+// invariant is about write grants, not folder-level grants in general.
+func TestUpdateTokenPermissions_ScopeOnlyDowngrade_AllowedWithReadGrants(t *testing.T) {
+	user := &model.User{ID: 1, Username: "alice"}
+	repo := newFakeAPITokenRepo()
+	tok, err := repo.Create(context.Background(), 1, "t", "tn_readgrants", "readwrite")
+	require.NoError(t, err)
+	folderID := int64(9)
+	require.NoError(t, repo.SetPermissions(context.Background(), 1, tok.ID, []model.TokenFolderPermission{
+		{FolderID: &folderID, Permission: "read"},
+	}))
+
+	r := newAccountRouter(user, repo)
+	body := strings.NewReader(`{"scope":"read"}`)
+	req := httptest.NewRequest(http.MethodPut, fmt.Sprintf("/tokens/%d/permissions", tok.ID), body)
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+	downgraded, err := repo.GetByToken(context.Background(), "tn_readgrants")
+	require.NoError(t, err)
+	assert.Equal(t, "read", downgraded.Scope)
+	perms, err := repo.ListPermissions(context.Background(), tok.ID)
+	require.NoError(t, err)
+	assert.Len(t, perms, 1) // read grant preserved
+}
+
+// A combined downgrade + perm replacement is a single coherent intent and must
+// succeed: clear the write grants by supplying a new perms list along with
+// scope=read.
+func TestUpdateTokenPermissions_CombinedDowngradeAndClearWriteGrants(t *testing.T) {
+	user := &model.User{ID: 1, Username: "alice"}
+	repo := newFakeAPITokenRepo()
+	tok, err := repo.Create(context.Background(), 1, "t", "tn_combined", "readwrite")
+	require.NoError(t, err)
+	folderID := int64(9)
+	require.NoError(t, repo.SetPermissions(context.Background(), 1, tok.ID, []model.TokenFolderPermission{
+		{FolderID: &folderID, Permission: "write"},
+	}))
+
+	r := newAccountRouter(user, repo)
+	body := strings.NewReader(`{"scope":"read","folder_permissions":[]}`)
+	req := httptest.NewRequest(http.MethodPut, fmt.Sprintf("/tokens/%d/permissions", tok.ID), body)
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+	out, err := repo.GetByToken(context.Background(), "tn_combined")
+	require.NoError(t, err)
+	assert.Equal(t, "read", out.Scope)
+	perms, err := repo.ListPermissions(context.Background(), tok.ID)
+	require.NoError(t, err)
+	assert.Empty(t, perms)
+}
+
+// Updating a token ID the caller does not own returns 404 — this is the
+// ownership-check leg of the new effective-state validation. Without this,
+// the new ListPermissions lookup could become a write-grant probe oracle
+// for any tokenID.
+func TestUpdateTokenPermissions_NotOwnedReturns404(t *testing.T) {
+	alice := &model.User{ID: 1, Username: "alice"}
+	repo := newFakeAPITokenRepo()
+	// Bob's token — not visible to Alice. Seed with values that DIFFER from
+	// the PUT body below so the post-call assertions can actually distinguish
+	// "404 short-circuited cleanly" from "404 reported but mutation ran
+	// anyway". Bob also gets a folder grant so the perms check below can
+	// observe a survived row.
+	bobToken, err := repo.Create(context.Background(), 2, "bob-original-name", "tn_bobs", "readwrite")
+	require.NoError(t, err)
+	bobFolderID := int64(77)
+	require.NoError(t, repo.SetPermissions(context.Background(), 2, bobToken.ID, []model.TokenFolderPermission{
+		{FolderID: &bobFolderID, Permission: "write"},
+	}))
+
+	r := newAccountRouter(alice, repo)
+	body := strings.NewReader(`{"name":"hijacked","scope":"read","folder_permissions":[]}`)
+	req := httptest.NewRequest(http.MethodPut, fmt.Sprintf("/tokens/%d/permissions", bobToken.ID), body)
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusNotFound, rr.Code)
+	// The 404 must short-circuit before any mutation. Confirm Bob's token
+	// kept its original name, scope, and the seeded write grant — a future
+	// regression that returns 404 while still calling SetName / SetScope /
+	// SetPermissions would slip through a status-code-only assertion.
+	after, err := repo.GetByToken(context.Background(), "tn_bobs")
+	require.NoError(t, err)
+	assert.Equal(t, "bob-original-name", after.Name, "alice must not be able to rename bob's token")
+	assert.Equal(t, "readwrite", after.Scope, "alice must not be able to downgrade bob's token")
+	perms, err := repo.ListPermissions(context.Background(), bobToken.ID)
+	require.NoError(t, err)
+	require.Len(t, perms, 1, "alice must not be able to clear bob's permissions")
+	assert.Equal(t, "write", perms[0].Permission)
+	require.NotNil(t, perms[0].FolderID)
+	assert.Equal(t, bobFolderID, *perms[0].FolderID)
+}
+
 func TestDeleteToken_RepoError(t *testing.T) {
 	user := &model.User{ID: 1, Username: "alice"}
 	repo := newFakeAPITokenRepo()
