@@ -2,6 +2,16 @@
 
 All notable changes to thornotes are documented here.
 
+## [Unreleased]
+
+### Fixed
+- **A stale session no longer loses edits silently.** When a notes tab is left open past the 7-day session TTL (or the session is ended server-side), every autosave `PATCH` returns `401`. Previously the front-end caught that `401` in `autoSave`'s generic error branch and only flipped the small "Saving…/Saved/Error" chip to "Error" — the user kept typing and nothing was ever saved. The `api()` helper now detects a `401` on any authenticated request and raises a persistent, non-dismissable top banner ("Your session has expired — recent edits have not been saved. Copy any unsaved text now, then reload to log back in.") with a Reload button. The editor content is deliberately left intact so the user can copy their work out before reloading. The detection is guarded on `currentUser`, so a failed login (also a `401`) does not trip the banner.
+- **The autosave retry loop stops once the session is dead.** A new `sessionExpired` flag short-circuits `scheduleAutoSave()` and `autoSave()`, so the editor no longer fires a fresh doomed `PATCH` on every keystroke after the session expires. Covered by `web/static/js/session-expiry.test.js` (15 cases: expiry detection, idempotency, failed-login isolation, non-401 errors, and retry-loop suppression).
+
+### Internal
+- The two duplicated `setSaveStatus('saving') + clearTimeout + setTimeout` autosave-scheduling blocks (`onEditorChange` and the preview-edit `commitEdit`) are now a single `scheduleAutoSave()` helper.
+- Service worker cache key bumped to `thornotes-v1.5.14.0` so the new `app.js` / `app.html` reach existing browsers on first open after the upgrade.
+
 ## [1.5.13.5] - 2026-05-15
 
 ### Security

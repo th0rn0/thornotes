@@ -45,6 +45,7 @@ let editorSplitOpen = false;
 let editorPreviewEditOpen = false;
 let _previewEditBlocks = []; // [{raw, type}] from marked.lexer — used in preview-edit mode
 let saveTimer = null;
+let sessionExpired = false;  // set once a 401 proves the login session is dead
 let _loadingNote = false;  // suppresses auto-save during editor.setValue()
 let loadedFolderIds = new Set(); // tracks which folders have had their notes loaded
 let folders = [];            // flat folder list from API
@@ -890,9 +891,7 @@ function openPreviewEditInlineEditor(block, idx) {
     editor.setValue(newContent);
     _loadingNote = false;
     document.getElementById('note-stats').textContent = noteStats(newContent);
-    setSaveStatus('saving');
-    clearTimeout(saveTimer);
-    saveTimer = setTimeout(autoSave, AUTO_SAVE_DELAY_MS);
+    scheduleAutoSave();
     renderPreviewContent(newContent);
   }
 
@@ -1275,9 +1274,7 @@ function onEditorChange() {
   // Dismiss the paste-conversion bar on any user edit (the paste state is
   // cleared before dispatch in convertPasteToTable so this won't close it mid-convert).
   if (_pendingTablePaste) hideTablePasteBar();
-  setSaveStatus('saving');
-  clearTimeout(saveTimer);
-  saveTimer = setTimeout(autoSave, AUTO_SAVE_DELAY_MS);
+  scheduleAutoSave();
   const content = editor.getValue();
   document.getElementById('note-stats').textContent = noteStats(content);
   if ((editorPreviewOpen || editorSplitOpen || editorPreviewEditOpen) && editorPreviewEl) {
@@ -1286,8 +1283,36 @@ function onEditorChange() {
   runLint();
 }
 
+// scheduleAutoSave flips the save indicator to "saving" and (re)arms the
+// debounced autosave timer. It is a no-op once the session has expired:
+// re-arming a doomed save would just spam the server with 401s while the
+// user keeps typing, and the session-expired banner is already telling them
+// to reload. Mirrored by session-expiry.test.js.
+function scheduleAutoSave() {
+  if (sessionExpired) return;
+  setSaveStatus('saving');
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(autoSave, AUTO_SAVE_DELAY_MS);
+}
+
+// handleSessionExpired puts the app into a terminal "session dead" state: it
+// raises a persistent banner, freezes the save indicator on "error", and
+// cancels the pending autosave so the editor stops hammering the server with
+// doomed 401s. Idempotent — only the first 401 does the work. The note text
+// is deliberately left untouched in the editor so the user can copy it out
+// before reloading. Mirrored by session-expiry.test.js.
+function handleSessionExpired() {
+  if (sessionExpired) return;
+  sessionExpired = true;
+  clearTimeout(saveTimer);
+  setSaveStatus('error');
+  const banner = document.getElementById('session-expired-banner');
+  if (banner) banner.style.display = 'block';
+}
+
 async function autoSave() {
   if (!currentNote) return;
+  if (sessionExpired) return;  // session is dead; the banner is already up
   const content = editor.getValue();
   try {
     const res = await api('PATCH', `/api/v1/notes/${currentNote.id}`, {
@@ -1507,6 +1532,15 @@ async function api(method, path, body) {
   }
 
   const res = await fetch(path, opts);
+  // A 401 on any request once the user is logged in means the login session
+  // has died (7-day TTL elapsed, server-side logout, or the cookie was
+  // cleared). Surface it loudly here, centrally, so every caller is covered —
+  // autosave, title/tag edits, folder ops — instead of each one silently
+  // swallowing the error. Guarded on currentUser so a failed login attempt
+  // (also a 401) does not trip the banner. See handleSessionExpired.
+  if (res.status === 401 && currentUser) {
+    handleSessionExpired();
+  }
   let data;
   try { data = await res.json(); } catch { data = {}; }
 
@@ -2356,6 +2390,9 @@ document.getElementById('import-confirm-btn').addEventListener('click', async fu
 
 // Disk full banner
 document.getElementById('disk-full-dismiss').addEventListener('click', function() { document.getElementById('disk-full-banner').style.display = 'none'; });
+// The session-expired banner has no dismiss — the only recovery is a reload,
+// which re-runs auth and drops the user on the login screen.
+document.getElementById('session-expired-reload').addEventListener('click', function() { location.reload(); });
 
 // ── Table feature ──────────────────────────────────────────────────────────
 

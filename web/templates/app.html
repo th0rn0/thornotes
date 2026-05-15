@@ -374,6 +374,10 @@ body {
 #notification.error { background: var(--color-error); }
 #disk-full-banner { position: fixed; bottom: 0; left: 0; right: 0; background: var(--color-error); color: #fff; padding: 10px 16px; font-size: 13px; text-align: center; z-index: 1100; display: none; }
 #disk-full-banner a { color: #fff; text-decoration: underline; cursor: pointer; margin-left: 12px; font-size: 12px; }
+/* Session-expired banner: pinned to the top above every modal (z-index 2000),
+   no dismiss control — the user must reload to recover. */
+#session-expired-banner { position: fixed; top: 0; left: 0; right: 0; background: var(--color-error); color: #fff; padding: 12px 16px; font-size: 14px; font-weight: 600; text-align: center; z-index: 2000; display: none; }
+#session-expired-banner button { margin-left: 14px; background: #fff; color: var(--color-error); border: none; padding: 5px 14px; font-size: 13px; font-weight: 600; cursor: pointer; border-radius: 3px; }
 
 /* MODALS */
 .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 500; display: none; align-items: center; justify-content: center; }
@@ -949,6 +953,7 @@ body {
 </div>
 
 <div id="disk-full-banner">&#9888; Your disk is full &mdash; note could not be saved. Free up space to continue.<a id="disk-full-dismiss">Dismiss</a></div>
+<div id="session-expired-banner" role="alert">&#9888; Your session has expired &mdash; recent edits have <strong>not</strong> been saved. Copy any unsaved text now, then reload to log back in.<button id="session-expired-reload" type="button">Reload page</button></div>
 
 <script src="/static/js/vendor/codemirror6.min.js"></script>
 <script src="/static/js/vendor/marked.min.js"></script>
