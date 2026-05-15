@@ -42,7 +42,7 @@ docker run -d \
   th0rn0/thornotes
 ```
 
-Open [http://localhost:8080](http://localhost:8080) and register your account. Once you've signed up, set `THORNOTES_ALLOW_REGISTRATION=false` and restart to close public sign-up.
+Open [http://localhost:8080](http://localhost:8080) and register your account. Once you've signed up, set `THORNOTES_ALLOW_REGISTRATION=false` and restart to close public sign-up. With the flag off, the "Create account" link is removed from the auth screen entirely, the register form is removed from the DOM, and `POST /api/v1/auth/register` returns `404 Not Found` for every caller including the very first user — closed means closed. Always start with the flag on (or unset; default is on), register the admin account, then restart with the flag off.
 
 For a full walkthrough of all features, see the **[How-To Guide](docs/how-to.md)**.
 

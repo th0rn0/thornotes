@@ -582,7 +582,11 @@ body {
       <label>Password</label>
       <input id="login-password" type="password" autocomplete="current-password" />
       <button id="login-btn">Sign in</button>
-      <div class="switch-link"><a id="show-register-link">Create account</a></div>
+      <!-- Fail-closed: link starts hidden and is revealed by app.js only after
+           GET /api/v1/auth/config confirms allow_registration=true. On a
+           closed instance the entire register form is also removed from the
+           DOM so the "Create account" page is unreachable from the UI. -->
+      <div class="switch-link" id="show-register-wrap" style="display:none"><a id="show-register-link">Create account</a></div>
       <div class="error" id="login-error"></div>
     </div>
     <div id="auth-form-register" style="display:none">

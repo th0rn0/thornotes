@@ -2,6 +2,19 @@
 
 All notable changes to thornotes are documented here.
 
+## [1.5.13.5] - 2026-05-15
+
+### Security
+- **`--allow-registration=false` is now airtight.** Previously the flag only stopped the service layer from creating users — the "Create account" link remained in the auth screen HTML, the register form stayed in the DOM, the JS unconditionally wired up its event handlers, and `POST /api/v1/auth/register` returned `403 Forbidden` (after parsing the request body and running validation). A closed instance now presents *no* register surface at all: the link starts hidden in the template, the SPA's `init()` removes both the link wrap and the entire register form element from the DOM when the new `GET /api/v1/auth/config` endpoint reports the instance as closed, and the route handler short-circuits with `404 Not Found` before any request parsing. The route gate and `/config` predicate share a single source of truth (`Service.RegistrationOpen`) so the UI affordance and the route behaviour can never disagree.
+- **Bootstrap window removed.** The pre-existing "the first user can always register, even when the flag is off" carve-out has been deleted: an internet-exposed closed-empty instance previously advertised this loophole over the public `/config` endpoint, turning the bootstrap window into a drive-by admin-takeover target for the first scanner that found it. Operators bootstrap fresh instances by following the documented flow — start with `--allow-registration=true` (the default), register the admin, restart with `--allow-registration=false`.
+- **`/auth/config` is no longer behind the auth rate-limiter.** The endpoint exposes a single config bool with no auth side effects, but the previous wiring shared the per-IP burst budget with `/login`. A noisy neighbour on a NAT / CGNAT / corp-proxy IP could exhaust the bucket via failed logins, after which every honest visitor on that IP would see `/config` 429 in `init()` and fall through to the fail-closed branch — the register form would silently disappear on an OPEN instance until the bucket refilled. The endpoint is now unmetered.
+
+### Changed
+- `POST /api/v1/auth/register` returns `404 Not Found` (was `403 Forbidden`) on a closed instance. Tooling that classifies 4xx auth spikes by status code may need to be retuned: a cached SPA on a freshly-closed instance will start emitting 404s on the register path.
+
+### Internal
+- Service worker cache key bumped from `thornotes-v1.5.3.0` (last changed in v1.5.3.0) to `thornotes-v1.5.13.5` so the new `app.js` and `app.html` actually reach existing browsers on first open after the upgrade; otherwise the cache-first fetch for `/static/js/app.js` would keep serving the pre-fix code that left the "Create account" link visible.
+
 ## [1.5.13.4] - 2026-05-14
 
 ### Security

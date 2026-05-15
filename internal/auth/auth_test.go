@@ -156,24 +156,82 @@ func TestRegister_ShortPassword(t *testing.T) {
 	assert.Equal(t, 400, appErr.Code)
 }
 
-func TestRegister_FirstUserAlwaysAllowed(t *testing.T) {
-	// allowRegistration = false but first user should still register.
-	svc := NewServiceForTest(newFakeUserRepo(), newFakeSessionRepo(), false)
-	u, err := svc.Register(context.Background(), "admin", "longenoughpassword123")
-	require.NoError(t, err)
-	assert.Equal(t, "admin", u.Username)
-}
-
-func TestRegister_SecondUserBlockedWhenClosed(t *testing.T) {
+// Closed instance refuses ALL registrations, including the very first user.
+// The "first user can register even with the flag off" bootstrap window was
+// removed: operators bootstrap fresh closed instances by following the
+// documented flow (start with --allow-registration=true, register, restart
+// closed). Advertising a bootstrap window over a public /config endpoint
+// turned an accidentally-exposed closed-empty instance into a drive-by
+// admin-takeover target.
+func TestRegister_ClosedInstance_RefusesFirstUser(t *testing.T) {
 	svc := NewServiceForTest(newFakeUserRepo(), newFakeSessionRepo(), false)
 	_, err := svc.Register(context.Background(), "admin", "longenoughpassword123")
+	require.Error(t, err)
+	var appErr *apperror.AppError
+	require.ErrorAs(t, err, &appErr)
+	assert.Equal(t, 404, appErr.Code, "closed instance must refuse first user too — no bootstrap window")
+}
+
+// Closed instance refuses subsequent registrations after the admin has
+// bootstrapped via the documented open-then-close flow. Asserts 404 rather
+// than 403 to match the "page can't even be accessed" contract: a closed
+// instance presents no register surface in the UI, in the route gate, or
+// in the service layer.
+func TestRegister_SecondUserBlockedWhenClosed(t *testing.T) {
+	// Documented bootstrap flow: start with the flag on, register the admin,
+	// then flip to closed (simulating an operator restart with the flag off).
+	svc := NewServiceForTest(newFakeUserRepo(), newFakeSessionRepo(), true)
+	_, err := svc.Register(context.Background(), "admin", "longenoughpassword123")
 	require.NoError(t, err)
+	svc.allowRegistration = false
 
 	_, err = svc.Register(context.Background(), "hacker", "longenoughpassword123")
 	require.Error(t, err)
 	var appErr *apperror.AppError
 	require.ErrorAs(t, err, &appErr)
-	assert.Equal(t, 403, appErr.Code)
+	assert.Equal(t, 404, appErr.Code)
+}
+
+// ── RegistrationOpen ────────────────────────────────────────────────────────
+
+// RegistrationOpen is true whenever the SPA's "Create account" link should
+// appear and the POST /register route should accept work. Two states only
+// now that the bootstrap window has been removed:
+//
+//   - Flag on → true (regardless of user count).
+//   - Flag off → false (regardless of user count; closed means closed).
+//
+// Both the GET /api/v1/auth/config endpoint and the POST /register
+// early-404 gate read from this single source so the UI affordances and
+// the route behaviour can never disagree.
+func TestRegistrationOpen_FlagOn(t *testing.T) {
+	svc := NewServiceForTest(newFakeUserRepo(), newFakeSessionRepo(), true)
+	open, err := svc.RegistrationOpen(context.Background())
+	require.NoError(t, err)
+	assert.True(t, open, "flag on must always report open regardless of user count")
+}
+
+// Closed means closed regardless of user count — the bootstrap-window
+// exception was removed for security. See TestRegister_ClosedInstance_
+// RefusesFirstUser for the operator-impact rationale.
+func TestRegistrationOpen_FlagOff_NoUsers(t *testing.T) {
+	svc := NewServiceForTest(newFakeUserRepo(), newFakeSessionRepo(), false)
+	open, err := svc.RegistrationOpen(context.Background())
+	require.NoError(t, err)
+	assert.False(t, open, "flag off must report closed even on a fresh empty instance")
+}
+
+func TestRegistrationOpen_FlagOff_WithUser(t *testing.T) {
+	svc := NewServiceForTest(newFakeUserRepo(), newFakeSessionRepo(), true)
+	// Provision the first user via an open instance, then flip to closed.
+	_, err := svc.Register(context.Background(), "admin", "longenoughpassword123")
+	require.NoError(t, err)
+
+	// Simulate the documented flow: admin restarts with the flag off.
+	svc.allowRegistration = false
+	open, err := svc.RegistrationOpen(context.Background())
+	require.NoError(t, err)
+	assert.False(t, open, "flag off with an existing user must report closed")
 }
 
 func TestLogin_Success(t *testing.T) {
@@ -365,22 +423,6 @@ func TestRegister_LongUsername(t *testing.T) {
 	var appErr *apperror.AppError
 	require.ErrorAs(t, err, &appErr)
 	assert.Equal(t, 400, appErr.Code)
-}
-
-// errCountUserRepo returns an error from Count.
-type errCountUserRepo struct {
-	*fakeUserRepo
-}
-
-func (r *errCountUserRepo) Count(_ context.Context) (int, error) {
-	return 0, fmt.Errorf("db connection lost")
-}
-
-func TestRegister_CountError(t *testing.T) {
-	repo := &errCountUserRepo{fakeUserRepo: newFakeUserRepo()}
-	svc := NewServiceForTest(repo, newFakeSessionRepo(), true)
-	_, err := svc.Register(context.Background(), "alice", "longenoughpassword123")
-	require.Error(t, err)
 }
 
 // errGetByUsernameRepo returns a non-ErrNotFound error from GetByUsername.

@@ -41,21 +41,44 @@ func NewServiceForTest(users repository.UserRepository, sessions repository.Sess
 	return &Service{users: users, sessions: sessions, allowRegistration: allowRegistration, bcryptCost: bcrypt.MinCost}
 }
 
+// RegistrationOpen reports whether the public sign-up surface is currently
+// available. Closed means closed: when `--allow-registration` is off the
+// instance is closed regardless of how many users exist. The pre-existing
+// "first user can register even when the flag is off" bootstrap window has
+// been removed because (a) the documented setup flow already starts with
+// the flag on, registers the admin, and then restarts with the flag off,
+// and (b) advertising a bootstrap window over a public /config endpoint
+// turned an internet-exposed closed-empty instance into a drive-by
+// admin-takeover target. Operators who want to bootstrap a fresh closed
+// instance now follow the README flow: start with `--allow-registration=true`,
+// register the admin, restart with `--allow-registration=false`.
+//
+// Both the handler-level 404 gate on POST /register and the GET /api/v1/
+// auth/config endpoint that the SPA reads on init route through this same
+// method so the UI affordance and the route gate can never disagree.
+func (s *Service) RegistrationOpen(_ context.Context) (bool, error) {
+	return s.allowRegistration, nil
+}
+
 func (s *Service) Register(ctx context.Context, username, password string) (*model.User, error) {
+	// Closed-instance gate: identical predicate to RegistrationOpen so the
+	// handler-level 404 and the service-level rejection can never disagree.
+	// Returning NotFound (not Forbidden) matches the "page can't even be
+	// accessed" UX contract — a closed instance presents no register surface
+	// at all, in the routing, in the API, or in the UI.
+	open, err := s.RegistrationOpen(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if !open {
+		return nil, apperror.NotFound("not found")
+	}
+
 	if len(username) < 2 || len(username) > 64 {
 		return nil, apperror.BadRequest("username must be 2–64 characters")
 	}
 	if len(password) < minPasswordLen {
 		return nil, apperror.BadRequest(fmt.Sprintf("password must be at least %d characters", minPasswordLen))
-	}
-
-	// Allow first user regardless of flag.
-	count, err := s.users.Count(ctx)
-	if err != nil {
-		return nil, apperror.Internal("count users", err)
-	}
-	if count > 0 && !s.allowRegistration {
-		return nil, apperror.Forbidden("registration is closed")
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), s.bcryptCost)
