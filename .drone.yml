@@ -80,6 +80,7 @@ steps:
       - node --test web/static/js/table-utils.test.js
       - node --test web/static/js/editor-scroll-reset.test.js
       - node --test web/static/js/default-note-view.test.js
+      - node --test web/static/js/session-expiry.test.js
       - npm install --prefix web/cm6-bundle
       - node --test web/cm6-bundle/index.test.mjs
 
