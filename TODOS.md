@@ -1,5 +1,19 @@
 # thornotes — TODOS
 
+## Auth & accounts
+
+---
+
+### Full user management system
+Replace the thin `--allow-registration` flag model with a proper multi-user management system. Motivated by ongoing login/session problems — rather than keep patching the single-flag bootstrap model, build the real thing.
+
+- **First user = super admin.** The first account created on a fresh instance is automatically the app's super admin. No separate bootstrap flag once this lands.
+- **Super admin powers:** create / edit / disable / delete other accounts; grant and revoke admin rights.
+- **Roles:** at minimum super-admin / admin / regular user. Per-role capability matrix TBD.
+- **Admin UI:** user list with role, status, and last-login; create/edit/disable controls.
+- **Account self-service:** change password; admin-initiated password reset.
+- **Open question:** how this interacts with the `feat/stale-session-feedback` branch (stale-session 401 banner). That work fixes silent data loss on save and is orthogonal — it can ship independently or fold in here. Decide when this is picked up.
+
 ## UI / UX
 
 ---
