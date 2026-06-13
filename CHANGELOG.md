@@ -2,7 +2,7 @@
 
 All notable changes to thornotes are documented here.
 
-## [Unreleased]
+## [1.5.14.0] - 2026-06-13
 
 ### Fixed
 - **A stale session no longer loses edits silently.** When a notes tab is left open past the 7-day session TTL (or the session is ended server-side), every autosave `PATCH` returns `401`. Previously the front-end caught that `401` in `autoSave`'s generic error branch and only flipped the small "Saving…/Saved/Error" chip to "Error" — the user kept typing and nothing was ever saved. The `api()` helper now detects a `401` on any authenticated request and raises a persistent, non-dismissable top banner ("Your session has expired — recent edits have not been saved. Copy any unsaved text now, then reload to log back in.") with a Reload button. The editor content is deliberately left intact so the user can copy their work out before reloading. The detection is guarded on `currentUser`, so a failed login (also a `401`) does not trip the banner.
