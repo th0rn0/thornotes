@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	"github.com/gin-gonic/gin"
+	"github.com/th0rn0/thornotes/internal/apperror"
 	"github.com/th0rn0/thornotes/internal/model"
 	"github.com/th0rn0/thornotes/internal/notes"
 )
@@ -84,10 +85,39 @@ func (h *NotesHandler) Patch(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "content_hash required when patching content"})
 			return
 		}
+		// If the same PATCH also carries metadata (title and/or tags), validate
+		// the current content_hash and apply the metadata update BEFORE writing
+		// the new content so a metadata conflict/validation error never leaves
+		// the note with partially mutated content.
+		if req.Title != nil || req.Tags != nil {
+			note, err := h.svc.GetNote(c.Request.Context(), user.ID, noteID)
+			if err != nil {
+				writeError(c, err)
+				return
+			}
+			if note.ContentHash != *req.ContentHash {
+				writeError(c, apperror.ErrConflict)
+				return
+			}
+			title := ""
+			if req.Title != nil {
+				title = *req.Title
+			}
+			if err := h.svc.UpdateNoteMetadata(c.Request.Context(), user.ID, user.UUID, noteID, title, req.Tags); err != nil {
+				writeError(c, err)
+				return
+			}
+		}
 		newHash, err := h.svc.UpdateNoteContent(c.Request.Context(), user.ID, noteID, *req.Content, *req.ContentHash)
 		if err != nil {
 			writeError(c, err)
 			return
+		}
+		if req.Title != nil {
+			if note, err := h.svc.GetNote(c.Request.Context(), user.ID, noteID); err == nil {
+				c.JSON(http.StatusOK, gin.H{"content_hash": newHash, "slug": note.Slug, "title": note.Title})
+				return
+			}
 		}
 		c.JSON(http.StatusOK, gin.H{"content_hash": newHash})
 		return

@@ -156,6 +156,9 @@ func (r *NoteRepo) Update(ctx context.Context, n *model.Note) error {
 		n.Title, n.Slug, n.DiskPath, string(tagsJSON), n.ID, n.UserID,
 	)
 	if err != nil {
+		if isUniqueConstraint(err) {
+			return apperror.Conflict(fmt.Sprintf("note %q already exists in this folder", n.Title))
+		}
 		return fmt.Errorf("update note: %w", err)
 	}
 	rows, _ := res.RowsAffected()

@@ -2,6 +2,9 @@ package notes
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"os"
 	"path/filepath"
 
 	"github.com/th0rn0/thornotes/internal/apperror"
@@ -28,13 +31,31 @@ func (s *Service) CreateFolder(ctx context.Context, userID int64, userUUID strin
 
 	diskPath := folderDiskPath(userUUID, parentPath, name)
 
-	if err := s.fs.EnsureDir(diskPath); err != nil {
-		return nil, apperror.Internal("create folder on disk", err)
+	if _, err := s.folders.GetByDiskPath(ctx, diskPath); err == nil {
+		return nil, apperror.Conflict(fmt.Sprintf("folder %q already exists", name))
+	} else if !errors.Is(err, apperror.ErrNotFound) {
+		return nil, err
+	}
+
+	createdOnDisk := false
+	if err := s.fs.CreateDirExclusive(diskPath); err != nil {
+		if !errors.Is(err, os.ErrExist) {
+			return nil, apperror.Internal("create folder on disk", err)
+		}
+	} else {
+		createdOnDisk = true
 	}
 
 	folder, err := s.folders.Create(ctx, userID, parentID, name, diskPath)
 	if err != nil {
-		_ = s.fs.RemoveDir(diskPath)
+		// Remove the directory only if we created it AND no DB row now claims
+		// diskPath (e.g. a concurrent caller won folders.Create after we won
+		// CreateDirExclusive).
+		if createdOnDisk && !apperror.IsConflict(err) {
+			if _, lookupErr := s.folders.GetByDiskPath(ctx, diskPath); errors.Is(lookupErr, apperror.ErrNotFound) {
+				_ = s.fs.RemoveEmptyDir(diskPath)
+			}
+		}
 		return nil, err
 	}
 
@@ -71,8 +92,20 @@ func (s *Service) RenameFolder(ctx context.Context, userID int64, userUUID strin
 	oldDiskPath := folder.DiskPath
 	newDiskPath := folderDiskPath(userUUID, parentPath, newName)
 
-	// Rename on disk first.
-	if err := s.fs.RenameDir(oldDiskPath, newDiskPath); err != nil {
+	// Reject a destination collision before touching the filesystem so an
+	// existing folder is never replaced (os.Rename would silently replace an
+	// empty destination directory on Linux).
+	if existing, err := s.folders.GetByDiskPath(ctx, newDiskPath); err == nil && existing.ID != folder.ID {
+		return apperror.Conflict(fmt.Sprintf("folder %q already exists", newName))
+	} else if err != nil && !errors.Is(err, apperror.ErrNotFound) {
+		return err
+	}
+
+	// Rename on disk first, without replacing an existing destination.
+	if err := s.fs.RenameDirExclusive(oldDiskPath, newDiskPath); err != nil {
+		if errors.Is(err, os.ErrExist) {
+			return apperror.Conflict(fmt.Sprintf("folder %q already exists", newName))
+		}
 		return apperror.Internal("rename folder on disk", err)
 	}
 
@@ -134,7 +167,18 @@ func (s *Service) MoveFolder(ctx context.Context, userID int64, userUUID string,
 	oldDiskPath := folder.DiskPath
 	newDiskPath := folderDiskPath(userUUID, newParentPath, folder.Name)
 
-	if err := s.fs.RenameDir(oldDiskPath, newDiskPath); err != nil {
+	// Reject a destination collision before touching the filesystem so an
+	// existing folder is never replaced.
+	if existing, err := s.folders.GetByDiskPath(ctx, newDiskPath); err == nil && existing.ID != folder.ID {
+		return apperror.Conflict(fmt.Sprintf("a folder named %q already exists at the destination", folder.Name))
+	} else if err != nil && !errors.Is(err, apperror.ErrNotFound) {
+		return err
+	}
+
+	if err := s.fs.RenameDirExclusive(oldDiskPath, newDiskPath); err != nil {
+		if errors.Is(err, os.ErrExist) {
+			return apperror.Conflict(fmt.Sprintf("a folder named %q already exists at the destination", folder.Name))
+		}
 		return apperror.Internal("move folder on disk", err)
 	}
 
