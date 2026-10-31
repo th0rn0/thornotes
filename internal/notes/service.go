@@ -17,14 +17,47 @@ import (
 // IDs may collide but the contention is bounded and harmless.
 const noteLockStripes = 64
 
+// Default reconcile deletion guard. The circuit breaker is a second net behind
+// the mount precondition: a partial wipe (half a tree unmounted, a bad rsync)
+// shows up as a burst of deletions rather than an empty root, and the pass must
+// stop before applying it. The floor keeps ordinary small edits reconciling.
+const (
+	DefaultReconcileMaxDeleteRatio = 0.25
+	DefaultReconcileMinDeleteTrips = 3
+)
+
 // Service coordinates note and folder operations across the FileStore and repositories.
 type Service struct {
-	notes      repository.NoteRepository
-	folders    repository.FolderRepository
-	search     repository.SearchRepository
-	journals   repository.JournalRepository
-	fs         *FileStore
-	noteLocks  [noteLockStripes]sync.Mutex
+	notes     repository.NoteRepository
+	folders   repository.FolderRepository
+	search    repository.SearchRepository
+	journals  repository.JournalRepository
+	fs        *FileStore
+	noteLocks [noteLockStripes]sync.Mutex
+
+	// reconcileMaxDeleteRatio / reconcileMinDeleteTrips configure the
+	// deletion circuit breaker (see guardReconcileDeletions).
+	reconcileMaxDeleteRatio float64
+	reconcileMinDeleteTrips int
+
+	// healthMu guards lastReconcile, the readiness signal for the notes root.
+	healthMu      sync.RWMutex
+	lastReconcile *ReconcileHealth
+}
+
+// SetReconcileDeleteGuard overrides the deletion circuit breaker. A ratio >= 1
+// effectively disables it, which is how an operator deliberately reconciles a
+// large intentional deletion. minDeletes is an absolute floor so that deleting
+// one of three notes does not trip the breaker.
+func (s *Service) SetReconcileDeleteGuard(ratio float64, minDeletes int) {
+	if ratio < 0 {
+		ratio = 0
+	}
+	if minDeletes < 0 {
+		minDeletes = 0
+	}
+	s.reconcileMaxDeleteRatio = ratio
+	s.reconcileMinDeleteTrips = minDeletes
 }
 
 func NewService(
@@ -40,6 +73,9 @@ func NewService(
 		search:   search,
 		journals: journals,
 		fs:       fs,
+
+		reconcileMaxDeleteRatio: DefaultReconcileMaxDeleteRatio,
+		reconcileMinDeleteTrips: DefaultReconcileMinDeleteTrips,
 	}
 }
 
@@ -75,6 +111,7 @@ func (s *Service) Reconcile(ctx context.Context, user *model.User) (int, error) 
 	}
 	log.Info().Int64("user_id", user.ID).Msg("reconcile: starting")
 	result, err := s.reconcileUserFromDisk(ctx, user)
+	s.recordReconcile(err)
 	if err != nil {
 		return 0, err
 	}
