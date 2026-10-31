@@ -3,6 +3,7 @@ package notes
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -177,16 +178,30 @@ func (fs *FileStore) WriteExclusive(relativePath, content string) error {
 }
 
 // Read returns the content of relativePath.
+//
+// O_NOFOLLOW closes the window between the boundary check and the open: the
+// final component is opened as a leaf or not at all, so a symlink swapped in
+// after lstat cannot be followed.
 func (fs *FileStore) Read(relativePath string) (string, error) {
 	absPath, err := fs.safePath(relativePath)
 	if err != nil {
 		return "", err
 	}
-	b, err := os.ReadFile(absPath)
+	f, err := os.OpenFile(absPath, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
 	if err != nil {
-		if os.IsNotExist(err) {
+		switch {
+		case os.IsNotExist(err):
 			return "", apperror.ErrNotFound
+		case errors.Is(err, syscall.ELOOP):
+			log.Warn().Str("path", relativePath).Msg("notes: refusing to follow a symlink on read")
+			return "", apperror.ErrPathTraversal
 		}
+		return "", fmt.Errorf("read file: %w", err)
+	}
+	defer f.Close()
+
+	b, err := io.ReadAll(f)
+	if err != nil {
 		return "", fmt.Errorf("read file: %w", err)
 	}
 	return string(b), nil
@@ -387,6 +402,24 @@ func isENOSPC(err error) bool {
 
 // safePath resolves relativePath against notesRoot and verifies the result
 // stays within notesRoot (prevents path traversal attacks).
+//
+// Two checks, because they catch different attacks:
+//
+//   - a lexical check, which rejects ".." and absolute paths outright;
+//   - a physical check, which walks every existing component from the root with
+//     lstat(2) and refuses a symlink anywhere in the path. The lexical check
+//     alone accepted "user1/escape/secret.md" when "escape" was a symlink to
+//     /etc: reads then served files from outside the root and writes created
+//     them there.
+//
+// os.Lstat never follows the final link, so an existing symlink at any level is
+// visible as a symlink. A component that does not exist yet cannot be one, and
+// everything below it is created by us after the parent has been verified.
+//
+// Symlinks that point *inside* the root are refused too, deliberately: links are
+// not part of the notes model (reconcile treats them as non-regular and skips
+// them), and refusing them keeps the invariant — every path we touch is a real
+// file under the root — simple enough to reason about.
 func (fs *FileStore) safePath(relativePath string) (string, error) {
 	// Clean first to resolve any ../ components.
 	clean := filepath.Clean(relativePath)
@@ -404,5 +437,45 @@ func (fs *FileStore) safePath(relativePath string) (string, error) {
 		return "", apperror.ErrPathTraversal
 	}
 
+	if err := fs.assertNoSymlinkInPath(abs); err != nil {
+		return "", err
+	}
+
 	return abs, nil
+}
+
+// assertNoSymlinkInPath refuses a path that has a symlink in any component
+// between the notes root and the target.
+func (fs *FileStore) assertNoSymlinkInPath(abs string) error {
+	rel, err := filepath.Rel(fs.notesRoot, abs)
+	if err != nil {
+		return apperror.ErrPathTraversal
+	}
+	if rel == "." {
+		return nil
+	}
+	if strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." {
+		return apperror.ErrPathTraversal
+	}
+
+	cur := fs.notesRoot
+	for _, part := range strings.Split(rel, string(filepath.Separator)) {
+		cur = filepath.Join(cur, part)
+		info, statErr := os.Lstat(cur)
+		if statErr != nil {
+			if os.IsNotExist(statErr) {
+				// Nothing exists here yet; everything below is ours to create.
+				return nil
+			}
+			return fmt.Errorf("stat %q: %w", cur, statErr)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			log.Warn().
+				Str("path", rel).
+				Str("symlink", cur).
+				Msg("notes: refusing path — symlink inside the notes root would escape it")
+			return apperror.ErrPathTraversal
+		}
+	}
+	return nil
 }

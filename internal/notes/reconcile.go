@@ -432,7 +432,17 @@ func (s *Service) walkUserTree(userUUID string) (diskTree, error) {
 	tree := diskTree{folders: map[string]struct{}{}, notes: map[string]string{}}
 	rootAbs, err := s.fs.safePath(userUUID)
 	if err != nil {
-		return tree, err
+		if errors.Is(err, apperror.ErrPathTraversal) {
+			// A symlink in the root's own path is a configuration problem or an
+			// attack, not a transient blip: fail loudly.
+			return tree, err
+		}
+		// A permission or I/O error resolving the root is unknown, not absent.
+		// Treat it like an unreadable root so the precondition decides.
+		tree.root = rootState{exists: true, readable: false}
+		tree.unknown = append(tree.unknown, userUUID)
+		log.Error().Err(err).Str("root", s.fs.notesRoot).Msg("reconcile: cannot resolve notes root — treating as unknown")
+		return tree, nil
 	}
 
 	// Probe the root explicitly: WalkDir reports a stat failure for the root as
