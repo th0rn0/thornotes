@@ -269,12 +269,35 @@ func (s *Service) DeleteNote(ctx context.Context, userID, noteID int64) error {
 	}
 	diskPath := note.DiskPath
 
-	if err := s.notes.Delete(ctx, userID, noteID); err != nil {
+	// Disk first. Moving the file out of the live tree is the commit point: if
+	// it fails (read-only volume, busy mount, permissions) we return the error
+	// with the row untouched. The old order removed the row first and discarded
+	// the filesystem error, so a failed unlink left the file behind and the next
+	// reconcile re-imported it as a brand-new note — the note "came back" with
+	// its tags and share token gone.
+	token, err := s.fs.MoveToTrash(diskPath)
+	if err != nil {
 		return err
 	}
 
-	// Delete file after DB row is gone.
-	_ = s.fs.Delete(diskPath)
+	if err := s.notes.Delete(ctx, userID, noteID); err != nil {
+		if token != "" {
+			if restoreErr := s.fs.RestoreFromTrash(token, diskPath); restoreErr != nil {
+				log.Error().Err(restoreErr).
+					Str("disk_path", diskPath).Str("trash", token).
+					Msg("notes: could not restore the file after a failed delete — it is still in the trash")
+			}
+		}
+		return err
+	}
+
+	if token != "" {
+		if purgeErr := s.fs.PurgeTrash(token); purgeErr != nil {
+			log.Warn().Err(purgeErr).Str("trash", token).
+				Msg("notes: could not purge the trash entry (harmless, cleaned up later)")
+		}
+		s.fs.RecordDelete(diskPath)
+	}
 	return nil
 }
 

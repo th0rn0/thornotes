@@ -342,6 +342,108 @@ func (fs *FileStore) RemoveEmptyDir(relativePath string) error {
 	return nil
 }
 
+// trashDirName is where a file or directory is parked while its row is being
+// removed. It lives inside the notes root so the move is a rename within one
+// filesystem, and it is dot-prefixed and outside any user subtree so neither the
+// reconciler's walk nor the user's tree can ever see it.
+const trashDirName = ".thornotes-trash"
+
+// MoveToTrash atomically renames relativePath into the notes-root trash and
+// returns an opaque token for RestoreFromTrash / PurgeTrash.
+//
+// This is the commit point of a delete: it either succeeds (the path is now
+// gone from the live tree) or fails with the original file untouched. A missing
+// source returns ("", nil) — nothing exists to resurrect, so the caller may
+// proceed to remove the row.
+func (fs *FileStore) MoveToTrash(relativePath string) (string, error) {
+	src, err := fs.safePath(relativePath)
+	if err != nil {
+		return "", err
+	}
+	if _, statErr := os.Lstat(src); statErr != nil {
+		if os.IsNotExist(statErr) {
+			return "", nil
+		}
+		return "", fmt.Errorf("trash stat: %w", statErr)
+	}
+
+	trashRoot := filepath.Join(fs.notesRoot, trashDirName)
+	if err := os.MkdirAll(trashRoot, 0700); err != nil {
+		return "", fmt.Errorf("trash mkdir: %w", err)
+	}
+	// One unique slot per deletion, so concurrent deletes of same-named leaves
+	// cannot collide and each purge is independent.
+	slot, err := os.MkdirTemp(trashRoot, "del-*")
+	if err != nil {
+		return "", fmt.Errorf("trash slot: %w", err)
+	}
+
+	base := filepath.Base(src)
+	if base == "." || base == string(filepath.Separator) || base == "" {
+		base = "entry"
+	}
+	dst := filepath.Join(slot, base)
+	if err := os.Rename(src, dst); err != nil {
+		_ = os.RemoveAll(slot)
+		return "", fmt.Errorf("move to trash: %w", err)
+	}
+
+	token, err := filepath.Rel(fs.notesRoot, slot)
+	if err != nil {
+		return "", apperror.ErrPathTraversal
+	}
+	return token, nil
+}
+
+// RestoreFromTrash puts a trashed entry back at relativePath. Used to undo a
+// delete whose database half failed.
+func (fs *FileStore) RestoreFromTrash(token, relativePath string) error {
+	if token == "" {
+		return nil
+	}
+	slotAbs, err := fs.safePath(token)
+	if err != nil {
+		return err
+	}
+	dst, err := fs.safePath(relativePath)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0700); err != nil {
+		return fmt.Errorf("restore mkdir: %w", err)
+	}
+	return os.Rename(filepath.Join(slotAbs, filepath.Base(dst)), dst)
+}
+
+// PurgeTrash removes a trashed entry for good. Failure here is not data loss:
+// the entry is out of the live tree and out of the index, so it can be cleaned
+// up later.
+func (fs *FileStore) PurgeTrash(token string) error {
+	if token == "" {
+		return nil
+	}
+	abs, err := fs.safePath(token)
+	if err != nil {
+		return err
+	}
+	if err := os.RemoveAll(abs); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("purge trash: %w", err)
+	}
+	return nil
+}
+
+// RecordDelete records a completed delete in the git history, if it is enabled.
+// The delete itself goes through MoveToTrash, so this is called once the trash
+// entry has been purged and the working tree shows only the removal.
+func (fs *FileStore) RecordDelete(relativePath string) {
+	if fs.git == nil {
+		return
+	}
+	if err := fs.git.CommitDelete(relativePath); err != nil {
+		log.Warn().Err(err).Str("path", relativePath).Msg("git commit delete")
+	}
+}
+
 // RemoveDir removes an empty or non-empty directory at relativePath.
 func (fs *FileStore) RemoveDir(relativePath string) error {
 	absPath, err := fs.safePath(relativePath)
