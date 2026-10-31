@@ -130,6 +130,9 @@ steps:
     image: golang:1.26.3
     environment:
       THORNOTES_TEST_MYSQL_DSN: "thornotes:thornotes@tcp(mariadb:3306)/thornotes_test?parseTime=true"
+      # Fail instead of skipping when the DSN is missing, so a renamed or
+      # dropped MySQL variable can never silently disable the MySQL leg again.
+      THORNOTES_REQUIRE_MYSQL: "1"
     commands:
       - go test -race -coverprofile=coverage.out -covermode=atomic ./...
       - go tool cover -func=coverage.out | tail -1

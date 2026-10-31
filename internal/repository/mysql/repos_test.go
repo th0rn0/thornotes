@@ -14,18 +14,73 @@ import (
 	"github.com/th0rn0/thornotes/internal/model"
 )
 
-// openTestMySQL opens a real MySQL connection using the DSN in THORNOTES_MYSQL_TEST_DSN.
-// All tests in this file are skipped if the variable is not set.
+// mysqlDSNEnv is the single environment variable that enables the MariaDB/MySQL
+// integration suites. It must match internal/db/mysql_test.go, .drone.yml and
+// the Makefile; a mismatch here silently skips every test in this package while
+// the package still reports "ok".
+const mysqlDSNEnv = "THORNOTES_TEST_MYSQL_DSN"
+
+// requireMySQLEnv, when set to "1", turns a missing DSN into a failure instead
+// of a skip. CI sets it so a broken or renamed DSN cannot silently disable the
+// MySQL leg again.
+const requireMySQLEnv = "THORNOTES_REQUIRE_MYSQL"
+
+// openTestMySQL opens a real MySQL connection using the DSN in
+// THORNOTES_TEST_MYSQL_DSN and clears the schema so the test starts from a
+// known-empty database. Without the per-test reset, tests that share a fixed
+// username (createMySQLUser uses "user1") fail with "username already taken"
+// as soon as a second test runs against the same database.
 func openTestMySQL(t *testing.T) *db.Pool {
 	t.Helper()
-	dsn := os.Getenv("THORNOTES_MYSQL_TEST_DSN")
+	dsn := os.Getenv(mysqlDSNEnv)
 	if dsn == "" {
-		t.Skip("THORNOTES_MYSQL_TEST_DSN not set")
+		msg := mysqlDSNEnv + " not set — skipping MariaDB/MySQL integration test"
+		if os.Getenv(requireMySQLEnv) == "1" {
+			t.Fatalf("%s (%s=1, MySQL must not be skipped)", msg, requireMySQLEnv)
+		}
+		t.Skip(msg)
 	}
 	pool, err := db.OpenMySQL(dsn)
 	require.NoError(t, err)
 	t.Cleanup(func() { pool.Close() })
+	truncateAll(t, pool)
 	return pool
+}
+
+// truncateAll deletes every row from the application tables, leaving the
+// golang-migrate bookkeeping table (schema_migrations) untouched. Foreign key
+// checks are disabled on the same connection for the duration of the deletes so
+// table order does not matter, then restored.
+func truncateAll(t *testing.T, pool *db.Pool) {
+	t.Helper()
+	ctx := context.Background()
+
+	conn, err := pool.WriteDB.Conn(ctx)
+	require.NoError(t, err)
+	defer conn.Close()
+
+	_, err = conn.ExecContext(ctx, "SET FOREIGN_KEY_CHECKS = 0")
+	require.NoError(t, err)
+	defer func() {
+		_, _ = conn.ExecContext(context.Background(), "SET FOREIGN_KEY_CHECKS = 1")
+	}()
+
+	// Children before parents is not strictly required while FK checks are off,
+	// but keeps the statement order readable.
+	tables := []string{
+		"api_token_folder_permissions",
+		"api_tokens",
+		"journals",
+		"notes",
+		"sessions",
+		"folders",
+		"users",
+	}
+	for _, table := range tables {
+		if _, err := conn.ExecContext(ctx, "DELETE FROM "+table); err != nil {
+			t.Fatalf("reset table %s: %v", table, err)
+		}
+	}
 }
 
 func createMySQLUser(t *testing.T, pool *db.Pool) *model.User {

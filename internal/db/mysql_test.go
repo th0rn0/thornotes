@@ -9,12 +9,18 @@ import (
 )
 
 // mysqlTestDSN returns the DSN for MariaDB/MySQL integration tests, or skips
-// the test if THORNOTES_TEST_MYSQL_DSN is not set.
+// the test if THORNOTES_TEST_MYSQL_DSN is not set. When THORNOTES_REQUIRE_MYSQL
+// is "1" (CI) a missing DSN is a failure instead of a skip, so the MySQL leg
+// cannot silently disappear.
 func mysqlTestDSN(t *testing.T) string {
 	t.Helper()
 	dsn := os.Getenv("THORNOTES_TEST_MYSQL_DSN")
 	if dsn == "" {
-		t.Skip("THORNOTES_TEST_MYSQL_DSN not set — skipping MariaDB/MySQL integration test")
+		msg := "THORNOTES_TEST_MYSQL_DSN not set — skipping MariaDB/MySQL integration test"
+		if os.Getenv("THORNOTES_REQUIRE_MYSQL") == "1" {
+			t.Fatalf("%s (THORNOTES_REQUIRE_MYSQL=1, MySQL must not be skipped)", msg)
+		}
+		t.Skip(msg)
 	}
 	return dsn
 }
