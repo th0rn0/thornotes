@@ -7,14 +7,17 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/rs/zerolog/log"
+
 	"github.com/th0rn0/thornotes/internal/apperror"
 	"github.com/th0rn0/thornotes/internal/model"
 )
 
 // CreateFolder creates a folder on disk and in the DB.
 func (s *Service) CreateFolder(ctx context.Context, userID int64, userUUID string, parentID *int64, name string) (*model.Folder, error) {
-	if len(name) == 0 || len(name) > 255 {
-		return nil, apperror.BadRequest("folder name must be 1–255 characters")
+	defer s.lockTreeExclusive(userID)()
+	if err := validateEntryName("folder name", name); err != nil {
+		return nil, err
 	}
 	if filepath.Base(name) != name || name == ".." || name == "." {
 		return nil, apperror.BadRequest("folder name must not contain path separators")
@@ -67,8 +70,9 @@ func (s *Service) CreateFolder(ctx context.Context, userID int64, userUUID strin
 // 2. Updates the folder's own disk_path in DB.
 // 3. Updates all descendant folder and note disk_paths in DB.
 func (s *Service) RenameFolder(ctx context.Context, userID int64, userUUID string, folderID int64, newName string) error {
-	if len(newName) == 0 || len(newName) > 255 {
-		return apperror.BadRequest("folder name must be 1–255 characters")
+	defer s.lockTreeExclusive(userID)()
+	if err := validateEntryName("folder name", newName); err != nil {
+		return err
 	}
 	if filepath.Base(newName) != newName || newName == ".." || newName == "." {
 		return apperror.BadRequest("folder name must not contain path separators")
@@ -132,6 +136,7 @@ func (s *Service) RenameFolder(ctx context.Context, userID int64, userUUID strin
 // 3. Updates the folder's parent_id and disk_path in DB.
 // 4. Cascades disk_path updates to all descendants.
 func (s *Service) MoveFolder(ctx context.Context, userID int64, userUUID string, folderID int64, newParentID *int64) error {
+	defer s.lockTreeExclusive(userID)()
 	folder, err := s.folders.GetByID(ctx, userID, folderID)
 	if err != nil {
 		return err
@@ -223,6 +228,7 @@ func (s *Service) isFolderDescendant(ctx context.Context, userID, ancestorID, ca
 // notes.folder_id is ON DELETE SET NULL in the schema, so DB cascade alone would orphan
 // child notes to the root — we explicitly delete them first.
 func (s *Service) DeleteFolder(ctx context.Context, userID, folderID int64) error {
+	defer s.lockTreeExclusive(userID)()
 	folder, err := s.folders.GetByID(ctx, userID, folderID)
 	if err != nil {
 		return err
@@ -234,6 +240,39 @@ func (s *Service) DeleteFolder(ctx context.Context, userID, folderID int64) erro
 		return err
 	}
 
+	// Disk first, and in one atomic rename: the whole subtree leaves the live
+	// tree before a single row is removed, so no file can outlive its row and
+	// come back through a reconcile as an untagged stranger.
+	token, err := s.fs.MoveToTrash(diskPath)
+	if err != nil {
+		return err
+	}
+
+	if err := s.deleteFolderRows(ctx, userID, folderID, descendantIDs); err != nil {
+		if token != "" {
+			if restoreErr := s.fs.RestoreFromTrash(token, diskPath); restoreErr != nil {
+				log.Error().Err(restoreErr).
+					Str("disk_path", diskPath).Str("trash", token).
+					Msg("notes: could not restore the folder after a failed delete — it is still in the trash")
+			}
+		}
+		return err
+	}
+
+	if token != "" {
+		if purgeErr := s.fs.PurgeTrash(token); purgeErr != nil {
+			log.Warn().Err(purgeErr).Str("trash", token).
+				Msg("notes: could not purge the trash entry (harmless, cleaned up later)")
+		}
+		s.fs.RecordDelete(diskPath)
+	}
+	return nil
+}
+
+// deleteFolderRows removes the note rows inside a folder subtree and then the
+// folder rows themselves. Split out so DeleteFolder can restore the directory
+// when the database half fails.
+func (s *Service) deleteFolderRows(ctx context.Context, userID, folderID int64, descendantIDs []int64) error {
 	for _, fid := range descendantIDs {
 		fid := fid
 		childNotes, err := s.notes.ListByFolder(ctx, userID, &fid)
@@ -248,13 +287,7 @@ func (s *Service) DeleteFolder(ctx context.Context, userID, folderID int64) erro
 	}
 
 	// DB deletion cascades to child folder rows.
-	if err := s.folders.Delete(ctx, userID, folderID); err != nil {
-		return err
-	}
-
-	// RemoveDir wipes the on-disk directory tree (including any note files within it).
-	_ = s.fs.RemoveDir(diskPath)
-	return nil
+	return s.folders.Delete(ctx, userID, folderID)
 }
 
 // collectDescendantFolderIDs returns rootID followed by every descendant folder ID,

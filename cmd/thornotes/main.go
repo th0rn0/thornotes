@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -101,6 +102,13 @@ func main() {
 		os.Exit(1)
 	}
 
+	// One process owns a notes root. Two reconcilers writing the same tree
+	// corrupt it, so a second process fails here instead of racing silently.
+	if err := fs.AcquireOwnerLock(); err != nil {
+		log.Error().Err(err).Str("notes_root", cfg.NotesRoot).Msg("notes root ownership")
+		os.Exit(1)
+	}
+
 	// Optionally enable git history tracking.
 	if cfg.EnableGitHistory {
 		if err := fs.EnableGitHistory(); err != nil {
@@ -113,6 +121,7 @@ func main() {
 	// Build services.
 	authSvc := auth.NewService(userRepo, sessionRepo, cfg.AllowRegistration)
 	notesSvc := notes.NewService(noteRepo, folderRepo, searchRepo, journalRepo, fs)
+	applyReconcileGuardFromEnv(notesSvc)
 
 	// Development-only: seed a dev user + folder tree + ~100 notes.
 	// Idempotent — skipped entirely if the dev user already exists.
@@ -227,5 +236,41 @@ func main() {
 
 	// Wait for in-flight file writes to complete.
 	fs.Wait()
+	fs.ReleaseOwnerLock()
 	log.Info().Msg("shutdown complete")
+}
+
+// applyReconcileGuardFromEnv configures the reconcile deletion circuit breaker.
+//
+// The defaults (refuse a pass that would delete more than 25% of a user's notes,
+// once at least 3 are at stake) are the safe ones: they turn a partial data-loss
+// event into a refusal instead of a silent index wipe. An operator who genuinely
+// intends a large deletion raises the ratio rather than the code being relaxed.
+func applyReconcileGuardFromEnv(svc *notes.Service) {
+	ratio := notes.DefaultReconcileMaxDeleteRatio
+	minDeletes := notes.DefaultReconcileMinDeleteTrips
+
+	if v := os.Getenv("THORNOTES_RECONCILE_MAX_DELETE_RATIO"); v != "" {
+		parsed, err := strconv.ParseFloat(v, 64)
+		if err != nil || parsed < 0 || parsed > 1 {
+			log.Error().Str("value", v).
+				Msg("THORNOTES_RECONCILE_MAX_DELETE_RATIO must be a number between 0 and 1")
+			os.Exit(1)
+		}
+		ratio = parsed
+	}
+	if v := os.Getenv("THORNOTES_RECONCILE_MIN_DELETES"); v != "" {
+		parsed, err := strconv.Atoi(v)
+		if err != nil || parsed < 0 {
+			log.Error().Str("value", v).Msg("THORNOTES_RECONCILE_MIN_DELETES must be a non-negative integer")
+			os.Exit(1)
+		}
+		minDeletes = parsed
+	}
+
+	svc.SetReconcileDeleteGuard(ratio, minDeletes)
+	log.Info().
+		Float64("max_delete_ratio", ratio).
+		Int("min_deletes_to_trip", minDeletes).
+		Msg("reconcile: deletion circuit breaker configured")
 }

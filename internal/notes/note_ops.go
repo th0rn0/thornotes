@@ -24,11 +24,17 @@ func (s *Service) CreateNote(ctx context.Context, userID int64, userUUID string,
 // flow, which uses pretty names like "06 - Tuesday") pass an explicit slug
 // instead of relying on slugify.
 func (s *Service) createNoteWithSlug(ctx context.Context, userID int64, userUUID string, folderID *int64, title, slug string, tags []string) (*model.Note, error) {
+	// Shared tree lock: creating a file is a path write, so it must not
+	// interleave with a subtree rename that is rewriting the same directory.
+	defer s.lockTreeShared(userID)()
 	if len(title) == 0 || len(title) > 500 {
 		return nil, apperror.BadRequest("title must be 1–500 characters")
 	}
 	if slug == "" {
 		return nil, apperror.BadRequest("note slug must be non-empty")
+	}
+	if err := validateEntryName("note filename", slug); err != nil {
+		return nil, err
 	}
 	if tags == nil {
 		tags = []string{}
@@ -113,6 +119,7 @@ func (s *Service) ListAllNotes(ctx context.Context, userID int64) ([]*model.Note
 // concurrent saves cannot leave the disk and DB pointing at different content
 // (the "loser of optimistic conflict still wins on disk" race).
 func (s *Service) UpdateNoteContent(ctx context.Context, userID, noteID int64, content, expectedHash string) (string, error) {
+	defer s.lockTreeShared(userID)()
 	if int64(len(content)) > 1<<20 {
 		return "", &apperror.AppError{Code: 413, Message: "content exceeds 1 MB limit"}
 	}
@@ -157,6 +164,7 @@ func (s *Service) UpdateNoteContent(ctx context.Context, userID, noteID int64, c
 // fails after the disk rename, the rename is rolled back so disk and DB stay
 // in sync.
 func (s *Service) UpdateNoteMetadata(ctx context.Context, userID int64, userUUID string, noteID int64, title string, tags []string) error {
+	defer s.lockTreeShared(userID)()
 	mu := s.lockNote(noteID)
 	mu.Lock()
 	defer mu.Unlock()
@@ -214,6 +222,7 @@ func (s *Service) UpdateNoteMetadata(ctx context.Context, userID int64, userUUID
 // 1. Moves the file on disk.
 // 2. Updates the note's folder_id and disk_path in DB.
 func (s *Service) MoveNote(ctx context.Context, userID int64, userUUID string, noteID int64, newFolderID *int64) error {
+	defer s.lockTreeShared(userID)()
 	mu := s.lockNote(noteID)
 	mu.Lock()
 	defer mu.Unlock()
@@ -263,18 +272,42 @@ func (s *Service) MoveNote(ctx context.Context, userID int64, userUUID string, n
 
 // DeleteNote removes a note from DB and disk.
 func (s *Service) DeleteNote(ctx context.Context, userID, noteID int64) error {
+	defer s.lockTreeShared(userID)()
 	note, err := s.notes.GetByID(ctx, userID, noteID)
 	if err != nil {
 		return err
 	}
 	diskPath := note.DiskPath
 
-	if err := s.notes.Delete(ctx, userID, noteID); err != nil {
+	// Disk first. Moving the file out of the live tree is the commit point: if
+	// it fails (read-only volume, busy mount, permissions) we return the error
+	// with the row untouched. The old order removed the row first and discarded
+	// the filesystem error, so a failed unlink left the file behind and the next
+	// reconcile re-imported it as a brand-new note — the note "came back" with
+	// its tags and share token gone.
+	token, err := s.fs.MoveToTrash(diskPath)
+	if err != nil {
 		return err
 	}
 
-	// Delete file after DB row is gone.
-	_ = s.fs.Delete(diskPath)
+	if err := s.notes.Delete(ctx, userID, noteID); err != nil {
+		if token != "" {
+			if restoreErr := s.fs.RestoreFromTrash(token, diskPath); restoreErr != nil {
+				log.Error().Err(restoreErr).
+					Str("disk_path", diskPath).Str("trash", token).
+					Msg("notes: could not restore the file after a failed delete — it is still in the trash")
+			}
+		}
+		return err
+	}
+
+	if token != "" {
+		if purgeErr := s.fs.PurgeTrash(token); purgeErr != nil {
+			log.Warn().Err(purgeErr).Str("trash", token).
+				Msg("notes: could not purge the trash entry (harmless, cleaned up later)")
+		}
+		s.fs.RecordDelete(diskPath)
+	}
 	return nil
 }
 
