@@ -89,6 +89,11 @@ func (s *Service) reconcileUserFromDisk(ctx context.Context, user *model.User) (
 	if user.UUID == "" {
 		return result, nil
 	}
+	// The whole pass is a path-changing subtree operation: it creates, moves
+	// and deletes files. Holding the exclusive lock means a concurrent note
+	// write cannot observe a half-reconciled tree, and the pass cannot race a
+	// folder rename.
+	defer s.lockTreeExclusive(user.ID)()
 
 	// 1. Walk disk.
 	tree, err := s.walkUserTree(user.UUID)

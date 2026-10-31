@@ -43,6 +43,10 @@ type Service struct {
 	// healthMu guards lastReconcile, the readiness signal for the notes root.
 	healthMu      sync.RWMutex
 	lastReconcile *ReconcileHealth
+
+	// tree serialises path-changing mutations per user: subtree operations take
+	// the exclusive side, single-note path writes the shared side.
+	tree treeLocks
 }
 
 // SetReconcileDeleteGuard overrides the deletion circuit breaker. A ratio >= 1

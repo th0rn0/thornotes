@@ -102,6 +102,13 @@ func main() {
 		os.Exit(1)
 	}
 
+	// One process owns a notes root. Two reconcilers writing the same tree
+	// corrupt it, so a second process fails here instead of racing silently.
+	if err := fs.AcquireOwnerLock(); err != nil {
+		log.Error().Err(err).Str("notes_root", cfg.NotesRoot).Msg("notes root ownership")
+		os.Exit(1)
+	}
+
 	// Optionally enable git history tracking.
 	if cfg.EnableGitHistory {
 		if err := fs.EnableGitHistory(); err != nil {
@@ -229,6 +236,7 @@ func main() {
 
 	// Wait for in-flight file writes to complete.
 	fs.Wait()
+	fs.ReleaseOwnerLock()
 	log.Info().Msg("shutdown complete")
 }
 

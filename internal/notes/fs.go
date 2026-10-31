@@ -23,6 +23,11 @@ type FileStore struct {
 	notesRoot string
 	wg        sync.WaitGroup // tracks in-flight writes for graceful shutdown
 	git       *gitHistory    // nil when git history is disabled
+
+	// ownerMu guards the advisory cross-process lock on the notes root.
+	ownerMu       sync.Mutex
+	ownerLock     *os.File
+	ownerLockPath string
 }
 
 func NewFileStore(notesRoot string) (*FileStore, error) {

@@ -15,6 +15,7 @@ import (
 
 // CreateFolder creates a folder on disk and in the DB.
 func (s *Service) CreateFolder(ctx context.Context, userID int64, userUUID string, parentID *int64, name string) (*model.Folder, error) {
+	defer s.lockTreeExclusive(userID)()
 	if len(name) == 0 || len(name) > 255 {
 		return nil, apperror.BadRequest("folder name must be 1–255 characters")
 	}
@@ -69,6 +70,7 @@ func (s *Service) CreateFolder(ctx context.Context, userID int64, userUUID strin
 // 2. Updates the folder's own disk_path in DB.
 // 3. Updates all descendant folder and note disk_paths in DB.
 func (s *Service) RenameFolder(ctx context.Context, userID int64, userUUID string, folderID int64, newName string) error {
+	defer s.lockTreeExclusive(userID)()
 	if len(newName) == 0 || len(newName) > 255 {
 		return apperror.BadRequest("folder name must be 1–255 characters")
 	}
@@ -134,6 +136,7 @@ func (s *Service) RenameFolder(ctx context.Context, userID int64, userUUID strin
 // 3. Updates the folder's parent_id and disk_path in DB.
 // 4. Cascades disk_path updates to all descendants.
 func (s *Service) MoveFolder(ctx context.Context, userID int64, userUUID string, folderID int64, newParentID *int64) error {
+	defer s.lockTreeExclusive(userID)()
 	folder, err := s.folders.GetByID(ctx, userID, folderID)
 	if err != nil {
 		return err
@@ -225,6 +228,7 @@ func (s *Service) isFolderDescendant(ctx context.Context, userID, ancestorID, ca
 // notes.folder_id is ON DELETE SET NULL in the schema, so DB cascade alone would orphan
 // child notes to the root — we explicitly delete them first.
 func (s *Service) DeleteFolder(ctx context.Context, userID, folderID int64) error {
+	defer s.lockTreeExclusive(userID)()
 	folder, err := s.folders.GetByID(ctx, userID, folderID)
 	if err != nil {
 		return err
