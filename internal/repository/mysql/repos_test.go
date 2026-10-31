@@ -57,7 +57,7 @@ func truncateAll(t *testing.T, pool *db.Pool) {
 
 	conn, err := pool.WriteDB.Conn(ctx)
 	require.NoError(t, err)
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	_, err = conn.ExecContext(ctx, "SET FOREIGN_KEY_CHECKS = 0")
 	require.NoError(t, err)
