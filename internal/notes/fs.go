@@ -119,6 +119,63 @@ func (fs *FileStore) Write(relativePath, content string) error {
 	return nil
 }
 
+// WriteExclusive creates relativePath with O_CREATE|O_EXCL so an existing file
+// is never truncated or overwritten. Returns os.ErrExist (wrapped) if the file
+// already exists.
+func (fs *FileStore) WriteExclusive(relativePath, content string) error {
+	absPath, err := fs.safePath(relativePath)
+	if err != nil {
+		return err
+	}
+
+	if err := os.MkdirAll(filepath.Dir(absPath), 0700); err != nil {
+		return fmt.Errorf("mkdir: %w", err)
+	}
+
+	fs.wg.Add(1)
+	defer fs.wg.Done()
+
+	f, err := os.OpenFile(absPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if err != nil {
+		if isENOSPC(err) {
+			return apperror.DiskFull()
+		}
+		return fmt.Errorf("create exclusive: %w", err)
+	}
+
+	if _, err := f.WriteString(content); err != nil {
+		f.Close()
+		os.Remove(absPath)
+		if isENOSPC(err) {
+			return apperror.DiskFull()
+		}
+		return fmt.Errorf("write exclusive: %w", err)
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		os.Remove(absPath)
+		if isENOSPC(err) {
+			return apperror.DiskFull()
+		}
+		return fmt.Errorf("sync exclusive: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(absPath)
+		if isENOSPC(err) {
+			return apperror.DiskFull()
+		}
+		return fmt.Errorf("close exclusive: %w", err)
+	}
+
+	if fs.git != nil {
+		if err := fs.git.CommitSave(relativePath); err != nil {
+			log.Warn().Err(err).Str("path", relativePath).Msg("git commit save")
+		}
+	}
+
+	return nil
+}
+
 // Read returns the content of relativePath.
 func (fs *FileStore) Read(relativePath string) (string, error) {
 	absPath, err := fs.safePath(relativePath)
@@ -204,6 +261,37 @@ func (fs *FileStore) RenameFile(oldRelPath, newRelPath string) error {
 	return nil
 }
 
+// RenameFileExclusive moves a single file from oldRelPath to newRelPath without
+// replacing an existing destination file. It uses os.Link(oldAbs, newAbs) which
+// fails atomically with os.ErrExist in the kernel if newAbs already exists,
+// followed by os.Remove(oldAbs).
+func (fs *FileStore) RenameFileExclusive(oldRelPath, newRelPath string) error {
+	oldAbs, err := fs.safePath(oldRelPath)
+	if err != nil {
+		return err
+	}
+	newAbs, err := fs.safePath(newRelPath)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(newAbs), 0700); err != nil {
+		return fmt.Errorf("mkdir parent: %w", err)
+	}
+	if err := os.Link(oldAbs, newAbs); err != nil {
+		return fmt.Errorf("link file exclusive: %w", err)
+	}
+	if err := os.Remove(oldAbs); err != nil {
+		_ = os.Remove(newAbs)
+		return fmt.Errorf("remove old file after link: %w", err)
+	}
+	if fs.git != nil {
+		if err := fs.git.CommitRename(oldRelPath, newRelPath); err != nil {
+			log.Warn().Err(err).Str("old", oldRelPath).Str("new", newRelPath).Msg("git commit rename")
+		}
+	}
+	return nil
+}
+
 // EnsureDir creates the directory at relativePath if it doesn't exist.
 func (fs *FileStore) EnsureDir(relativePath string) error {
 	absPath, err := fs.safePath(relativePath)
@@ -211,6 +299,32 @@ func (fs *FileStore) EnsureDir(relativePath string) error {
 		return err
 	}
 	return os.MkdirAll(absPath, 0700)
+}
+
+// CreateDirExclusive creates the leaf directory at relativePath exclusively
+// (parent directories are created if needed). Returns os.ErrExist if the leaf
+// directory already exists on disk.
+func (fs *FileStore) CreateDirExclusive(relativePath string) error {
+	absPath, err := fs.safePath(relativePath)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(absPath), 0700); err != nil {
+		return fmt.Errorf("mkdir parent: %w", err)
+	}
+	return os.Mkdir(absPath, 0700)
+}
+
+// RemoveEmptyDir removes relativePath only if it is an empty directory.
+func (fs *FileStore) RemoveEmptyDir(relativePath string) error {
+	absPath, err := fs.safePath(relativePath)
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(absPath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove empty dir: %w", err)
+	}
+	return nil
 }
 
 // RemoveDir removes an empty or non-empty directory at relativePath.

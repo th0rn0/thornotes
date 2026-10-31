@@ -4,7 +4,9 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"os"
 
 	"github.com/rs/zerolog/log"
 	"github.com/th0rn0/thornotes/internal/apperror"
@@ -42,11 +44,22 @@ func (s *Service) createNoteWithSlug(ctx context.Context, userID int64, userUUID
 	}
 	diskPath := notesDiskPath(userUUID, folderPath, slug)
 
+	// Reject duplicate slug in the target folder before touching the filesystem
+	// so an existing note file is never truncated or deleted on conflict.
+	if _, err := s.notes.GetByFolderAndSlug(ctx, userID, folderID, slug); err == nil {
+		return nil, apperror.Conflict(fmt.Sprintf("note %q already exists in this folder", title))
+	} else if !errors.Is(err, apperror.ErrNotFound) {
+		return nil, err
+	}
+
 	content := ""
 	hash := HashContent(content)
 
-	// Write file first (file-as-canonical protocol).
-	if err := s.fs.Write(diskPath, content); err != nil {
+	// Write file exclusively (never overwrite a pre-existing file on disk).
+	if err := s.fs.WriteExclusive(diskPath, content); err != nil {
+		if errors.Is(err, os.ErrExist) {
+			return nil, apperror.Conflict(fmt.Sprintf("note %q already exists in this folder", title))
+		}
 		return nil, apperror.Internal("write note file", err)
 	}
 
@@ -63,7 +76,7 @@ func (s *Service) createNoteWithSlug(ctx context.Context, userID int64, userUUID
 
 	created, err := s.notes.Create(ctx, n)
 	if err != nil {
-		// Best-effort cleanup of the file if DB insert fails.
+		// Cleanup the file we exclusively created if the DB insert fails.
 		if cleanupErr := s.fs.Delete(diskPath); cleanupErr != nil {
 			log.Warn().Err(cleanupErr).Str("path", diskPath).Msg("cleanup file after failed db insert")
 		}
@@ -157,6 +170,11 @@ func (s *Service) UpdateNoteMetadata(ctx context.Context, userID int64, userUUID
 	if title != "" && title != note.Title {
 		newSlug := slugify(title)
 		if newSlug != note.Slug {
+			if existing, err := s.notes.GetByFolderAndSlug(ctx, userID, note.FolderID, newSlug); err == nil && existing.ID != note.ID {
+				return apperror.Conflict(fmt.Sprintf("note %q already exists in this folder", title))
+			} else if err != nil && !errors.Is(err, apperror.ErrNotFound) {
+				return err
+			}
 			var folderPath string
 			if note.FolderID != nil {
 				folder, err := s.folders.GetByID(ctx, userID, *note.FolderID)
@@ -166,7 +184,10 @@ func (s *Service) UpdateNoteMetadata(ctx context.Context, userID int64, userUUID
 				folderPath = folder.DiskPath
 			}
 			newDiskPath := notesDiskPath(userUUID, folderPath, newSlug)
-			if err := s.fs.RenameFile(note.DiskPath, newDiskPath); err != nil {
+			if err := s.fs.RenameFileExclusive(note.DiskPath, newDiskPath); err != nil {
+				if errors.Is(err, os.ErrExist) {
+					return apperror.Conflict(fmt.Sprintf("note %q already exists in this folder", title))
+				}
 				return apperror.Internal("rename note file", err)
 			}
 			note.Slug = newSlug
@@ -180,7 +201,7 @@ func (s *Service) UpdateNoteMetadata(ctx context.Context, userID int64, userUUID
 	}
 	if err := s.notes.Update(ctx, note); err != nil {
 		if renamed {
-			if rbErr := s.fs.RenameFile(note.DiskPath, oldDiskPath); rbErr != nil {
+			if rbErr := s.fs.RenameFileExclusive(note.DiskPath, oldDiskPath); rbErr != nil {
 				log.Warn().Err(rbErr).Str("from", note.DiskPath).Str("to", oldDiskPath).Msg("rollback note rename after failed db update")
 			}
 		}
@@ -193,6 +214,10 @@ func (s *Service) UpdateNoteMetadata(ctx context.Context, userID int64, userUUID
 // 1. Moves the file on disk.
 // 2. Updates the note's folder_id and disk_path in DB.
 func (s *Service) MoveNote(ctx context.Context, userID int64, userUUID string, noteID int64, newFolderID *int64) error {
+	mu := s.lockNote(noteID)
+	mu.Lock()
+	defer mu.Unlock()
+
 	note, err := s.notes.GetByID(ctx, userID, noteID)
 	if err != nil {
 		return err
@@ -212,15 +237,24 @@ func (s *Service) MoveNote(ctx context.Context, userID int64, userUUID string, n
 		newFolderPath = folder.DiskPath
 	}
 
+	if existing, err := s.notes.GetByFolderAndSlug(ctx, userID, newFolderID, note.Slug); err == nil && existing.ID != note.ID {
+		return apperror.Conflict("a note with that name already exists in the destination folder")
+	} else if err != nil && !errors.Is(err, apperror.ErrNotFound) {
+		return err
+	}
+
 	oldDiskPath := note.DiskPath
 	newDiskPath := notesDiskPath(userUUID, newFolderPath, note.Slug)
 
-	if err := s.fs.RenameFile(oldDiskPath, newDiskPath); err != nil {
+	if err := s.fs.RenameFileExclusive(oldDiskPath, newDiskPath); err != nil {
+		if errors.Is(err, os.ErrExist) {
+			return apperror.Conflict("a note with that name already exists in the destination folder")
+		}
 		return apperror.Internal("move note file", err)
 	}
 
 	if err := s.notes.Move(ctx, userID, noteID, newFolderID, newDiskPath); err != nil {
-		_ = s.fs.RenameFile(newDiskPath, oldDiskPath)
+		_ = s.fs.RenameFileExclusive(newDiskPath, oldDiskPath)
 		return err
 	}
 
