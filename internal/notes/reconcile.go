@@ -30,6 +30,11 @@ type diskTree struct {
 	notes   map[string]string
 	unknown []string
 	root    rootState
+	// skippedNonRegular counts entries that exist on disk but are not files we
+	// index (symlinks, sockets, fifos, devices). They are also recorded as
+	// unknown so no row is deleted for them; the count exists so a vault full of
+	// links does not silently look like a vault with missing notes.
+	skippedNonRegular int
 }
 
 // rootState is what the walk learned about the user's own directory.
@@ -61,6 +66,7 @@ type reconcileResult struct {
 	FoldersCreated    int
 	FoldersDeleted    int
 	FoldersRepaired   int
+	SkippedNonRegular int
 }
 
 // total returns the total number of disk-vs-DB drift events repaired.
@@ -101,6 +107,13 @@ func (s *Service) reconcileUserFromDisk(ctx context.Context, user *model.User) (
 		return result, err
 	}
 	diskFolders, diskNotes := tree.folders, tree.notes
+	result.SkippedNonRegular = tree.skippedNonRegular
+	if tree.skippedNonRegular > 0 {
+		log.Warn().
+			Int("skipped", tree.skippedNonRegular).
+			Int64("user_id", user.ID).
+			Msg("reconcile: entries skipped — symlinks and other non-regular files are not indexed")
+	}
 
 	// 2. Load DB state.
 	dbFolders, err := s.folders.Tree(ctx, user.ID)
@@ -506,6 +519,13 @@ func (s *Service) walkUserTree(userUUID string) (diskTree, error) {
 		}
 		name := d.Name()
 		if strings.HasPrefix(name, ".") {
+			// Dot-prefixed entries are not walked: the store keeps its own
+			// infrastructure there (.thornotes-trash, .thornotes-*.tmp). They are
+			// recorded as UNKNOWN rather than absent, so a user folder that was
+			// created before dot-prefixes were reserved cannot lose its rows on
+			// the first reconcile after an upgrade — the walk skips the subtree
+			// but every row under it survives.
+			tree.unknown = append(tree.unknown, rel)
 			if d.IsDir() {
 				return filepath.SkipDir
 			}
@@ -516,16 +536,21 @@ func (s *Service) walkUserTree(userUUID string) (diskTree, error) {
 			return nil
 		}
 		if !d.Type().IsRegular() {
-			// Symlink, socket, fifo, device: not a note we own, and not
-			// evidence that any row's file is gone.
+			// Symlink, socket, fifo, device: not a note we own, and not evidence
+			// that any row's file is gone. Counted so the operator sees it —
+			// a synced vault full of links otherwise just looks like it has
+			// missing notes.
 			tree.unknown = append(tree.unknown, rel)
-			log.Warn().Str("path", rel).Msg("reconcile: non-regular file skipped — rows under it are protected")
+			tree.skippedNonRegular++
+			log.Debug().Str("path", rel).Msg("reconcile: non-regular entry skipped — symlinks are not supported")
 			return nil
 		}
 		if !strings.HasSuffix(strings.ToLower(name), ".md") {
 			return nil
 		}
-		content, readErr := os.ReadFile(absPath)
+		// Read through the confined root so a leaf swapped for a symlink after
+		// the walk saw it cannot serve content from outside the tree.
+		content, readErr := s.fs.root.ReadFile(rel)
 		if readErr != nil {
 			tree.unknown = append(tree.unknown, rel)
 			log.Error().Err(readErr).Str("path", rel).Msg("reconcile: note unreadable — treating as unknown, DB row protected")

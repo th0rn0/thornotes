@@ -5,9 +5,12 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/rs/zerolog/log"
+
+	"github.com/th0rn0/thornotes/internal/apperror"
 	"github.com/th0rn0/thornotes/internal/model"
 	"github.com/th0rn0/thornotes/internal/repository"
 )
@@ -93,6 +96,36 @@ func (s *Service) lockNote(noteID int64) *sync.Mutex {
 	return &s.noteLocks[noteID%noteLockStripes]
 }
 
+// reservedPrefix marks the on-disk namespace the store owns. Entries starting
+// with "." are never walked by the reconciler (they are treated as unknown, so
+// nothing is deleted for them) and the store parks its own files there, so a
+// user-created dot-prefixed name would be invisible in the UI while its row
+// exists — which is data loss, not escalation. Reject it at the API boundary.
+const reservedPrefix = ".thornotes-"
+
+// validateEntryName rejects a name that would land in the reserved namespace or
+// create a malformed path component.
+//
+// This is the second half of the dot-namespace fix and it must not ship before
+// the first: reconcile now treats dot-directories as unknown rather than absent,
+// so an account that already has a ".office" folder keeps its rows instead of
+// losing them the moment this rejection goes live.
+func validateEntryName(kind, name string) error {
+	if len(name) == 0 || len(name) > 255 {
+		return apperror.BadRequest(kind + " must be 1–255 characters")
+	}
+	if strings.HasPrefix(name, reservedPrefix) {
+		return apperror.BadRequest(kind + " must not use the reserved prefix " + reservedPrefix)
+	}
+	if strings.HasPrefix(name, ".") {
+		return apperror.BadRequest(kind + " must not start with \".\" — dot-prefixed names are reserved for internal use")
+	}
+	if strings.ContainsAny(name, "/\\\x00") || name == ".." {
+		return apperror.BadRequest(kind + " must not contain path separators")
+	}
+	return nil
+}
+
 // HashContent returns the SHA-256 hex digest of content.
 func HashContent(content string) string {
 	return fmt.Sprintf("%x", sha256.Sum256([]byte(content)))
@@ -115,7 +148,7 @@ func (s *Service) Reconcile(ctx context.Context, user *model.User) (int, error) 
 	}
 	log.Info().Int64("user_id", user.ID).Msg("reconcile: starting")
 	result, err := s.reconcileUserFromDisk(ctx, user)
-	s.recordReconcile(err)
+	s.recordReconcile(err, result.SkippedNonRegular)
 	if err != nil {
 		return 0, err
 	}
@@ -129,6 +162,7 @@ func (s *Service) Reconcile(ctx context.Context, user *model.User) (int, error) 
 			Int("folders_created", result.FoldersCreated).
 			Int("folders_deleted", result.FoldersDeleted).
 			Int("folders_repaired", result.FoldersRepaired).
+			Int("skipped_non_regular", result.SkippedNonRegular).
 			Msg("reconcile: changes applied")
 	}
 	log.Info().Int64("user_id", user.ID).Int("total_changes", result.total()).Msg("reconcile: complete")

@@ -23,6 +23,11 @@ type ReconcileHealth struct {
 	At    time.Time
 	OK    bool
 	Error string
+	// SkippedNonRegular is how many on-disk entries the last pass refused to
+	// index because they are not regular files (symlinks, sockets, fifos,
+	// devices). Surfaced so a vault full of links does not look like a vault
+	// with missing notes.
+	SkippedNonRegular int
 }
 
 // NotesRootHealth is the operator-visible state of the notes root and of the
@@ -103,8 +108,8 @@ func (s *Service) NotesRootHealthError() string {
 }
 
 // recordReconcile stores the outcome of one pass for readiness reporting.
-func (s *Service) recordReconcile(err error) {
-	rec := &ReconcileHealth{At: time.Now().UTC(), OK: err == nil}
+func (s *Service) recordReconcile(err error, skippedNonRegular int) {
+	rec := &ReconcileHealth{At: time.Now().UTC(), OK: err == nil, SkippedNonRegular: skippedNonRegular}
 	if err != nil {
 		rec.Error = err.Error()
 	}

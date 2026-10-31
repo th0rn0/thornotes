@@ -33,6 +33,9 @@ func (s *Service) createNoteWithSlug(ctx context.Context, userID int64, userUUID
 	if slug == "" {
 		return nil, apperror.BadRequest("note slug must be non-empty")
 	}
+	if err := validateEntryName("note filename", slug); err != nil {
+		return nil, err
+	}
 	if tags == nil {
 		tags = []string{}
 	}

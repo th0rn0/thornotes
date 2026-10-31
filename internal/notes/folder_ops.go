@@ -16,8 +16,8 @@ import (
 // CreateFolder creates a folder on disk and in the DB.
 func (s *Service) CreateFolder(ctx context.Context, userID int64, userUUID string, parentID *int64, name string) (*model.Folder, error) {
 	defer s.lockTreeExclusive(userID)()
-	if len(name) == 0 || len(name) > 255 {
-		return nil, apperror.BadRequest("folder name must be 1–255 characters")
+	if err := validateEntryName("folder name", name); err != nil {
+		return nil, err
 	}
 	if filepath.Base(name) != name || name == ".." || name == "." {
 		return nil, apperror.BadRequest("folder name must not contain path separators")
@@ -71,8 +71,8 @@ func (s *Service) CreateFolder(ctx context.Context, userID int64, userUUID strin
 // 3. Updates all descendant folder and note disk_paths in DB.
 func (s *Service) RenameFolder(ctx context.Context, userID int64, userUUID string, folderID int64, newName string) error {
 	defer s.lockTreeExclusive(userID)()
-	if len(newName) == 0 || len(newName) > 255 {
-		return apperror.BadRequest("folder name must be 1–255 characters")
+	if err := validateEntryName("folder name", newName); err != nil {
+		return err
 	}
 	if filepath.Base(newName) != newName || newName == ".." || newName == "." {
 		return apperror.BadRequest("folder name must not contain path separators")

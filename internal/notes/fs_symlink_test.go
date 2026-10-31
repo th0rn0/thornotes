@@ -83,7 +83,10 @@ func TestFileStore_WriteExclusive_ThroughSymlinkedParentDir_Rejected(t *testing.
 	assert.True(t, os.IsNotExist(statErr))
 }
 
-func TestFileStore_Delete_SymlinkRejected(t *testing.T) {
+// Deleting a symlink is allowed and removes only the link: it is the user's only
+// way to clean one up from the UI (unlink(2) never touches the target). Every
+// operation that would FOLLOW the link is still refused.
+func TestFileStore_Delete_SymlinkRemovesLinkOnly(t *testing.T) {
 	outside := t.TempDir()
 	victim := filepath.Join(outside, "precious.md")
 	require.NoError(t, os.WriteFile(victim, []byte("keep me"), 0600))
@@ -92,14 +95,22 @@ func TestFileStore_Delete_SymlinkRejected(t *testing.T) {
 	fs, err := NewFileStore(root)
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Join(root, "user1"), 0700))
-	require.NoError(t, os.Symlink(victim, filepath.Join(root, "user1", "evil.md")))
+	link := filepath.Join(root, "user1", "evil.md")
+	require.NoError(t, os.Symlink(victim, link))
 
-	err = fs.Delete("user1/evil.md")
+	require.NoError(t, fs.Delete("user1/evil.md"))
+
+	_, statErr := os.Lstat(link)
+	assert.True(t, os.IsNotExist(statErr), "the link itself must be gone")
+	_, statErr = os.Stat(victim)
+	assert.NoError(t, statErr, "the file the link pointed at must be untouched")
+
+	// Reading through the link is still refused, even though the link is gone
+	// here, and a fresh one is refused too.
+	require.NoError(t, os.Symlink(victim, link))
+	_, err = fs.Read("user1/evil.md")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, apperror.ErrPathTraversal), "got %v", err)
-
-	_, statErr := os.Stat(victim)
-	assert.NoError(t, statErr, "the file the link pointed at must be untouched")
 }
 
 func TestFileStore_Write_SymlinkInMiddleOfPath_Rejected(t *testing.T) {
