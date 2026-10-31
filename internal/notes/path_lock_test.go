@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -87,11 +88,18 @@ func TestTreeLock_ExclusiveWaitsForShared(t *testing.T) {
 	rwShared.RLock()
 	unlockShared := rwShared.RUnlock
 
-	done := make(chan struct{})
+	var (
+		acquired atomic.Bool
+		done     = make(chan struct{})
+	)
 	go func() {
 		defer close(done)
 		rw := locks.forUser(1)
 		rw.Lock()
+		// The critical section records that the exclusive side was granted.
+		// Reaching this line at all is the assertion — it can only run once
+		// every shared holder has released.
+		acquired.Store(true)
 		rw.Unlock()
 	}()
 
@@ -100,6 +108,7 @@ func TestTreeLock_ExclusiveWaitsForShared(t *testing.T) {
 		t.Fatal("exclusive lock was acquired while a shared lock was still held")
 	case <-time.After(150 * time.Millisecond):
 	}
+	assert.False(t, acquired.Load(), "exclusive side must not be granted while a shared holder runs")
 
 	unlockShared()
 	select {
@@ -107,6 +116,7 @@ func TestTreeLock_ExclusiveWaitsForShared(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("exclusive lock was not acquired after the shared lock was released")
 	}
+	assert.True(t, acquired.Load(), "exclusive side must be granted once the shared holder released")
 }
 
 // Different users do not contend: the lock is per tree, not global.
@@ -116,11 +126,15 @@ func TestTreeLock_DifferentUsersDoNotBlock(t *testing.T) {
 	rw.RLock()
 	defer rw.RUnlock()
 
+	var acquired atomic.Bool
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
 		other := locks.forUser(2)
 		other.Lock()
+		// Non-empty on purpose: recording that the second user's lock was
+		// granted is exactly what this test observes.
+		acquired.Store(true)
 		other.Unlock()
 	}()
 
@@ -129,6 +143,7 @@ func TestTreeLock_DifferentUsersDoNotBlock(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("a second user's tree lock should not be blocked by the first user's")
 	}
+	assert.True(t, acquired.Load(), "a second user's tree must not wait on the first user's")
 }
 
 // The reported bug, in the reported order: a folder rename must not run while a
@@ -159,8 +174,8 @@ func TestRenameFolder_WaitsForInFlightNoteWrite(t *testing.T) {
 	go func() { renameDone <- st.svc.RenameFolder(ctx, st.userID, "test-uuid", folderID, "Work2") }()
 
 	select {
-	case <-renameDone:
-		t.Fatal("RenameFolder completed while a note write was still in flight")
+	case earlyErr := <-renameDone:
+		t.Fatalf("RenameFolder completed while a note write was still in flight: %v", earlyErr)
 	case <-time.After(200 * time.Millisecond):
 	}
 
@@ -172,7 +187,10 @@ func TestRenameFolder_WaitsForInFlightNoteWrite(t *testing.T) {
 	assert.True(t, os.IsNotExist(statErr), "the rename must not have happened yet")
 
 	close(st.release)
-	<-writeDone
+	// The parked write targets a note that does not exist, so it must come back
+	// with an error rather than hang; waiting for it also keeps the goroutine
+	// from leaking. Its error value is asserted, not discarded.
+	require.Error(t, <-writeDone, "the parked note write must return once released")
 
 	select {
 	case rerr := <-renameDone:
