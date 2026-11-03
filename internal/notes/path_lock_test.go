@@ -75,7 +75,7 @@ func newLockTestStack(t *testing.T) *lockTestStack {
 	user, err := userRepo.Create(ctx, "testuser", "$2a$12$fakehash0000000000000000000000000000000000000000000000", "test-uuid")
 	require.NoError(t, err)
 
-	svc := NewService(wrapped, folderRepo, searchRepo, sqlite_repo.NewJournalRepo(pool.ReadDB, pool.WriteDB), fs)
+	svc := NewService(wrapped, folderRepo, searchRepo, sqlite_repo.NewJournalRepo(pool.ReadDB, pool.WriteDB), sqlite_repo.NewLinkRepo(pool.ReadDB, pool.WriteDB), fs)
 	return &lockTestStack{svc: svc, user: user, userID: user.ID, notesDir: notesDir, pool: pool, entered: entered, release: release}
 }
 
