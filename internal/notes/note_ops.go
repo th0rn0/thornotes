@@ -11,6 +11,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/th0rn0/thornotes/internal/apperror"
 	"github.com/th0rn0/thornotes/internal/model"
+	"github.com/th0rn0/thornotes/internal/wikilinks"
 )
 
 // CreateNote creates a new note, writes the file, then saves to DB.
@@ -74,6 +75,7 @@ func (s *Service) createNoteWithSlug(ctx context.Context, userID int64, userUUID
 		FolderID:    folderID,
 		Title:       title,
 		Slug:        slug,
+		TitleKey:    wikilinks.NormalizeKey(title),
 		DiskPath:    diskPath,
 		Content:     content,
 		ContentHash: hash,
@@ -87,6 +89,10 @@ func (s *Service) createNoteWithSlug(ctx context.Context, userID int64, userUUID
 			log.Warn().Err(cleanupErr).Str("path", diskPath).Msg("cleanup file after failed db insert")
 		}
 		return nil, err
+	}
+
+	if err := s.indexLinks(ctx, created, ""); err != nil {
+		log.Warn().Err(err).Int64("note_id", created.ID).Msg("index links after create")
 	}
 
 	return created, nil
@@ -155,6 +161,12 @@ func (s *Service) UpdateNoteContent(ctx context.Context, userID, noteID int64, c
 		return "", err
 	}
 
+	note.Content = content
+	note.ContentHash = newHash
+	if err := s.indexLinks(ctx, note, ""); err != nil {
+		log.Warn().Err(err).Int64("note_id", noteID).Msg("index links after content update")
+	}
+
 	return newHash, nil
 }
 
@@ -173,6 +185,7 @@ func (s *Service) UpdateNoteMetadata(ctx context.Context, userID int64, userUUID
 	if err != nil {
 		return err
 	}
+	oldTitle := note.Title
 	renamed := false
 	oldDiskPath := note.DiskPath
 	if title != "" && title != note.Title {
@@ -203,6 +216,7 @@ func (s *Service) UpdateNoteMetadata(ctx context.Context, userID int64, userUUID
 			renamed = true
 		}
 		note.Title = title
+		note.TitleKey = wikilinks.NormalizeKey(title)
 	}
 	if tags != nil {
 		note.Tags = tags
@@ -214,6 +228,10 @@ func (s *Service) UpdateNoteMetadata(ctx context.Context, userID int64, userUUID
 			}
 		}
 		return err
+	}
+
+	if err := s.indexLinks(ctx, note, oldTitle); err != nil {
+		log.Warn().Err(err).Int64("note_id", noteID).Msg("index links after metadata update")
 	}
 	return nil
 }
@@ -265,6 +283,12 @@ func (s *Service) MoveNote(ctx context.Context, userID int64, userUUID string, n
 	if err := s.notes.Move(ctx, userID, noteID, newFolderID, newDiskPath); err != nil {
 		_ = s.fs.RenameFileExclusive(newDiskPath, oldDiskPath)
 		return err
+	}
+
+	// Reindex outgoing links — relative targets resolve differently in a new folder.
+	note.FolderID = newFolderID
+	if err := s.indexLinks(ctx, note, ""); err != nil {
+		log.Warn().Err(err).Int64("note_id", noteID).Msg("index links after move")
 	}
 
 	return nil

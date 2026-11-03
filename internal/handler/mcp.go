@@ -408,6 +408,18 @@ func (h *MCPHandler) handleToolsList(req rpcRequest) rpcResponse {
 				"Returns a plain array of strings: [\"cooking\", \"ideas\", \"project\", ...].",
 			InputSchema: jsonSchema(nil, nil),
 		},
+		{
+			Name: "get_links",
+			Description: "Return the link graph around a single note. " +
+				"`outgoing` lists the [[wikilinks]] written in the note's content, each resolved to a note id+title where one exists; " +
+				"an edge with id=null is unresolved (a page the wiki has not written yet) and ambiguous=true means several notes matched equally. " +
+				"`backlinks` lists the notes that link TO this note. " +
+				"Edge fields: target is the raw target text as written, anchor is the [[Target#anchor]] heading, link_text is the [[Target|display]] label. " +
+				"A folder-scoped API token only sees links to notes inside its permitted subtree; out-of-scope edges are omitted rather than redacted.",
+			InputSchema: jsonSchema(map[string]any{
+				"id": prop("integer", "ID of the note whose outgoing links and backlinks to return."),
+			}, []string{"id"}),
+		},
 		// ── Note write tools ──────────────────────────────────────────────────────
 		{
 			Name: "create_note",
@@ -795,6 +807,35 @@ func (h *MCPHandler) handleToolsCall(r *http.Request, req rpcRequest, user *mode
 			tags = kept
 		}
 		text, _ := json.Marshal(tags)
+		return rpcOK(req.ID, toolResult(string(text)))
+
+	case "get_links":
+		var args struct {
+			ID int64 `json:"id"`
+		}
+		if err := json.Unmarshal(params.Arguments, &args); err != nil || args.ID == 0 {
+			return rpcErr(req.ID, rpcInvalidParams, "id is required")
+		}
+		note, err := h.notes.GetNote(ctx, userID, args.ID)
+		if err != nil {
+			return rpcErr(req.ID, rpcInternalError, errorString(err))
+		}
+		if resp := checkRead(note.FolderID); resp != nil {
+			return *resp
+		}
+		outView, err := buildOutgoingLinkView(ctx, authz, h.notes, userID, args.ID)
+		if err != nil {
+			return rpcErr(req.ID, rpcInternalError, "links failed")
+		}
+		backView, err := buildBacklinkView(ctx, authz, h.notes, userID, args.ID)
+		if err != nil {
+			return rpcErr(req.ID, rpcInternalError, "links failed")
+		}
+		payload := mcpGetLinksResult{
+			Outgoing:  toMCPOutgoing(outView),
+			Backlinks: toMCPBacklinks(backView),
+		}
+		text, _ := json.Marshal(payload)
 		return rpcOK(req.ID, toolResult(string(text)))
 
 	case "rename_note":

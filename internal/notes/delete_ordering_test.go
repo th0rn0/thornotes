@@ -130,7 +130,7 @@ func TestDeleteNote_DBFailure_RestoresFile(t *testing.T) {
 	require.NoError(t, fs.Write("test-uuid/precious.md", "# Precious"))
 
 	failing := &failingDeleteRepo{NoteRepository: baseNoteRepo, fail: true, err: errors.New("db is down")}
-	svc := notes.NewService(failing, folderRepo, searchRepo, sqlite_repo.NewJournalRepo(pool.ReadDB, pool.WriteDB), fs)
+	svc := notes.NewService(failing, folderRepo, searchRepo, sqlite_repo.NewJournalRepo(pool.ReadDB, pool.WriteDB), sqlite_repo.NewLinkRepo(pool.ReadDB, pool.WriteDB), fs)
 
 	err = svc.DeleteNote(ctx, user.ID, note.ID)
 	require.Error(t, err)

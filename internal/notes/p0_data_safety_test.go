@@ -382,8 +382,9 @@ func TestP0_C02_CreateFolder_DeterministicInterleaving_CallerAWinsDiskCallerBWin
 	// interleaving this test guards against is the cross-process one (two
 	// thornotes processes over one notes root and one database), so model that
 	// honestly: two Services, each with its own locks, over the shared repos.
-	svc := notes.NewService(noteRepo, hookRepo, searchRepo, journalRepo, st.svc.FileStore())
-	svcB := notes.NewService(noteRepo, hookRepo, searchRepo, journalRepo, st.svc.FileStore())
+	linkRepo := sqlite_repo.NewLinkRepo(st.pool.ReadDB, st.pool.WriteDB)
+	svc := notes.NewService(noteRepo, hookRepo, searchRepo, journalRepo, linkRepo, st.svc.FileStore())
+	svcB := notes.NewService(noteRepo, hookRepo, searchRepo, journalRepo, linkRepo, st.svc.FileStore())
 
 	var (
 		folderA, folderB *model.Folder

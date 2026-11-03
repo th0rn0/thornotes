@@ -14,6 +14,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/th0rn0/thornotes/internal/apperror"
 	"github.com/th0rn0/thornotes/internal/model"
+	"github.com/th0rn0/thornotes/internal/wikilinks"
 )
 
 // diskTree is one user's on-disk state as observed by a single walk, together
@@ -335,6 +336,7 @@ func (s *Service) reconcileUserFromDisk(ctx context.Context, user *model.User) (
 			FolderID:    folderID,
 			Title:       title,
 			Slug:        slug,
+			TitleKey:    wikilinks.NormalizeKey(title),
 			DiskPath:    diskPath,
 			Content:     content,
 			ContentHash: hash,
@@ -374,6 +376,14 @@ func (s *Service) reconcileUserFromDisk(ctx context.Context, user *model.User) (
 		mu.Unlock()
 		rec.ContentHash = hash
 		result.NotesUpdated++
+	}
+
+	// 10. Rebuild the link graph for the user. Backfills title keys (migration
+	// 008 leaves them empty) and recomputes every note's outgoing edges, so
+	// edits made in an external editor (vim) are reflected on the next watch
+	// tick or startup reconcile.
+	if err := s.reindexUserLinks(ctx, user); err != nil {
+		log.Warn().Err(err).Int64("user_id", user.ID).Msg("reconcile: reindex links")
 	}
 
 	return result, nil

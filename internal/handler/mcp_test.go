@@ -2217,12 +2217,13 @@ func TestMCP_ReadOnlyToken_AllowsReadTools(t *testing.T) {
 		{"find_folders", map[string]interface{}{"query": "scope-leak-check"}},
 		{"find_notes_by_tag", map[string]interface{}{"tags": []string{"scope-leak-check"}}},
 		{"list_tags", map[string]interface{}{}},
+		{"get_links", map[string]interface{}{"id": 1}},
 	}
 	// Sentinel symmetric with RejectsAllWriteTools — keep in sync with the
 	// read-tool dispatch cases in mcp.go. If a new read tool is added without
 	// updating this table the gate-precision contract is no longer fully
 	// pinned for that tool, so this assertion fails to force the update.
-	require.Len(t, cases, 7, "read-tool count drifted — sync this table with mcp.go read-tool dispatch")
+	require.Len(t, cases, 8, "read-tool count drifted — sync this table with mcp.go read-tool dispatch")
 
 	id := 200
 	for _, tc := range cases {

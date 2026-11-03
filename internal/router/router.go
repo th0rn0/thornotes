@@ -137,6 +137,8 @@ func New(
 		notesGroup.GET("/all", notesH.ListAll)
 		notesGroup.GET("/context", notesH.Context)
 		notesGroup.GET("/:id", notesH.Get)
+		notesGroup.GET("/:id/links", notesH.Links)
+		notesGroup.GET("/:id/backlinks", notesH.Backlinks)
 		notesGroup.PATCH("/:id", csrfMW, notesH.Patch)
 		notesGroup.PATCH("/:id/move", csrfMW, notesH.Move)
 		notesGroup.DELETE("/:id", csrfMW, notesH.Delete)

@@ -28,10 +28,10 @@ func (r *NoteRepo) Create(ctx context.Context, n *model.Note) (*model.Note, erro
 
 	var id int64
 	err = r.writeDB.QueryRowContext(ctx, `
-		INSERT INTO notes (user_id, folder_id, title, slug, disk_path, content, content_hash, tags)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO notes (user_id, folder_id, title, slug, title_key, disk_path, content, content_hash, tags)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		RETURNING id`,
-		n.UserID, n.FolderID, n.Title, n.Slug, n.DiskPath, n.Content, n.ContentHash, string(tagsJSON),
+		n.UserID, n.FolderID, n.Title, n.Slug, n.TitleKey, n.DiskPath, n.Content, n.ContentHash, string(tagsJSON),
 	).Scan(&id)
 	if err != nil {
 		if isUniqueConstraint(err) {
@@ -45,7 +45,7 @@ func (r *NoteRepo) Create(ctx context.Context, n *model.Note) (*model.Note, erro
 
 func (r *NoteRepo) GetByID(ctx context.Context, userID, noteID int64) (*model.Note, error) {
 	return r.scanNote(r.readDB.QueryRowContext(ctx, `
-		SELECT id, user_id, folder_id, title, slug, disk_path, content, content_hash,
+		SELECT id, user_id, folder_id, title, slug, title_key, disk_path, content, content_hash,
 		       tags, share_token, fts_synced_at, created_at, updated_at
 		FROM notes WHERE id = ? AND user_id = ?`, noteID, userID))
 }
@@ -53,7 +53,7 @@ func (r *NoteRepo) GetByID(ctx context.Context, userID, noteID int64) (*model.No
 func (r *NoteRepo) GetByShareToken(ctx context.Context, token string) (*model.Note, error) {
 	// Share token lookup doesn't require user_id — it's public by design.
 	return r.scanNote(r.readDB.QueryRowContext(ctx, `
-		SELECT id, user_id, folder_id, title, slug, disk_path, content, content_hash,
+		SELECT id, user_id, folder_id, title, slug, title_key, disk_path, content, content_hash,
 		       tags, share_token, fts_synced_at, created_at, updated_at
 		FROM notes WHERE share_token = ?`, token))
 }
@@ -61,13 +61,13 @@ func (r *NoteRepo) GetByShareToken(ctx context.Context, token string) (*model.No
 func (r *NoteRepo) GetByFolderAndSlug(ctx context.Context, userID int64, folderID *int64, slug string) (*model.Note, error) {
 	if folderID == nil {
 		return r.scanNote(r.readDB.QueryRowContext(ctx, `
-			SELECT id, user_id, folder_id, title, slug, disk_path, content, content_hash,
+			SELECT id, user_id, folder_id, title, slug, title_key, disk_path, content, content_hash,
 			       tags, share_token, fts_synced_at, created_at, updated_at
 			FROM notes WHERE user_id = ? AND folder_id IS NULL AND slug = ?`,
 			userID, slug))
 	}
 	return r.scanNote(r.readDB.QueryRowContext(ctx, `
-		SELECT id, user_id, folder_id, title, slug, disk_path, content, content_hash,
+		SELECT id, user_id, folder_id, title, slug, title_key, disk_path, content, content_hash,
 		       tags, share_token, fts_synced_at, created_at, updated_at
 		FROM notes WHERE user_id = ? AND folder_id = ? AND slug = ?`,
 		userID, *folderID, slug))
@@ -151,9 +151,9 @@ func (r *NoteRepo) Update(ctx context.Context, n *model.Note) error {
 	}
 
 	res, err := r.writeDB.ExecContext(ctx, `
-		UPDATE notes SET title = ?, slug = ?, disk_path = ?, tags = ?, updated_at = datetime('now')
+		UPDATE notes SET title = ?, slug = ?, title_key = ?, disk_path = ?, tags = ?, updated_at = datetime('now')
 		WHERE id = ? AND user_id = ?`,
-		n.Title, n.Slug, n.DiskPath, string(tagsJSON), n.ID, n.UserID,
+		n.Title, n.Slug, n.TitleKey, n.DiskPath, string(tagsJSON), n.ID, n.UserID,
 	)
 	if err != nil {
 		if isUniqueConstraint(err) {
@@ -194,6 +194,20 @@ func (r *NoteRepo) UpdateContent(ctx context.Context, userID, noteID int64, cont
 			return apperror.ErrNotFound
 		}
 		return apperror.ErrConflict
+	}
+	return nil
+}
+
+func (r *NoteRepo) SetTitleKey(ctx context.Context, userID, noteID int64, titleKey string) error {
+	res, err := r.writeDB.ExecContext(ctx,
+		`UPDATE notes SET title_key = ? WHERE id = ? AND user_id = ?`,
+		titleKey, noteID, userID,
+	)
+	if err != nil {
+		return fmt.Errorf("set title key: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return apperror.ErrNotFound
 	}
 	return nil
 }
@@ -245,13 +259,13 @@ func (r *NoteRepo) ListForContext(ctx context.Context, userID int64, folderID *i
 	)
 	if folderID == nil {
 		rows, err = r.readDB.QueryContext(ctx, `
-			SELECT id, user_id, folder_id, title, slug, disk_path, content, content_hash,
+			SELECT id, user_id, folder_id, title, slug, title_key, disk_path, content, content_hash,
 			       tags, share_token, fts_synced_at, created_at, updated_at
 			FROM notes WHERE user_id = ?
 			ORDER BY updated_at DESC`, userID)
 	} else {
 		rows, err = r.readDB.QueryContext(ctx, `
-			SELECT id, user_id, folder_id, title, slug, disk_path, content, content_hash,
+			SELECT id, user_id, folder_id, title, slug, title_key, disk_path, content, content_hash,
 			       tags, share_token, fts_synced_at, created_at, updated_at
 			FROM notes WHERE user_id = ? AND folder_id = ?
 			ORDER BY updated_at DESC`, userID, *folderID)
@@ -269,7 +283,7 @@ func scanNotes(rows *sql.Rows) ([]*model.Note, error) {
 		n := &model.Note{}
 		var tagsJSON string
 		if err := rows.Scan(
-			&n.ID, &n.UserID, &n.FolderID, &n.Title, &n.Slug, &n.DiskPath,
+			&n.ID, &n.UserID, &n.FolderID, &n.Title, &n.Slug, &n.TitleKey, &n.DiskPath,
 			&n.Content, &n.ContentHash, &tagsJSON, &n.ShareToken,
 			&n.FtsSyncedAt, &n.CreatedAt, &n.UpdatedAt,
 		); err != nil {
@@ -287,7 +301,7 @@ func (r *NoteRepo) scanNote(row *sql.Row) (*model.Note, error) {
 	n := &model.Note{}
 	var tagsJSON string
 	err := row.Scan(
-		&n.ID, &n.UserID, &n.FolderID, &n.Title, &n.Slug, &n.DiskPath,
+		&n.ID, &n.UserID, &n.FolderID, &n.Title, &n.Slug, &n.TitleKey, &n.DiskPath,
 		&n.Content, &n.ContentHash, &tagsJSON, &n.ShareToken,
 		&n.FtsSyncedAt, &n.CreatedAt, &n.UpdatedAt,
 	)

@@ -41,7 +41,7 @@ func buildHandler(t *testing.T) http.Handler {
 	apiTokenRepo := sqlite.NewAPITokenRepo(pool.ReadDB, pool.WriteDB)
 
 	authSvc := auth.NewServiceForTest(userRepo, sessionRepo, true)
-	notesSvc := notes.NewService(noteRepo, folderRepo, searchRepo, sqlite.NewJournalRepo(pool.ReadDB, pool.WriteDB), fs)
+	notesSvc := notes.NewService(noteRepo, folderRepo, searchRepo, sqlite.NewJournalRepo(pool.ReadDB, pool.WriteDB), sqlite.NewLinkRepo(pool.ReadDB, pool.WriteDB), fs)
 	rateLimiter := security.NewAuthRateLimiter(nil)
 	t.Cleanup(rateLimiter.Stop)
 
@@ -148,10 +148,11 @@ func TestRouter_Healthz_DBError(t *testing.T) {
 	searchRepo := sqlite.NewSearchRepo(pool.ReadDB, pool.WriteDB)
 	apiTokenRepo := sqlite.NewAPITokenRepo(pool.ReadDB, pool.WriteDB)
 	journalRepo := sqlite.NewJournalRepo(pool.ReadDB, pool.WriteDB)
+	linkRepo := sqlite.NewLinkRepo(pool.ReadDB, pool.WriteDB)
 	authSvc := auth.NewService(userRepo, sessionRepo, false)
 	fs, err := notes.NewFileStore(t.TempDir())
 	require.NoError(t, err)
-	notesSvc := notes.NewService(noteRepo, folderRepo, searchRepo, journalRepo, fs)
+	notesSvc := notes.NewService(noteRepo, folderRepo, searchRepo, journalRepo, linkRepo, fs)
 	tmpl, err := template.ParseFS(thornotes.TemplatesFS, "web/templates/*.html")
 	require.NoError(t, err)
 	rateLimiter := security.NewAuthRateLimiter(nil)

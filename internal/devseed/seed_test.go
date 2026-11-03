@@ -35,10 +35,11 @@ func newStack(t *testing.T) (*auth.Service, *notes.Service, *sqliterepo.UserRepo
 	noteRepo := sqliterepo.NewNoteRepo(pool.ReadDB, pool.WriteDB)
 	searchRepo := sqliterepo.NewSearchRepo(pool.ReadDB, pool.WriteDB)
 	journalRepo := sqliterepo.NewJournalRepo(pool.ReadDB, pool.WriteDB)
+	linkRepo := sqliterepo.NewLinkRepo(pool.ReadDB, pool.WriteDB)
 
 	// NewServiceForTest uses bcrypt.MinCost so Register is fast in tests.
 	authSvc := auth.NewServiceForTest(userRepo, sessionRepo, true)
-	notesSvc := notes.NewService(noteRepo, folderRepo, searchRepo, journalRepo, fs)
+	notesSvc := notes.NewService(noteRepo, folderRepo, searchRepo, journalRepo, linkRepo, fs)
 	return authSvc, notesSvc, userRepo
 }
 
