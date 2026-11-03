@@ -30,11 +30,14 @@ type Folder struct {
 }
 
 type Note struct {
-	ID          int64      `json:"id"`
-	UserID      int64      `json:"-"`
-	FolderID    *int64     `json:"folder_id"`
-	Title       string     `json:"title"`
-	Slug        string     `json:"slug"`
+	ID       int64  `json:"id"`
+	UserID   int64  `json:"-"`
+	FolderID *int64 `json:"folder_id"`
+	Title    string `json:"title"`
+	Slug     string `json:"slug"`
+	// TitleKey is the normalized lookup key for Title (NFC, entity-decoded,
+	// dash-folded, case-folded). Computed in Go; used for link resolution.
+	TitleKey    string     `json:"-"`
 	DiskPath    string     `json:"disk_path"`
 	Content     string     `json:"content"`
 	ContentHash string     `json:"content_hash"`
@@ -118,6 +121,39 @@ type APIToken struct {
 	// folders (whitelist mode). When empty, the token uses Scope globally.
 	// A nil FolderID represents a permission on the root (unfiled) area.
 	FolderPermissions []TokenFolderPermission `json:"folder_permissions,omitempty"`
+}
+
+// NoteLink is one row in note_links — a resolved outgoing [[link]] edge.
+type NoteLink struct {
+	ID         int64      `json:"id"`
+	UserID     int64      `json:"-"`
+	FromNoteID int64      `json:"from_note_id"`
+	ToNoteID   *int64     `json:"to_note_id"` // nil = unresolved/broken
+	RawTarget  string     `json:"raw_target"`
+	TargetHash string     `json:"target_hash"` // sha256(NormalizeKey(target))
+	Anchor     string     `json:"anchor"`
+	LinkText   string     `json:"link_text"`
+	Ambiguous  bool       `json:"ambiguous"`
+	ResolvedAt *time.Time `json:"resolved_at,omitempty"`
+	CreatedAt  time.Time  `json:"created_at"`
+}
+
+// Backlink is an inbound edge, enriched with the source note's title and
+// folder for display ("what links here").
+type Backlink struct {
+	FromNoteID   int64  `json:"from_note_id"`
+	FromTitle    string `json:"from_title"`
+	FromFolderID *int64 `json:"from_folder_id"`
+	Anchor       string `json:"anchor"`
+	LinkText     string `json:"link_text"`
+}
+
+// InboundLink is an inbound edge targeted for re-resolution after a rename.
+type InboundLink struct {
+	ID           int64
+	FromNoteID   int64
+	FromFolderID *int64
+	RawTarget    string
 }
 
 // TokenFolderPermission grants a single API token permission on one folder.

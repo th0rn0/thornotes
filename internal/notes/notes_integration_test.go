@@ -50,7 +50,7 @@ func newTestStackFull(t *testing.T) *serviceStack {
 	user, err := userRepo.Create(ctx, "testuser", "$2a$12$fakehash0000000000000000000000000000000000000000000000", "test-uuid")
 	require.NoError(t, err)
 
-	svc := notes.NewService(noteRepo, folderRepo, searchRepo, sqlite_repo.NewJournalRepo(pool.ReadDB, pool.WriteDB), fs)
+	svc := notes.NewService(noteRepo, folderRepo, searchRepo, sqlite_repo.NewJournalRepo(pool.ReadDB, pool.WriteDB), sqlite_repo.NewLinkRepo(pool.ReadDB, pool.WriteDB), fs)
 	return &serviceStack{svc: svc, user: user, userID: user.ID, pool: pool, notesDir: fsDir}
 }
 
@@ -74,7 +74,7 @@ func newTestStack(t *testing.T) (svc *notes.Service, userID int64) {
 	user, err := userRepo.Create(ctx, "testuser", "$2a$12$fakehash0000000000000000000000000000000000000000000000", "test-uuid")
 	require.NoError(t, err)
 
-	svc = notes.NewService(noteRepo, folderRepo, searchRepo, sqlite_repo.NewJournalRepo(pool.ReadDB, pool.WriteDB), fs)
+	svc = notes.NewService(noteRepo, folderRepo, searchRepo, sqlite_repo.NewJournalRepo(pool.ReadDB, pool.WriteDB), sqlite_repo.NewLinkRepo(pool.ReadDB, pool.WriteDB), fs)
 	return svc, user.ID
 }
 
@@ -506,7 +506,7 @@ func TestService_Reconcile(t *testing.T) {
 	user, err := userRepo.Create(ctx, "testuser2", "$2a$12$fakehash0000000000000000000000000000000000000000000000", "test-uuid")
 	require.NoError(t, err)
 
-	svc := notes.NewService(noteRepo, folderRepo, searchRepo, sqlite_repo.NewJournalRepo(pool.ReadDB, pool.WriteDB), fs)
+	svc := notes.NewService(noteRepo, folderRepo, searchRepo, sqlite_repo.NewJournalRepo(pool.ReadDB, pool.WriteDB), sqlite_repo.NewLinkRepo(pool.ReadDB, pool.WriteDB), fs)
 
 	note, err := svc.CreateNote(ctx, user.ID, "test-uuid", nil, "Reconcile Test", nil)
 	require.NoError(t, err)
@@ -560,7 +560,7 @@ func TestService_Reconcile_MissingFile(t *testing.T) {
 	user, err := userRepo.Create(ctx, "testuser3", "$2a$12$fakehash000000000000000000000000000000000000000000000", "test-uuid")
 	require.NoError(t, err)
 
-	svc := notes.NewService(noteRepo, folderRepo, searchRepo, sqlite_repo.NewJournalRepo(pool.ReadDB, pool.WriteDB), fs)
+	svc := notes.NewService(noteRepo, folderRepo, searchRepo, sqlite_repo.NewJournalRepo(pool.ReadDB, pool.WriteDB), sqlite_repo.NewLinkRepo(pool.ReadDB, pool.WriteDB), fs)
 
 	note, err := svc.CreateNote(ctx, user.ID, "test-uuid", nil, "Note Missing File", nil)
 	require.NoError(t, err)

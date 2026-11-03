@@ -35,6 +35,7 @@ type Service struct {
 	folders   repository.FolderRepository
 	search    repository.SearchRepository
 	journals  repository.JournalRepository
+	links     repository.LinkRepository
 	fs        *FileStore
 	noteLocks [noteLockStripes]sync.Mutex
 
@@ -72,6 +73,7 @@ func NewService(
 	folders repository.FolderRepository,
 	search repository.SearchRepository,
 	journals repository.JournalRepository,
+	links repository.LinkRepository,
 	fs *FileStore,
 ) *Service {
 	return &Service{
@@ -79,6 +81,7 @@ func NewService(
 		folders:  folders,
 		search:   search,
 		journals: journals,
+		links:    links,
 		fs:       fs,
 
 		reconcileMaxDeleteRatio: DefaultReconcileMaxDeleteRatio,

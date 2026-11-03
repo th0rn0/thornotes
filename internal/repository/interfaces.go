@@ -61,6 +61,9 @@ type NoteRepository interface {
 	ListForContext(ctx context.Context, userID int64, folderID *int64) ([]*model.Note, error)
 	Update(ctx context.Context, n *model.Note) error
 	UpdateContent(ctx context.Context, userID, noteID int64, content, contentHash, expectedHash string) error
+	// SetTitleKey updates a note's normalized title key (link-resolution index,
+	// backfilled on reconcile).
+	SetTitleKey(ctx context.Context, userID, noteID int64, titleKey string) error
 	// Move updates the note's folder_id and disk_path (used when reparenting via drag-and-drop).
 	Move(ctx context.Context, userID, noteID int64, newFolderID *int64, newDiskPath string) error
 	Delete(ctx context.Context, userID, noteID int64) error
@@ -100,4 +103,26 @@ type SearchRepository interface {
 	Search(ctx context.Context, userID int64, query string, tags []string) ([]*model.SearchResult, error)
 	// SyncNote explicitly brings a note's FTS entry up to date.
 	SyncNote(ctx context.Context, noteID int64) error
+}
+
+// LinkRepository persists and queries the resolved link graph (note_links).
+type LinkRepository interface {
+	// ReplaceLinks atomically replaces all outgoing edges of fromNoteID with
+	// edges (delete-then-insert). Callers hold the per-note lock.
+	ReplaceLinks(ctx context.Context, userID, fromNoteID int64, edges []model.NoteLink) error
+	// DeleteForUser removes every note_links row owned by userID (full-reindex prep).
+	DeleteForUser(ctx context.Context, userID int64) error
+	// ListOutgoing returns the outgoing edges of a note.
+	ListOutgoing(ctx context.Context, userID, noteID int64) ([]model.NoteLink, error)
+	// ListBacklinks returns inbound edges (to_note_id = noteID) enriched with
+	// the source note's title and folder.
+	ListBacklinks(ctx context.Context, userID, noteID int64) ([]model.Backlink, error)
+	// ListByTargetHash returns edges whose target_hash matches (edge_key lookup).
+	ListByTargetHash(ctx context.Context, userID int64, targetHash string) ([]model.NoteLink, error)
+	// ListInboundForRename returns inbound edges (to_note_id = noteID) with the
+	// source note's folder, for re-resolution after a title rename.
+	ListInboundForRename(ctx context.Context, userID, noteID int64) ([]model.InboundLink, error)
+	// UpdateResolution updates an edge's to_note_id, ambiguous flag and
+	// resolved_at (rename re-resolution).
+	UpdateResolution(ctx context.Context, userID, linkID int64, toNoteID *int64, ambiguous bool) error
 }

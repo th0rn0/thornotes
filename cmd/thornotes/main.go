@@ -68,6 +68,7 @@ func main() {
 		searchRepo   repository.SearchRepository
 		apiTokenRepo repository.APITokenRepository
 		journalRepo  repository.JournalRepository
+		linkRepo     repository.LinkRepository
 	)
 
 	switch strings.ToLower(cfg.DBDriver) {
@@ -79,6 +80,7 @@ func main() {
 		searchRepo = mysqlrepo.NewSearchRepo(pool.WriteDB)
 		apiTokenRepo = mysqlrepo.NewAPITokenRepo(pool.WriteDB)
 		journalRepo = mysqlrepo.NewJournalRepo(pool.WriteDB)
+		linkRepo = mysqlrepo.NewLinkRepo(pool.WriteDB)
 	default:
 		userRepo = sqlite.NewUserRepo(pool.WriteDB)
 		sessionRepo = sqlite.NewSessionRepo(pool.WriteDB)
@@ -87,6 +89,7 @@ func main() {
 		searchRepo = sqlite.NewSearchRepo(pool.ReadDB, pool.WriteDB)
 		apiTokenRepo = sqlite.NewAPITokenRepo(pool.ReadDB, pool.WriteDB)
 		journalRepo = sqlite.NewJournalRepo(pool.ReadDB, pool.WriteDB)
+		linkRepo = sqlite.NewLinkRepo(pool.ReadDB, pool.WriteDB)
 	}
 
 	// Backfill UUIDs for any users created before v1.4.0.0.
@@ -120,7 +123,7 @@ func main() {
 
 	// Build services.
 	authSvc := auth.NewService(userRepo, sessionRepo, cfg.AllowRegistration)
-	notesSvc := notes.NewService(noteRepo, folderRepo, searchRepo, journalRepo, fs)
+	notesSvc := notes.NewService(noteRepo, folderRepo, searchRepo, journalRepo, linkRepo, fs)
 	applyReconcileGuardFromEnv(notesSvc)
 
 	// Development-only: seed a dev user + folder tree + ~100 notes.
