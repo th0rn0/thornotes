@@ -2,7 +2,10 @@ package notes
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io/fs"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -12,6 +15,45 @@ import (
 	"github.com/th0rn0/thornotes/internal/apperror"
 	"github.com/th0rn0/thornotes/internal/model"
 )
+
+// diskTree is one user's on-disk state as observed by a single walk, together
+// with what the walk could not observe.
+//
+// The distinction that matters is absence versus ignorance. `folders` and
+// `notes` are only populated for paths whose state was positively determined;
+// `unknown` records the paths whose state could not be (a stat/read error such
+// as EACCES or EIO, a directory that could not be listed, or a non-regular file
+// we refuse to treat as a note). A DB row may only be deleted when the disk
+// says its file is *gone* — never when the disk merely failed to answer.
+type diskTree struct {
+	folders map[string]struct{}
+	notes   map[string]string
+	unknown []string
+	root    rootState
+	// skippedNonRegular counts entries that exist on disk but are not files we
+	// index (symlinks, sockets, fifos, devices). They are also recorded as
+	// unknown so no row is deleted for them; the count exists so a vault full of
+	// links does not silently look like a vault with missing notes.
+	skippedNonRegular int
+}
+
+// rootState is what the walk learned about the user's own directory.
+type rootState struct {
+	exists   bool
+	readable bool
+	empty    bool
+}
+
+// isUnknown reports whether rel is, or is underneath, a path whose state could
+// not be determined.
+func (t diskTree) isUnknown(rel string) bool {
+	for _, u := range t.unknown {
+		if rel == u || strings.HasPrefix(rel, u+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
+}
 
 // reconcileResult summarises what the reconciler did for a user. It is the
 // return value of reconcileUserFromDisk and the input to the watcher's
@@ -24,6 +66,7 @@ type reconcileResult struct {
 	FoldersCreated    int
 	FoldersDeleted    int
 	FoldersRepaired   int
+	SkippedNonRegular int
 }
 
 // total returns the total number of disk-vs-DB drift events repaired.
@@ -52,11 +95,24 @@ func (s *Service) reconcileUserFromDisk(ctx context.Context, user *model.User) (
 	if user.UUID == "" {
 		return result, nil
 	}
+	// The whole pass is a path-changing subtree operation: it creates, moves
+	// and deletes files. Holding the exclusive lock means a concurrent note
+	// write cannot observe a half-reconciled tree, and the pass cannot race a
+	// folder rename.
+	defer s.lockTreeExclusive(user.ID)()
 
 	// 1. Walk disk.
-	diskFolders, diskNotes, err := s.walkUserTree(user.UUID)
+	tree, err := s.walkUserTree(user.UUID)
 	if err != nil {
 		return result, err
+	}
+	diskFolders, diskNotes := tree.folders, tree.notes
+	result.SkippedNonRegular = tree.skippedNonRegular
+	if tree.skippedNonRegular > 0 {
+		log.Warn().
+			Int("skipped", tree.skippedNonRegular).
+			Int64("user_id", user.ID).
+			Msg("reconcile: entries skipped — symlinks and other non-regular files are not indexed")
 	}
 
 	// 2. Load DB state.
@@ -78,6 +134,16 @@ func (s *Service) reconcileUserFromDisk(ctx context.Context, user *model.User) (
 	dbNotesByPath := make(map[string]*model.NoteWatchRecord, len(dbNotes))
 	for _, n := range dbNotes {
 		dbNotesByPath[n.DiskPath] = n
+	}
+
+	// 2b. Mount precondition. A missing or unreadable notes root is not a user
+	//     with no notes: it is an instance that cannot see its own storage. If
+	//     the index holds rows, refuse the pass outright rather than converging
+	//     to a "truth" that would delete every note, tag and share token while
+	//     the files sit intact on a volume that simply is not mounted.
+	if err := s.checkRootPrecondition(user, tree, len(dbNotes), len(dbFolders)); err != nil {
+		logAbort(user.ID, s.fs.notesRoot, err)
+		return result, err
 	}
 
 	// 3. Repair stale folder disk_paths. A folder is "stale" when its DB
@@ -143,11 +209,45 @@ func (s *Service) reconcileUserFromDisk(ctx context.Context, user *model.User) (
 		result.NotesPathRepaired++
 	}
 
-	// 5. Delete DB notes still missing on disk after repair. Do this before
-	//    folder delete so child notes are gone first (folder.notes.folder_id
-	//    is ON DELETE SET NULL otherwise).
-	for diskPath, n := range dbNotesByPath {
+	// 5. Decide what to delete, then guard the decision before applying it.
+	//    A row is only deletable when the disk positively reports its path
+	//    gone; a path the walk could not read is unknown, and unknown is never
+	//    absent.
+	noteDeletePaths := make([]string, 0, len(dbNotesByPath))
+	for diskPath := range dbNotesByPath {
 		if _, ok := diskNotes[diskPath]; ok {
+			continue
+		}
+		if tree.isUnknown(diskPath) {
+			log.Warn().Int64("note_id", dbNotesByPath[diskPath].ID).Str("disk_path", diskPath).
+				Msg("reconcile: note path unreadable or unverifiable — keeping DB row")
+			continue
+		}
+		noteDeletePaths = append(noteDeletePaths, diskPath)
+	}
+	folderDeletePaths := make([]string, 0, len(dbFoldersByPath))
+	for p := range dbFoldersByPath {
+		if _, ok := diskFolders[p]; ok {
+			continue
+		}
+		if tree.isUnknown(p) {
+			log.Warn().Int64("folder_id", dbFoldersByPath[p].ID).Str("disk_path", p).
+				Msg("reconcile: folder path unreadable or unverifiable — keeping DB row")
+			continue
+		}
+		folderDeletePaths = append(folderDeletePaths, p)
+	}
+	if err := s.checkDeletionBudget(user, len(dbNotes), noteDeletePaths); err != nil {
+		logAbort(user.ID, s.fs.notesRoot, err)
+		return result, err
+	}
+
+	// 5b. Delete DB notes whose files are gone. Before folder delete so child
+	//     notes are gone first (folder.notes.folder_id is ON DELETE SET NULL
+	//     otherwise).
+	for _, diskPath := range noteDeletePaths {
+		n := dbNotesByPath[diskPath]
+		if n == nil {
 			continue
 		}
 		if err := s.notes.Delete(ctx, user.ID, n.ID); err != nil {
@@ -160,19 +260,14 @@ func (s *Service) reconcileUserFromDisk(ctx context.Context, user *model.User) (
 
 	// 6. Delete DB folders still missing on disk after repair. Walk deepest
 	//    first so children are gone before parents.
-	missingFolderPaths := make([]string, 0)
-	for p, f := range dbFoldersByPath {
-		if _, ok := diskFolders[p]; ok {
+	sort.Slice(folderDeletePaths, func(i, j int) bool {
+		return pathDepth(folderDeletePaths[i]) > pathDepth(folderDeletePaths[j])
+	})
+	for _, p := range folderDeletePaths {
+		f := dbFoldersByPath[p]
+		if f == nil {
 			continue
 		}
-		_ = f
-		missingFolderPaths = append(missingFolderPaths, p)
-	}
-	sort.Slice(missingFolderPaths, func(i, j int) bool {
-		return pathDepth(missingFolderPaths[i]) > pathDepth(missingFolderPaths[j])
-	})
-	for _, p := range missingFolderPaths {
-		f := dbFoldersByPath[p]
 		if err := s.folders.Delete(ctx, user.ID, f.ID); err != nil {
 			log.Warn().Err(err).Int64("folder_id", f.ID).Str("disk_path", p).Msg("reconcile: delete missing folder")
 			continue
@@ -284,62 +379,190 @@ func (s *Service) reconcileUserFromDisk(ctx context.Context, user *model.User) (
 	return result, nil
 }
 
-// walkUserTree returns:
-//   - the set of folder disk_paths found under the user's UUID directory
-//     (relative to notesRoot),
-//   - a map of note disk_path → file content for every .md file.
+// checkRootPrecondition implements the C-03 mount precondition: a notes root
+// that cannot be seen must never be read as a user who has no notes.
+func (s *Service) checkRootPrecondition(user *model.User, tree diskTree, dbNoteCount, dbFolderCount int) error {
+	if dbNoteCount == 0 && dbFolderCount == 0 {
+		return nil // nothing to lose, and nothing to be wrong about
+	}
+	if !tree.root.exists {
+		return fmt.Errorf(
+			"%w: notes root %q for user %d is missing, but the index holds %d notes and %d folders — a missing mount is not an empty one; restore the mount and reconcile again",
+			ErrReconcileAborted, s.fs.notesRoot, user.ID, dbNoteCount, dbFolderCount)
+	}
+	if !tree.root.readable {
+		return fmt.Errorf(
+			"%w: notes root %q for user %d is unreadable, but the index holds %d notes and %d folders — unreadable is unknown, not absent",
+			ErrReconcileAborted, s.fs.notesRoot, user.ID, dbNoteCount, dbFolderCount)
+	}
+	// An empty-but-present root is ambiguous: it is the signature of a mount
+	// that came up empty, and also of a user who deleted their last note. Only
+	// the second is legitimate, and it cannot plausibly involve a burst of rows,
+	// so the same floor the circuit breaker uses settles it.
+	if dbNoteCount >= s.reconcileMinDeleteTrips && tree.root.empty {
+		return fmt.Errorf(
+			"%w: notes root %q for user %d is empty, but the index holds %d notes — refusing to converge a populated index to an empty directory",
+			ErrReconcileAborted, s.fs.notesRoot, user.ID, dbNoteCount)
+	}
+	return nil
+}
+
+// checkDeletionBudget is the deletion circuit breaker. The mount precondition
+// catches a wholly absent root; this catches the partial disasters — half a
+// tree unmounted, an rsync that dropped a directory, a chmod that hid one
+// subtree — where the pass would delete a large minority rather than all of it.
+func (s *Service) checkDeletionBudget(user *model.User, totalNotes int, noteDeletes []string) error {
+	if len(noteDeletes) == 0 || totalNotes == 0 {
+		return nil
+	}
+	if len(noteDeletes) < s.reconcileMinDeleteTrips {
+		return nil // ordinary small edits (and small accounts) reconcile normally
+	}
+	limit := int(math.Floor(s.reconcileMaxDeleteRatio * float64(totalNotes)))
+	if len(noteDeletes) <= limit {
+		return nil
+	}
+	pct := 100 * float64(len(noteDeletes)) / float64(totalNotes)
+	sort.Strings(noteDeletes) // deterministic logs
+	log.Error().
+		Int64("user_id", user.ID).
+		Int("would_delete", len(noteDeletes)).
+		Int("total_notes", totalNotes).
+		Float64("percent", math.Round(pct)).
+		Float64("configured_max_percent", s.reconcileMaxDeleteRatio*100).
+		Strs("would_delete_paths", noteDeletes).
+		Msg("reconcile: deletion circuit breaker tripped — these rows would have been deleted")
+	return fmt.Errorf(
+		"%w: this pass would delete %d of %d notes (%.0f%%, over the configured %.0f%% guard); nothing was deleted — check the volume before reconciling",
+		ErrReconcileAborted, len(noteDeletes), totalNotes, pct, s.reconcileMaxDeleteRatio*100)
+}
+
+// walkUserTree returns the user's on-disk folders and note contents, plus the
+// paths whose state could not be determined.
 //
 // Hidden directories (anything starting with ".") and the FileStore's own
-// ".thornotes-*.tmp" write-temps are skipped. A missing user directory is
-// not an error: an empty result lets the reconciler delete every DB row for
-// the user and converge to the empty truth on disk.
-func (s *Service) walkUserTree(userUUID string) (map[string]struct{}, map[string]string, error) {
-	folders := map[string]struct{}{}
-	notes := map[string]string{}
+// ".thornotes-*.tmp" write-temps are skipped. A missing user directory yields
+// an empty tree with root.exists = false; the caller decides what that means,
+// because a missing directory is a data-loss signal whenever the index is not
+// empty. Read errors never produce "absent": they produce an unknown path that
+// the reconciler refuses to delete against.
+func (s *Service) walkUserTree(userUUID string) (diskTree, error) {
+	tree := diskTree{folders: map[string]struct{}{}, notes: map[string]string{}}
 	rootAbs, err := s.fs.safePath(userUUID)
 	if err != nil {
-		return folders, notes, err
+		if errors.Is(err, apperror.ErrPathTraversal) {
+			// A symlink in the root's own path is a configuration problem or an
+			// attack, not a transient blip: fail loudly.
+			return tree, err
+		}
+		// A permission or I/O error resolving the root is unknown, not absent.
+		// Treat it like an unreadable root so the precondition decides.
+		tree.root = rootState{exists: true, readable: false}
+		tree.unknown = append(tree.unknown, userUUID)
+		log.Error().Err(err).Str("root", s.fs.notesRoot).Msg("reconcile: cannot resolve notes root — treating as unknown")
+		return tree, nil
 	}
+
+	// Probe the root explicitly: WalkDir reports a stat failure for the root as
+	// a plain error, and we need to distinguish "not there" from "cannot see".
+	info, statErr := os.Stat(rootAbs)
+	switch {
+	case statErr != nil && errors.Is(statErr, fs.ErrNotExist):
+		return tree, nil // absent — checkRootPrecondition decides if that is fatal
+	case statErr != nil:
+		tree.root = rootState{exists: true, readable: false}
+		tree.unknown = append(tree.unknown, userUUID)
+		log.Error().Err(statErr).Str("root", rootAbs).Msg("reconcile: notes root cannot be stat'ed — treating as unknown")
+		return tree, nil
+	case !info.IsDir():
+		tree.root = rootState{exists: true, readable: false}
+		tree.unknown = append(tree.unknown, userUUID)
+		log.Error().Str("root", rootAbs).Msg("reconcile: notes root is not a directory — treating as unknown")
+		return tree, nil
+	}
+
+	entries, readErr := os.ReadDir(rootAbs)
+	if readErr != nil {
+		tree.root = rootState{exists: true, readable: false}
+		tree.unknown = append(tree.unknown, userUUID)
+		log.Error().Err(readErr).Str("root", rootAbs).Msg("reconcile: notes root cannot be read — treating as unknown")
+		return tree, nil
+	}
+	tree.root = rootState{exists: true, readable: true, empty: len(entries) == 0}
+
 	walkErr := filepath.WalkDir(rootAbs, func(absPath string, d fs.DirEntry, err error) error {
-		if err != nil {
-			if os.IsNotExist(err) {
+		if absPath == rootAbs {
+			if err != nil {
+				// The root we just listed has become unreadable.
+				tree.root.readable = false
+				tree.unknown = append(tree.unknown, userUUID)
 				return filepath.SkipAll
 			}
-			return nil
-		}
-		if absPath == rootAbs {
 			return nil
 		}
 		rel, relErr := filepath.Rel(s.fs.notesRoot, absPath)
 		if relErr != nil {
 			return nil
 		}
+		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				// Genuinely gone (deleted between listing and stat): absent.
+				return nil
+			}
+			// EACCES, EIO, ELOOP, ENOTDIR …: we cannot know what is here.
+			tree.unknown = append(tree.unknown, rel)
+			log.Error().Err(err).Str("path", rel).Msg("reconcile: path unreadable — treating as unknown, rows under it are protected")
+			if d != nil && d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
 		name := d.Name()
 		if strings.HasPrefix(name, ".") {
+			// Dot-prefixed entries are not walked: the store keeps its own
+			// infrastructure there (.thornotes-trash, .thornotes-*.tmp). They are
+			// recorded as UNKNOWN rather than absent, so a user folder that was
+			// created before dot-prefixes were reserved cannot lose its rows on
+			// the first reconcile after an upgrade — the walk skips the subtree
+			// but every row under it survives.
+			tree.unknown = append(tree.unknown, rel)
 			if d.IsDir() {
 				return filepath.SkipDir
 			}
 			return nil
 		}
 		if d.IsDir() {
-			folders[rel] = struct{}{}
+			tree.folders[rel] = struct{}{}
+			return nil
+		}
+		if !d.Type().IsRegular() {
+			// Symlink, socket, fifo, device: not a note we own, and not evidence
+			// that any row's file is gone. Counted so the operator sees it —
+			// a synced vault full of links otherwise just looks like it has
+			// missing notes.
+			tree.unknown = append(tree.unknown, rel)
+			tree.skippedNonRegular++
+			log.Debug().Str("path", rel).Msg("reconcile: non-regular entry skipped — symlinks are not supported")
 			return nil
 		}
 		if !strings.HasSuffix(strings.ToLower(name), ".md") {
 			return nil
 		}
-		content, readErr := os.ReadFile(absPath)
+		// Read through the confined root so a leaf swapped for a symlink after
+		// the walk saw it cannot serve content from outside the tree.
+		content, readErr := s.fs.root.ReadFile(rel)
 		if readErr != nil {
-			log.Warn().Err(readErr).Str("path", rel).Msg("reconcile: read file")
+			tree.unknown = append(tree.unknown, rel)
+			log.Error().Err(readErr).Str("path", rel).Msg("reconcile: note unreadable — treating as unknown, DB row protected")
 			return nil
 		}
-		notes[rel] = string(content)
+		tree.notes[rel] = string(content)
 		return nil
 	})
-	if walkErr != nil && !os.IsNotExist(walkErr) {
-		return folders, notes, walkErr
+	if walkErr != nil && !errors.Is(walkErr, fs.ErrNotExist) {
+		return tree, walkErr
 	}
-	return folders, notes, nil
+	return tree, nil
 }
 
 // deriveTitle returns the first markdown H1 ("# Heading") line in content,

@@ -376,7 +376,14 @@ func TestP0_C02_CreateFolder_DeterministicInterleaving_CallerAWinsDiskCallerBWin
 	noteRepo := sqlite_repo.NewNoteRepo(st.pool.ReadDB, st.pool.WriteDB)
 	searchRepo := sqlite_repo.NewSearchRepo(st.pool.ReadDB, st.pool.WriteDB)
 	journalRepo := sqlite_repo.NewJournalRepo(st.pool.ReadDB, st.pool.WriteDB)
+
+	// H-10 added a per-Service tree lock, so two goroutines sharing one Service
+	// are serialised and can no longer interleave by construction. The
+	// interleaving this test guards against is the cross-process one (two
+	// thornotes processes over one notes root and one database), so model that
+	// honestly: two Services, each with its own locks, over the shared repos.
 	svc := notes.NewService(noteRepo, hookRepo, searchRepo, journalRepo, st.svc.FileStore())
+	svcB := notes.NewService(noteRepo, hookRepo, searchRepo, journalRepo, st.svc.FileStore())
 
 	var (
 		folderA, folderB *model.Folder
@@ -393,7 +400,7 @@ func TestP0_C02_CreateFolder_DeterministicInterleaving_CallerAWinsDiskCallerBWin
 		defer wg.Done()
 		// Wait until Caller A has created the directory on disk and entered folders.Create.
 		<-hookRepo.callerAInDB
-		folderB, errB = svc.CreateFolder(ctx, st.userID, st.user.UUID, nil, "Interleaved")
+		folderB, errB = svcB.CreateFolder(ctx, st.userID, st.user.UUID, nil, "Interleaved")
 	}()
 	wg.Wait()
 

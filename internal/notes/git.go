@@ -54,7 +54,7 @@ func writeGitIgnore(dir string) error {
 		return fmt.Errorf("write .gitignore: %w", err)
 	}
 	defer f.Close()
-	_, err = f.WriteString(".thornotes-*.tmp\n.thornotes-probe-*\n")
+	_, err = f.WriteString(".thornotes-*.tmp\n.thornotes-probe-*\n.thornotes-trash/\n")
 	return err
 }
 
