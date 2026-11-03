@@ -32,7 +32,7 @@ func (r *LinkRepo) ReplaceLinks(ctx context.Context, userID, fromNoteID int64, e
 	if err != nil {
 		return fmt.Errorf("replace links begin: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }() // no-op once the tx is committed
 
 	if _, err := tx.ExecContext(ctx, `DELETE FROM note_links WHERE user_id = ? AND from_note_id = ?`, userID, fromNoteID); err != nil {
 		return fmt.Errorf("replace links delete: %w", err)
