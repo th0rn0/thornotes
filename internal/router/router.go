@@ -35,6 +35,18 @@ func New(
 	r.Use(zerologAccessMiddleware())
 	r.Use(security.SecureHeadersMiddleware())
 
+	// Snapshot the static tree once so every asset URL the shell emits and
+	// every cache header it is served with agree. A failure here would mean
+	// the embed is broken; degrade to an empty version, which disables the
+	// immutable path and leaves everything on no-cache rather than pinning
+	// bytes that cannot be revalidated.
+	assets, err := indexAssets(staticFS)
+	if err != nil {
+		log.Error().Err(err).Msg("index static assets")
+		assets = &assetIndex{etags: map[string]string{}}
+	}
+	shell := assets.serveAppShell(tmpl)
+
 	r.NoRoute(func(c *gin.Context) {
 		p := c.Request.URL.Path
 		// API and MCP paths return JSON 404; everything else serves the app
@@ -44,11 +56,7 @@ func New(
 			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
 			return
 		}
-		c.Header("Content-Type", "text/html; charset=utf-8")
-		c.Writer.WriteHeader(http.StatusOK)
-		if err := tmpl.ExecuteTemplate(c.Writer, "app.html", nil); err != nil {
-			log.Error().Err(err).Msg("execute app template")
-		}
+		shell(c)
 	})
 
 	authH := handler.NewAuthHandler(authSvc, notesSvc, secureCookies)
@@ -72,23 +80,18 @@ func New(
 	healthH := handler.NewHealthHandler(dbHealth, handler.WithNotesRootChecker(notesSvc))
 	r.GET("/healthz", healthH.Check)
 
-	// Static files.
-	r.StaticFS("/static", staticFS)
+	// Static files. Cache headers depend on the ?v= asset version: only the
+	// current version is immutable (see serveStatic).
+	r.GET("/static/*filepath", assets.serveStatic(staticFS))
+	r.HEAD("/static/*filepath", assets.serveStatic(staticFS))
 
-	// Service worker must be served at root scope (not under /static/).
-	r.GET("/sw.js", func(c *gin.Context) {
-		c.Header("Cache-Control", "no-cache")
-		c.Header("Service-Worker-Allowed", "/")
-		c.FileFromFS("sw.js", staticFS)
-	})
+	// Service worker must be served at root scope (not under /static/), with
+	// the asset version substituted so its bytes change on every release.
+	r.GET("/sw.js", assets.serveServiceWorker(staticFS))
+	r.HEAD("/sw.js", assets.serveServiceWorker(staticFS))
 
-	// App shell.
-	r.GET("/", func(c *gin.Context) {
-		c.Header("Content-Type", "text/html; charset=utf-8")
-		if err := tmpl.ExecuteTemplate(c.Writer, "app.html", nil); err != nil {
-			log.Error().Err(err).Msg("execute app template")
-		}
-	})
+	// App shell — uncached, because it pins the asset URLs.
+	r.GET("/", shell)
 
 	// Public shared note view.
 	r.GET("/s/:token", shareH.View)

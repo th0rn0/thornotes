@@ -3,6 +3,7 @@ package thornotes
 import (
 	"bytes"
 	"html/template"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -30,7 +31,7 @@ func TestAppTemplate_SidebarCollapseArtifacts(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := tmpl.ExecuteTemplate(&buf, "app.html", nil); err != nil {
+	if err := tmpl.ExecuteTemplate(&buf, "app.html", struct{ AssetVersion string }{AssetVersion: "deadbeef"}); err != nil {
 		t.Fatalf("execute app.html: %v", err)
 	}
 	out := buf.String()
@@ -165,3 +166,33 @@ func TestAppTemplate_ShareTemplate_StillRenders(t *testing.T) {
 type mockTime struct{}
 
 func (mockTime) Format(_ string) string { return "Jan 1, 2026" }
+
+// TestAppTemplate_EveryStaticURLIsVersioned guards the cache-busting contract.
+// Every /static/ reference the shell emits must carry ?v=<assetVersion>: the
+// query is what makes a released bundle unreachable by an old cached URL, and a
+// proxy-injected max-age irrelevant. One missed URL silently restores the
+// staleness this whole mechanism exists to remove.
+func TestAppTemplate_EveryStaticURLIsVersioned(t *testing.T) {
+	tmpl, err := template.ParseFS(TemplatesFS, "web/templates/*.html")
+	if err != nil {
+		t.Fatalf("parse templates: %v", err)
+	}
+
+	const version = "deadbeef"
+	var buf bytes.Buffer
+	if err := tmpl.ExecuteTemplate(&buf, "app.html", struct{ AssetVersion string }{AssetVersion: version}); err != nil {
+		t.Fatalf("execute app.html: %v", err)
+	}
+	shell := buf.String()
+
+	// Covers href/src attributes and the inline theme-map string literals.
+	refs := regexp.MustCompile(`/static/[^"'\s)]+`).FindAllString(shell, -1)
+	if len(refs) == 0 {
+		t.Fatal("app.html references no static assets at all")
+	}
+	for _, ref := range refs {
+		if !strings.HasSuffix(ref, "?v="+version) {
+			t.Errorf("app.html emits an unversioned static URL: %q", ref)
+		}
+	}
+}
