@@ -20,9 +20,19 @@ type NotesRootHealthChecker interface {
 	NotesRootHealthError() string
 }
 
+// SchemaReporter reports the migration version stamped in the database and the
+// newest migration the running build embeds. An operator compares the two
+// numbers — and the image's co.thornotes.schema.max label — before deploying,
+// so this is observability, not a second gate: a database ahead of the binary
+// makes the process exit at startup, it never reaches this endpoint.
+type SchemaReporter interface {
+	SchemaStatus() (version, maxSupported int)
+}
+
 type HealthHandler struct {
-	db    DBHealthChecker
-	notes NotesRootHealthChecker
+	db     DBHealthChecker
+	notes  NotesRootHealthChecker
+	schema SchemaReporter
 }
 
 // HealthOption configures optional readiness checks.
@@ -33,6 +43,13 @@ type HealthOption func(*HealthHandler)
 // working unchanged.
 func WithNotesRootChecker(c NotesRootHealthChecker) HealthOption {
 	return func(h *HealthHandler) { h.notes = c }
+}
+
+// WithSchemaReporter adds the schema block to /healthz. Without it the endpoint
+// reports health checks only, which keeps every existing caller working
+// unchanged.
+func WithSchemaReporter(s SchemaReporter) HealthOption {
+	return func(h *HealthHandler) { h.schema = s }
 }
 
 func NewHealthHandler(db DBHealthChecker, opts ...HealthOption) *HealthHandler {
@@ -72,8 +89,19 @@ func (h *HealthHandler) Check(c *gin.Context) {
 	if status == "error" {
 		code = http.StatusServiceUnavailable
 	}
-	c.JSON(code, gin.H{
+	resp := gin.H{
 		"status": status,
 		"checks": checks,
-	})
+	}
+	// The schema block lets an operator compare a running instance against an
+	// image before deploying it. It never affects the status code: a database
+	// ahead of the binary exits at startup, so it cannot be reported here.
+	if h.schema != nil {
+		version, maxSupported := h.schema.SchemaStatus()
+		resp["schema"] = gin.H{
+			"version":       version,
+			"max_supported": maxSupported,
+		}
+	}
+	c.JSON(code, resp)
 }

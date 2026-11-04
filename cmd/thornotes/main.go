@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"html/template"
 	iofs "io/fs"
@@ -30,6 +31,11 @@ import (
 	"github.com/th0rn0/thornotes/internal/security"
 )
 
+// Version is the build version. It is injected at build time with
+// -ldflags "-X main.Version=..." (see the Makefile and the Dockerfile) and
+// reports "dev" for an unversioned local build.
+var Version = "dev"
+
 func main() {
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: time.RFC3339})
 	zerolog.SetGlobalLevel(zerolog.InfoLevel)
@@ -54,7 +60,7 @@ func main() {
 		pool, err = db.Open(cfg.DBPath)
 	}
 	if err != nil {
-		log.Error().Err(err).Str("driver", cfg.DBDriver).Msg("open database")
+		logDatabaseOpenError(err, cfg.DBDriver)
 		os.Exit(1)
 	}
 	defer pool.Close()
@@ -178,7 +184,7 @@ func main() {
 	defer watchCancel()
 
 	go func() {
-		log.Info().Str("addr", cfg.Addr).Str("driver", cfg.DBDriver).Msg("thornotes starting")
+		log.Info().Str("addr", cfg.Addr).Str("driver", cfg.DBDriver).Str("version", Version).Msg("thornotes starting")
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Error().Err(err).Msg("server error")
 			os.Exit(1)
@@ -241,6 +247,33 @@ func main() {
 	fs.Wait()
 	fs.ReleaseOwnerLock()
 	log.Info().Msg("shutdown complete")
+}
+
+// logDatabaseOpenError reports a failure to open the database.
+//
+// A database stamped with a newer migration version than this build carries, or
+// one left dirty by an interrupted migration, is a one-line diagnosis, not a
+// stack trace: those are the two states that would otherwise crash-loop a
+// container on restart with a message that never says what is actually wrong.
+// Everything else keeps the generic wrapped message.
+func logDatabaseOpenError(err error, driver string) {
+	var tooNew *db.ErrSchemaTooNew
+	var dirty *db.ErrSchemaDirty
+	switch {
+	case errors.As(err, &tooNew):
+		log.Error().
+			Str("driver", driver).
+			Int("db_schema_version", tooNew.DBVersion).
+			Int("max_supported", tooNew.MaxSupported).
+			Msg(tooNew.Error())
+	case errors.As(err, &dirty):
+		log.Error().
+			Str("driver", driver).
+			Int("dirty_version", dirty.Version).
+			Msg(dirty.Error())
+	default:
+		log.Error().Err(err).Str("driver", driver).Msg("open database")
+	}
 }
 
 // applyReconcileGuardFromEnv configures the reconcile deletion circuit breaker.

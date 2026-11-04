@@ -260,6 +260,15 @@ steps:
         from_secret: dockerhub_token
       tags:
         - latest
+      # co.thornotes.schema.max on the image is the highest migration the build
+      # embeds, so an operator can tell from `docker inspect` whether an image is
+      # older than a database before deploying it. The values are the SQLite and
+      # MySQL floors and are checked against the migration sources by
+      # TestDockerfile_SchemaLabelsMatchMigrations.
+      build_args:
+        - THORNOTES_SCHEMA_MAX=8
+        - THORNOTES_SCHEMA_MAX_MYSQL=7
+        - THORNOTES_VERSION=${DRONE_COMMIT_SHA}
     when:
       branch:
         - main
@@ -277,6 +286,10 @@ steps:
       tags:
         - latest
         - ${DRONE_TAG}
+      build_args:
+        - THORNOTES_SCHEMA_MAX=8
+        - THORNOTES_SCHEMA_MAX_MYSQL=7
+        - THORNOTES_VERSION=${DRONE_TAG}
     when:
       event:
         - tag

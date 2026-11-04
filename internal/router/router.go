@@ -68,8 +68,14 @@ func New(
 	rateMW := rateLimiter.GinMiddleware()
 
 	// Health check — unauthenticated, used by load balancers and monitoring.
-	// The notes-root check reports whether the reconciler trusts the volume.
-	healthH := handler.NewHealthHandler(dbHealth, handler.WithNotesRootChecker(notesSvc))
+	// The notes-root check reports whether the reconciler trusts the volume; the
+	// schema block reports the applied migration version against this build's
+	// floor, which is present whenever the pool implements SchemaReporter.
+	healthOpts := []handler.HealthOption{handler.WithNotesRootChecker(notesSvc)}
+	if schemaReporter, ok := dbHealth.(handler.SchemaReporter); ok {
+		healthOpts = append(healthOpts, handler.WithSchemaReporter(schemaReporter))
+	}
+	healthH := handler.NewHealthHandler(dbHealth, healthOpts...)
 	r.GET("/healthz", healthH.Check)
 
 	// Static files.
