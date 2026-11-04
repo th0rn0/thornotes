@@ -2,6 +2,11 @@
 
 All notable changes to thornotes are documented here.
 
+## Unreleased
+
+### Changed
+- Startup now refuses databases whose schema version is newer than the running build supports; the recovery path is documented in [docs/operations.md](docs/operations.md).
+
 ## [1.5.14.0] - 2026-06-13
 
 ### Fixed
