@@ -7,15 +7,15 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="thornotes">
-<link rel="manifest" href="/static/manifest.json">
-<link rel="icon" href="/static/icons/icon-192.svg" type="image/svg+xml">
-<link rel="apple-touch-icon" href="/static/icons/icon-192.svg">
+<link rel="manifest" href="/static/manifest.json?v={{.AssetVersion}}">
+<link rel="icon" href="/static/icons/icon-192.svg?v={{.AssetVersion}}" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/static/icons/icon-192.svg?v={{.AssetVersion}}">
 <title>thornotes</title>
-<link rel="stylesheet" href="/static/css/font-awesome.min.css">
-<link rel="stylesheet" href="/static/css/highlight-github.min.css" id="hljs-theme">
-<link rel="prefetch" href="/static/css/highlight-github.min.css">
-<link rel="prefetch" href="/static/css/highlight-github-dark.min.css">
-<link rel="prefetch" href="/static/css/highlight-catppuccin-mocha.min.css">
+<link rel="stylesheet" href="/static/css/font-awesome.min.css?v={{.AssetVersion}}">
+<link rel="stylesheet" href="/static/css/highlight-github.min.css?v={{.AssetVersion}}" id="hljs-theme">
+<link rel="prefetch" href="/static/css/highlight-github.min.css?v={{.AssetVersion}}">
+<link rel="prefetch" href="/static/css/highlight-github-dark.min.css?v={{.AssetVersion}}">
+<link rel="prefetch" href="/static/css/highlight-catppuccin-mocha.min.css?v={{.AssetVersion}}">
 <script>
 (function(){
   var THEMES=['auto','light','dark','catppuccin','nord','tokyonight','solarized'];
@@ -24,7 +24,7 @@
   var resolved=name==='auto'?(window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'):name;
   document.documentElement.setAttribute('data-theme',resolved);
   var hljs=document.getElementById('hljs-theme');
-  var hmap={light:'/static/css/highlight-github.min.css',dark:'/static/css/highlight-github-dark.min.css',catppuccin:'/static/css/highlight-catppuccin-mocha.min.css',nord:'/static/css/highlight-github-dark.min.css',tokyonight:'/static/css/highlight-github-dark.min.css',solarized:'/static/css/highlight-github.min.css'};
+  var hmap={light:'/static/css/highlight-github.min.css?v={{.AssetVersion}}',dark:'/static/css/highlight-github-dark.min.css?v={{.AssetVersion}}',catppuccin:'/static/css/highlight-catppuccin-mocha.min.css?v={{.AssetVersion}}',nord:'/static/css/highlight-github-dark.min.css?v={{.AssetVersion}}',tokyonight:'/static/css/highlight-github-dark.min.css?v={{.AssetVersion}}',solarized:'/static/css/highlight-github.min.css?v={{.AssetVersion}}'};
   if(hljs&&hmap[resolved])hljs.href=hmap[resolved];
 })();
 </script>
@@ -629,7 +629,7 @@ body {
 <div id="app-screen">
   <div class="topbar">
     <button class="topbar-menu-btn" aria-label="Toggle sidebar">&#9776;</button>
-    <span class="logo"><img src="/static/icons/icon-192.svg" width="20" height="20" alt="">thornotes</span>
+    <span class="logo"><img src="/static/icons/icon-192.svg?v={{.AssetVersion}}" width="20" height="20" alt="">thornotes</span>
     <div class="user-menu" id="user-menu">
       <button class="user-menu-trigger" id="user-menu-trigger" aria-haspopup="true" aria-expanded="false">
         <span id="topbar-username"></span>
@@ -975,11 +975,11 @@ body {
 <div id="disk-full-banner">&#9888; Your disk is full &mdash; note could not be saved. Free up space to continue.<a id="disk-full-dismiss">Dismiss</a></div>
 <div id="session-expired-banner" role="alert">&#9888; Your session has expired &mdash; recent edits have <strong>not</strong> been saved. Copy any unsaved text now, then reload to log back in.<button id="session-expired-reload" type="button">Reload page</button></div>
 
-<script src="/static/js/vendor/codemirror6.min.js"></script>
-<script src="/static/js/vendor/marked.min.js"></script>
-<script src="/static/js/vendor/highlight.min.js"></script>
-<script src="/static/js/vendor/purify.min.js"></script>
-<script src="/static/js/table-utils.js"></script>
-<script src="/static/js/app.js"></script>
+<script src="/static/js/vendor/codemirror6.min.js?v={{.AssetVersion}}"></script>
+<script src="/static/js/vendor/marked.min.js?v={{.AssetVersion}}"></script>
+<script src="/static/js/vendor/highlight.min.js?v={{.AssetVersion}}"></script>
+<script src="/static/js/vendor/purify.min.js?v={{.AssetVersion}}"></script>
+<script src="/static/js/table-utils.js?v={{.AssetVersion}}"></script>
+<script src="/static/js/app.js?v={{.AssetVersion}}"></script>
 </body>
 </html>
