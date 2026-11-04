@@ -23,6 +23,20 @@ var migrationsFS embed.FS
 type Pool struct {
 	ReadDB  *sql.DB
 	WriteDB *sql.DB
+
+	// schemaVersion is the migration version applied to the database when it was
+	// opened and schemaMax is the newest migration this build embeds. Both are
+	// set during Open/OpenMySQL, before the Pool is shared with anything else,
+	// and are read-only afterwards.
+	schemaVersion int
+	schemaMax     int
+}
+
+// SchemaStatus reports the applied migration version and the newest migration
+// this build supports. It is deliberately expressed with primitives so the
+// health handler can consume it without importing this package.
+func (p *Pool) SchemaStatus() (version, maxSupported int) {
+	return p.schemaVersion, p.schemaMax
 }
 
 func Open(dsn string) (*Pool, error) {
@@ -92,6 +106,13 @@ func (p *Pool) migrate() error {
 		return fmt.Errorf("iofs: %w", err)
 	}
 
+	// The newest migration this build carries. Read from the source driver, not
+	// from directory numbering — see maxSupportedVersion.
+	maxSupported, err := maxSupportedVersion(src)
+	if err != nil {
+		return fmt.Errorf("schema floor: %w", err)
+	}
+
 	driver, err := migratesqlite.WithInstance(p.WriteDB, &migratesqlite.Config{})
 	if err != nil {
 		return fmt.Errorf("migrate driver: %w", err)
@@ -102,23 +123,26 @@ func (p *Pool) migrate() error {
 		return fmt.Errorf("migrate instance: %w", err)
 	}
 
+	// Refuse a database that is ahead of this binary, or dirty, before applying
+	// anything. The typed errors are returned unwrapped so callers and tests can
+	// assert on the value rather than on a string.
+	if _, err := preflightSchema(m, maxSupported); err != nil {
+		return err
+	}
+
 	if err := m.Up(); err != nil && err != migrate.ErrNoChange {
-		var dirtyErr migrate.ErrDirty
-		if errors.As(err, &dirtyErr) {
-			// A previous run was interrupted and left the schema in a dirty state.
-			// Roll back to the last clean version and retry. All up migrations use
-			// CREATE TABLE IF NOT EXISTS so re-running a partially applied migration
-			// is safe.
-			if ferr := m.Force(dirtyErr.Version - 1); ferr != nil {
-				return fmt.Errorf("migrate up: force version after dirty state: %w", ferr)
-			}
-			if err := m.Up(); err != nil && err != migrate.ErrNoChange {
-				return fmt.Errorf("migrate up: %w", err)
-			}
-			return nil
-		}
 		return fmt.Errorf("migrate up: %w", err)
 	}
+
+	// Record what /healthz reports: the version now applied, and the floor this
+	// build supports. Up() leaves the database at maxSupported, but reading it
+	// back keeps the reported number honest if that ever stops being true.
+	applied, _, err := m.Version()
+	if err != nil && !errors.Is(err, migrate.ErrNilVersion) {
+		return fmt.Errorf("read applied schema version: %w", err)
+	}
+	p.schemaVersion = int(applied)
+	p.schemaMax = maxSupported
 
 	return nil
 }

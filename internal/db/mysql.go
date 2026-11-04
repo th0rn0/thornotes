@@ -37,59 +37,65 @@ func OpenMySQL(dsn string) (*Pool, error) {
 	// The go-sql-driver/mysql driver rejects SQL files that contain more than
 	// one semicolon-separated statement unless this flag is set. Keeping it off
 	// on the main pool avoids any risk of multi-statement injection via the app.
-	if err := runMySQLMigrations(dsn); err != nil {
+	applied, maxSupported, err := runMySQLMigrations(dsn)
+	if err != nil {
 		db.Close()
 		return nil, fmt.Errorf("mysql migrate: %w", err)
 	}
 
-	return &Pool{ReadDB: db, WriteDB: db}, nil
+	return &Pool{ReadDB: db, WriteDB: db, schemaVersion: applied, schemaMax: maxSupported}, nil
 }
 
-func runMySQLMigrations(dsn string) error {
+// runMySQLMigrations applies pending migrations and returns the version now
+// stamped in the database plus the newest migration this build embeds.
+func runMySQLMigrations(dsn string) (applied, maxSupported int, err error) {
 	sep := "?"
 	if strings.Contains(dsn, "?") {
 		sep = "&"
 	}
 	migDB, err := sql.Open("mysql", dsn+sep+"multiStatements=true")
 	if err != nil {
-		return fmt.Errorf("open migration db: %w", err)
+		return 0, 0, fmt.Errorf("open migration db: %w", err)
 	}
 	defer migDB.Close()
 
 	src, err := iofs.New(mysqlMigrationsFS, "mysql_migrations")
 	if err != nil {
-		return fmt.Errorf("iofs: %w", err)
+		return 0, 0, fmt.Errorf("iofs: %w", err)
+	}
+
+	// The MySQL sequence is numbered differently from SQLite's (no
+	// 004_api_tokens_hash), so the floor must come from this source driver and
+	// never from the SQLite directory.
+	maxSupported, err = maxSupportedVersion(src)
+	if err != nil {
+		return 0, 0, fmt.Errorf("schema floor: %w", err)
 	}
 
 	driver, err := migratemysql.WithInstance(migDB, &migratemysql.Config{})
 	if err != nil {
-		return fmt.Errorf("migrate driver: %w", err)
+		return 0, 0, fmt.Errorf("migrate driver: %w", err)
 	}
 
 	m, err := migrate.NewWithInstance("iofs", src, "mysql", driver)
 	if err != nil {
-		return fmt.Errorf("migrate instance: %w", err)
+		return 0, 0, fmt.Errorf("migrate instance: %w", err)
+	}
+
+	// Same preflight as SQLite: refuse a database newer than this build, or a
+	// dirty one, without applying anything.
+	if _, err := preflightSchema(m, maxSupported); err != nil {
+		return 0, 0, err
 	}
 
 	if err := m.Up(); err != nil && err != migrate.ErrNoChange {
-		var dirtyErr migrate.ErrDirty
-		if errors.As(err, &dirtyErr) {
-			// A previous run was interrupted and left the schema in a dirty state.
-			// Force(-1) clears the version tracking entirely (golang-migrate convention:
-			// -1 = no migrations applied). Up() then re-runs all migrations from
-			// scratch; all up migrations use CREATE TABLE IF NOT EXISTS so this is safe.
-			// We cannot use Force(version-1) because Force(0) is invalid — golang-migrate
-			// tries to read a down file for version 0 which does not exist.
-			if ferr := m.Force(-1); ferr != nil {
-				return fmt.Errorf("force version after dirty state: %w", ferr)
-			}
-			if err := m.Up(); err != nil && err != migrate.ErrNoChange {
-				return fmt.Errorf("migrate up: %w", err)
-			}
-			return nil
-		}
-		return fmt.Errorf("migrate up: %w", err)
+		return 0, 0, fmt.Errorf("migrate up: %w", err)
 	}
 
-	return nil
+	version, _, err := m.Version()
+	if err != nil && !errors.Is(err, migrate.ErrNilVersion) {
+		return 0, 0, fmt.Errorf("read applied schema version: %w", err)
+	}
+
+	return int(version), maxSupported, nil
 }

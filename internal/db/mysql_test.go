@@ -1,6 +1,7 @@
 package db
 
 import (
+	"database/sql"
 	"os"
 	"testing"
 
@@ -59,28 +60,45 @@ func TestMySQL_Migrations_Idempotent(t *testing.T) {
 	defer pool2.Close()
 }
 
-// TestMySQL_DirtyStateRecovery verifies that if a previous migration run was
-// interrupted (leaving a dirty flag in schema_migrations), the next OpenMySQL
-// call self-heals and returns a working pool.
-func TestMySQL_DirtyStateRecovery(t *testing.T) {
+// TestMySQL_DirtyState_RefusesLoudly verifies that a database left dirty by an
+// interrupted migration is refused with a typed error naming the version, rather
+// than silently forced forward or failed with migrate's own message. Recovery is
+// a human decision: inspect the schema, then force the version, or restore.
+func TestMySQL_DirtyState_RefusesLoudly(t *testing.T) {
 	dsn := mysqlTestDSN(t)
 
 	// First open — clean migration.
 	pool, err := OpenMySQL(dsn)
 	require.NoError(t, err)
 
-	// Simulate a crash mid-migration by marking version 1 as dirty.
-	_, err = pool.WriteDB.Exec("UPDATE schema_migrations SET dirty = 1 WHERE version = 1")
+	// Simulate a crash mid-migration by marking the current version dirty.
+	_, err = pool.WriteDB.Exec("UPDATE schema_migrations SET dirty = 1")
 	require.NoError(t, err)
 	pool.Close()
 
-	// Second open — should detect the dirty state and self-heal.
-	pool2, err := OpenMySQL(dsn)
-	require.NoError(t, err, "OpenMySQL should recover from a dirty migration state automatically")
-	defer pool2.Close()
+	// The database is repaired at the end of the test whatever happens, because
+	// the MySQL suite shares one database across tests.
+	t.Cleanup(func() {
+		repair, err := sql.Open("mysql", dsn)
+		if err != nil {
+			return
+		}
+		defer repair.Close()
+		_, _ = repair.Exec("UPDATE schema_migrations SET dirty = 0")
+	})
 
-	// Basic sanity check: the users table is queryable after recovery.
-	var count int
-	err = pool2.ReadDB.QueryRow("SELECT COUNT(*) FROM users").Scan(&count)
-	assert.NoError(t, err, "users table should be accessible after dirty state recovery")
+	// Second open — must refuse, naming the dirty version.
+	_, err = OpenMySQL(dsn)
+	var dirty *ErrSchemaDirty
+	require.ErrorAs(t, err, &dirty, "a dirty database must produce ErrSchemaDirty")
+	assert.Contains(t, err.Error(), "is dirty")
+	assert.Contains(t, err.Error(), "force version")
+
+	// The dirty flag is left in place for the operator to inspect.
+	check, err := sql.Open("mysql", dsn)
+	require.NoError(t, err)
+	defer check.Close()
+	var flagged int
+	require.NoError(t, check.QueryRow("SELECT dirty FROM schema_migrations LIMIT 1").Scan(&flagged))
+	assert.Equal(t, 1, flagged, "the refusal must not modify the database")
 }

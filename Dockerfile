@@ -5,6 +5,10 @@
 # breaks the build with "go.mod requires go >= 1.26.3".
 FROM golang:1.26.3-alpine AS builder
 
+# Build-time version, stamped into the binary (main.Version) and onto the image
+# (org.opencontainers.image.version). CI passes the git tag or commit.
+ARG THORNOTES_VERSION=dev
+
 WORKDIR /build
 
 # Download dependencies separately so this layer is cached on code-only changes.
@@ -16,7 +20,7 @@ RUN go mod download
 # no CGO sneaks in from transitive deps and the binary stays scratch-compatible.
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build \
-    -ldflags="-s -w" \
+    -ldflags="-s -w -X main.Version=${THORNOTES_VERSION}" \
     -trimpath \
     -o /thornotes \
     ./cmd/thornotes
@@ -25,6 +29,29 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
 FROM scratch
 
 COPY --from=builder /thornotes /thornotes
+
+# ── Artefact metadata ────────────────────────────────────────────────────────
+# co.thornotes.schema.max is the highest migration this image embeds, so
+# `docker inspect` answers "which schema does this image support?" without
+# starting it — the question an operator needs answered at 2am, and the one the
+# image previously could not answer at all.
+#
+# A database stamped above this number is refused at startup with a single log
+# line naming both numbers (see internal/db/schema.go); it is never migrated
+# down automatically.
+#
+# The defaults below are the SQLite floor for the default driver, and the MySQL
+# floor for --db-driver=mysql (whose sequence is numbered differently). They are
+# kept in step with internal/db/migrations/ and internal/db/mysql_migrations/ by
+# TestDockerfile_SchemaLabelsMatchMigrations, so a new migration that forgets to
+# bump them fails CI.
+ARG THORNOTES_SCHEMA_MAX=8
+ARG THORNOTES_SCHEMA_MAX_MYSQL=7
+ARG THORNOTES_VERSION=dev
+
+LABEL co.thornotes.schema.max="${THORNOTES_SCHEMA_MAX}" \
+      co.thornotes.schema.max.mysql="${THORNOTES_SCHEMA_MAX_MYSQL}" \
+      org.opencontainers.image.version="${THORNOTES_VERSION}"
 
 # Configuration via environment variables:
 #   THORNOTES_ADDR              bind address           (default :8080)
