@@ -558,6 +558,8 @@ async function openNote(noteId, { historyMode = 'push', isNew = false } = {}) {
   document.getElementById('note-stats').textContent = noteStats(note.content);
   setSaveStatus('saved');
 
+  loadLinksPanel();
+
   if (!editor) {
     const editorArea = document.getElementById('editor-area');
     editorArea.innerHTML = '';
@@ -586,6 +588,7 @@ async function openNote(noteId, { historyMode = 'push', isNew = false } = {}) {
       '<button data-cmd="previewedit" title="Preview Edit — click any block to edit inline" id="cm6-previewedit-btn">P.Edit</button>' +
       '<button data-cmd="split" title="Split editor / preview" id="cm6-split-btn">Split</button>' +
       '<button data-cmd="lineNumbers" title="Toggle line numbers" id="cm6-linenumbers-btn">Ln#</button>' +
+      '<button data-cmd="links" title="Toggle links panel" id="cm6-links-btn">Links</button>' +
       '<span class="cm6-sep"></span>' +
       '<button data-cmd="undo" title="Undo">Undo</button>' +
       '<button data-cmd="redo" title="Redo">Redo</button>';
@@ -608,6 +611,17 @@ async function openNote(noteId, { historyMode = 'push', isNew = false } = {}) {
     lintPanel.id = 'lint-panel';
     lintPanel.className = 'lint-panel';
     editorArea.appendChild(lintPanel);
+
+    // Links + backlinks panel (hidden until toggled)
+    const linksPanel = document.createElement('div');
+    linksPanel.id = 'links-panel';
+    linksPanel.className = 'links-panel';
+    linksPanel.setAttribute('role', 'region');
+    linksPanel.setAttribute('aria-label', 'Links and backlinks');
+    linksPanel.innerHTML =
+      '<div class="links-section"><div class="links-section-title">Outbound links</div><ul class="links-list" id="links-outbound"></ul></div>' +
+      '<div class="links-section"><div class="links-section-title">Backlinks</div><ul class="links-list" id="links-backlinks"></ul></div>';
+    editorArea.appendChild(linksPanel);
 
     // Editor + preview wrapper
     const wrap = document.createElement('div');
@@ -676,6 +690,8 @@ async function openNote(noteId, { historyMode = 'push', isNew = false } = {}) {
         handleTableBtn(e, btn);
       } else if (cmd === 'formatTable') {
         formatTableAtCursor();
+      } else if (cmd === 'links') {
+        toggleLinksPanel();
       } else if (CM6.commands[cmd]) {
         CM6.commands[cmd](editor);
       }
@@ -1048,6 +1064,169 @@ function lintMarkdown(md) {
   }
 
   return issues;
+}
+
+// ── Links + Backlinks Panel ────────────────────────────────────────────────
+let _linksGeneration = 0;
+let _linksAbortController = null;
+
+function toggleLinksPanel() {
+  const panel = document.getElementById('links-panel');
+  const btn = document.getElementById('cm6-links-btn');
+  if (!panel) return;
+  
+  const isOpen = panel.classList.toggle('open');
+  if (btn) btn.classList.toggle('active', isOpen);
+  
+  if (isOpen && currentNote) {
+    loadLinksPanel(currentNote.id);
+  }
+}
+
+async function loadLinksPanel() {
+  const panel = document.getElementById('links-panel');
+  if (!panel || !currentNote) return;
+  // If the panel is closed, there is nothing to refresh — toggling it open
+  // will trigger a fresh load itself.
+  if (!panel.classList.contains('open')) return;
+  
+  const noteId = currentNote.id;
+  
+  // Abort any in-flight request and increment generation counter
+  if (_linksAbortController) {
+    _linksAbortController.abort();
+  }
+  _linksGeneration++;
+  const thisGeneration = _linksGeneration;
+  
+  _linksAbortController = new AbortController();
+  const signal = _linksAbortController.signal;
+  
+  const outboundList = document.getElementById('links-outbound');
+  const backlinksList = document.getElementById('links-backlinks');
+  
+  // Show loading state
+  outboundList.innerHTML = '<li class="links-loading">Loading…</li>';
+  backlinksList.innerHTML = '<li class="links-loading">Loading…</li>';
+  
+  try {
+    // Fetch both endpoints in parallel
+    const [linksResp, backlinksResp] = await Promise.all([
+      fetch(`/api/v1/notes/${noteId}/links`, { signal, credentials: 'same-origin' }),
+      fetch(`/api/v1/notes/${noteId}/backlinks`, { signal, credentials: 'same-origin' })
+    ]);
+    
+    // Guard: if generation changed, we switched notes — discard
+    if (thisGeneration !== _linksGeneration) return;
+    // Guard: currentNote changed (or cleared) — discard
+    if (!currentNote || currentNote.id !== noteId) return;
+    
+    if (!linksResp.ok || !backlinksResp.ok) {
+      throw new Error(`HTTP ${linksResp.status} / ${backlinksResp.status}`);
+    }
+    
+    const linksData = await linksResp.json();
+    const backlinksData = await backlinksResp.json();
+    
+    // Final generation check after JSON parse
+    if (thisGeneration !== _linksGeneration) return;
+    if (!currentNote || currentNote.id !== noteId) return;
+    
+    // Render outbound links — API returns a raw array of outgoingLinkJSON.
+    renderOutboundLinks(outboundList, Array.isArray(linksData) ? linksData : []);
+    
+    // Render backlinks — API returns a raw array of Backlink.
+    renderBacklinks(backlinksList, Array.isArray(backlinksData) ? backlinksData : []);
+    
+  } catch (err) {
+    if (err.name === 'AbortError') return;
+    if (thisGeneration !== _linksGeneration) return;
+    if (!currentNote || currentNote.id !== noteId) return;
+    
+    outboundList.innerHTML = '<li class="links-error">Failed to load links</li>';
+    backlinksList.innerHTML = '<li class="links-error">Failed to load backlinks</li>';
+  }
+}
+
+function renderOutboundLinks(container, links) {
+  container.innerHTML = '';
+  
+  if (links.length === 0) {
+    container.innerHTML = '<li class="links-empty">No outbound links</li>';
+    return;
+  }
+  
+  links.forEach(link => {
+    const li = document.createElement('li');
+    li.className = 'links-item';
+    
+    const statusSpan = document.createElement('span');
+    statusSpan.className = 'links-item-status';
+    
+    const titleSpan = document.createElement('span');
+    titleSpan.className = 'links-item-title';
+    titleSpan.textContent = link.to_title || link.raw_target;
+    
+    if (link.ambiguous) {
+      li.classList.add('ambiguous');
+      statusSpan.textContent = '(ambiguous)';
+    } else if (link.unresolved) {
+      li.classList.add('unresolved');
+      statusSpan.textContent = '(unresolved)';
+    } else {
+      li.classList.add('resolved', 'clickable');
+      statusSpan.textContent = '';
+      li.setAttribute('data-note-id', link.to_note_id);
+      li.addEventListener('click', () => {
+        if (link.to_note_id) {
+          openNote(link.to_note_id);
+        }
+      });
+    }
+    
+    const rawSpan = document.createElement('span');
+    rawSpan.className = 'links-item-raw';
+    rawSpan.textContent = `[[${link.raw_target}]]`;
+    
+    li.appendChild(statusSpan);
+    li.appendChild(titleSpan);
+    li.appendChild(rawSpan);
+    container.appendChild(li);
+  });
+}
+
+function renderBacklinks(container, backlinks) {
+  container.innerHTML = '';
+  
+  if (backlinks.length === 0) {
+    container.innerHTML = '<li class="links-empty">No backlinks</li>';
+    return;
+  }
+  
+  backlinks.forEach(backlink => {
+    const li = document.createElement('li');
+    li.className = 'links-item resolved clickable';
+    li.setAttribute('data-note-id', backlink.from_note_id);
+    
+    const titleSpan = document.createElement('span');
+    titleSpan.className = 'links-item-title';
+    titleSpan.textContent = backlink.from_title;
+    
+    const rawSpan = document.createElement('span');
+    rawSpan.className = 'links-item-raw';
+    rawSpan.textContent = backlink.link_text || `[[${backlink.from_title}]]`;
+    
+    li.appendChild(titleSpan);
+    li.appendChild(rawSpan);
+    
+    li.addEventListener('click', () => {
+      if (backlink.from_note_id) {
+        openNote(backlink.from_note_id);
+      }
+    });
+    
+    container.appendChild(li);
+  });
 }
 
 function applyLintSetting() {
