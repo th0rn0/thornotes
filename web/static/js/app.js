@@ -619,6 +619,10 @@ async function openNote(noteId, { historyMode = 'push', isNew = false } = {}) {
     linksPanel.setAttribute('role', 'region');
     linksPanel.setAttribute('aria-label', 'Links and backlinks');
     linksPanel.innerHTML =
+      '<div class="links-graph" id="links-graph">' +
+        '<canvas class="links-graph-canvas" id="links-graph-canvas" aria-hidden="true"></canvas>' +
+        '<div class="links-graph-caption" id="links-graph-caption" tabindex="-1"></div>' +
+      '</div>' +
       '<div class="links-section"><div class="links-section-title">Outbound links</div><ul class="links-list" id="links-outbound"></ul></div>' +
       '<div class="links-section"><div class="links-section-title">Backlinks</div><ul class="links-list" id="links-backlinks"></ul></div>';
     editorArea.appendChild(linksPanel);
@@ -1138,6 +1142,16 @@ async function loadLinksPanel() {
     // Render backlinks — API returns a raw array of Backlink.
     renderBacklinks(backlinksList, Array.isArray(backlinksData) ? backlinksData : []);
     
+    // Render the one-hop graph view above the text lists. Same generation
+    // guards apply: stale responses return before touching the canvas.
+    renderOneHopGraph(
+      document.getElementById('links-graph-canvas'),
+      document.getElementById('links-graph-caption'),
+      { id: noteId, title: currentNote.title },
+      Array.isArray(linksData) ? linksData : [],
+      Array.isArray(backlinksData) ? backlinksData : []
+    );
+    
   } catch (err) {
     if (err.name === 'AbortError') return;
     if (thisGeneration !== _linksGeneration) return;
@@ -1145,6 +1159,11 @@ async function loadLinksPanel() {
     
     outboundList.innerHTML = '<li class="links-error">Failed to load links</li>';
     backlinksList.innerHTML = '<li class="links-error">Failed to load backlinks</li>';
+    clearOneHopGraph(
+      document.getElementById('links-graph-canvas'),
+      document.getElementById('links-graph-caption'),
+      'Failed to load graph'
+    );
   }
 }
 
@@ -1228,6 +1247,238 @@ function renderBacklinks(container, backlinks) {
     container.appendChild(li);
   });
 }
+
+// ── One-hop neighbourhood graph ────────────────────────────────────────────
+//
+// The graph is an *enhancement* over the text lists: the lists remain the
+// keyboard-accessible and screen-reader surface (the canvas is aria-hidden).
+// Resolved neighbour nodes are clickable; ghost and ambiguous nodes are not.
+//
+// Layout is deterministic: same note + same data → same picture, every time.
+// Neighbours are sorted by (status, label, direction) and placed on an
+// ellipse around the pinned centre. The node cap keeps hub notes readable;
+// when the cap fires, the caption shows "showing N of M".
+//
+// No vendored library — for tens of nodes a hand-rolled canvas is shorter
+// and dependency-free. Vendoring D3 would cost 200KB for a feature the
+// panel-size canvas does not need.
+
+// _layoutCache is a WeakMap<canvas, layout> so the click handler can find
+// the node that was hit without recomputing. The canvas itself is the key,
+// so the entry dies with the canvas when the panel is torn down.
+const _layoutCache = (typeof WeakMap !== 'undefined') ? new WeakMap() : null;
+
+// _graphColours resolves status colours from the current theme's computed
+// CSS variables so the canvas matches the surrounding panel in any theme.
+function _graphColours() {
+  const s = (typeof getComputedStyle !== 'undefined')
+    ? getComputedStyle(document.documentElement)
+    : null;
+  const g = (name, fallback) => (s && s.getPropertyValue(name).trim()) || fallback;
+  return {
+    bg:         g('--bg-editor',        '#ffffff'),
+    text:       g('--text',             '#222222'),
+    textMute:   g('--text-mute',        '#888888'),
+    textDim:    g('--text-dim',         '#aaaaaa'),
+    border:     g('--border',           '#dddddd'),
+    accent:     g('--accent',           '#222222'),
+    warning:    g('--color-warning',    '#c87800'),
+    error:      g('--color-error',      '#c00'),
+  };
+}
+
+// renderOneHopGraph paints the one-hop neighbourhood onto the canvas and
+// updates the caption. Called from loadLinksPanel inside the same abort +
+// generation guard that protects the text lists, so a stale response never
+// reaches this function for the wrong note.
+function renderOneHopGraph(canvas, caption, centre, outbound, backlinks) {
+  if (!canvas || !caption) return;
+  if (!centre) { clearOneHopGraph(canvas, caption, ''); return; }
+
+  // Size the bitmap to the CSS box at device pixel ratio for crisp text.
+  const rect = canvas.getBoundingClientRect();
+  const w = Math.max(1, Math.floor(rect.width));
+  const h = Math.max(1, Math.floor(rect.height || 240));
+  const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
+  canvas.width = Math.floor(w * dpr);
+  canvas.height = Math.floor(h * dpr);
+
+  const layout = _layoutOneHopGraph(centre, outbound, backlinks, w, h);
+
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const c = _graphColours();
+
+  // Clear.
+  ctx.fillStyle = c.bg;
+  ctx.fillRect(0, 0, w, h);
+
+  // Empty state: neither outbound nor backlinks. Render a centred text
+  // message rather than a blank canvas (acceptance #5).
+  if (layout.totalCount === 0) {
+    ctx.fillStyle = c.textMute;
+    ctx.font = '12px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('No links — nothing points here, and this note points nowhere.', w / 2, h / 2);
+    caption.textContent = '0 neighbours';
+    if (_layoutCache) _layoutCache.set(canvas, null);
+    return;
+  }
+
+  // Edges first, under the nodes.
+  layout.edges.forEach(edge => {
+    const a = edge.from, b = edge.to;
+    ctx.strokeStyle = (b.status === 'ghost') ? c.textDim
+                    : (b.status === 'ambiguous') ? c.warning
+                    : c.border;
+    ctx.lineWidth = 1;
+    ctx.setLineDash((b.status === 'ghost') ? [3, 3] : []);
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Arrowhead toward the non-centre end. Direction decides which end.
+    const outDir = b.directions.indexOf('out') !== -1;
+    const inDir  = b.directions.indexOf('in')  !== -1;
+    const head = 6;
+    const drawHead = (tx, ty, fx, fy) => {
+      const ang = Math.atan2(ty - fy, tx - fx);
+      ctx.fillStyle = ctx.strokeStyle;
+      ctx.beginPath();
+      ctx.moveTo(tx, ty);
+      ctx.lineTo(tx - head * Math.cos(ang - Math.PI / 7),
+                 ty - head * Math.sin(ang - Math.PI / 7));
+      ctx.lineTo(tx - head * Math.cos(ang + Math.PI / 7),
+                 ty - head * Math.sin(ang + Math.PI / 7));
+      ctx.closePath();
+      ctx.fill();
+    };
+    if (outDir) drawHead(b.x, b.y, a.x, a.y);
+    if (inDir)  drawHead(a.x, a.y, b.x, b.y);
+  });
+
+  // Nodes.
+  const R = 10;
+  layout.nodes.forEach(node => {
+    let fill, stroke, textColor;
+    if (node.status === 'centre') {
+      fill = c.accent; stroke = c.accent; textColor = c.bg;
+    } else if (node.status === 'resolved') {
+      fill = c.bg; stroke = c.accent; textColor = c.text;
+    } else if (node.status === 'ambiguous') {
+      fill = c.bg; stroke = c.warning; textColor = c.warning;
+    } else { // ghost
+      fill = c.bg; stroke = c.textDim; textColor = c.textDim;
+    }
+    ctx.beginPath();
+    ctx.arc(node.x, node.y, R, 0, 2 * Math.PI);
+    ctx.fillStyle = fill;
+    ctx.fill();
+    ctx.lineWidth = (node.status === 'centre') ? 0 : 1.5;
+    if (node.status !== 'centre') { ctx.strokeStyle = stroke; ctx.stroke(); }
+
+    // Label, rendered as text (not innerHTML — canvas text has no HTML
+    // interpretation, but this matches the acceptance criterion explicitly).
+    const label = (node.label || '').trim();
+    if (!label) return;
+    ctx.fillStyle = textColor;
+    ctx.font = (node.status === 'centre') ? '600 12px system-ui, sans-serif'
+                                          : '11px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = (node.status === 'centre') ? 'middle' : 'top';
+    const maxW = Math.max(40, w / 3);
+    const y = (node.status === 'centre') ? node.y : node.y + R + 3;
+    const truncated = _truncateLabel(ctx, label, maxW);
+    ctx.fillText(truncated, node.x, y);
+  });
+
+  // Caption — explicit "showing N of M" line when capped, otherwise the
+  // neighbour count. Empty state is already handled above.
+  let captionText;
+  if (layout.capped) {
+    captionText = 'showing ' + layout.shownCount + ' of ' + layout.totalCount + ' neighbours';
+  } else if (layout.totalCount === 1) {
+    captionText = '1 neighbour';
+  } else {
+    captionText = layout.totalCount + ' neighbours';
+  }
+  caption.textContent = captionText;
+
+  // Stash for hit-testing.
+  if (_layoutCache) _layoutCache.set(canvas, layout);
+}
+
+// clearOneHopGraph is the explicit-empty-state path used by the error
+// branch of loadLinksPanel — it wipes the canvas and (optionally) writes a
+// one-line caption rather than leaving a stale picture.
+function clearOneHopGraph(canvas, caption, message) {
+  if (canvas) {
+    if (_layoutCache) _layoutCache.set(canvas, null);
+    const ctx = canvas.getContext && canvas.getContext('2d');
+    if (ctx) {
+      const rect = canvas.getBoundingClientRect();
+      const w = Math.max(1, Math.floor(rect.width || canvas.width || 1));
+      const h = Math.max(1, Math.floor(rect.height || canvas.height || 240));
+      const c = _graphColours();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = c.bg;
+      ctx.fillRect(0, 0, w, h);
+      if (message) {
+        ctx.fillStyle = c.textMute;
+        ctx.font = '12px system-ui, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(message, w / 2, h / 2);
+      }
+    }
+  }
+  if (caption) caption.textContent = message || '';
+}
+
+// One-time wiring: click handler on the canvas. The first call to
+// renderOneHopGraph attaches this; subsequent renders only update the
+// layout stored in _layoutCache. Clicks on resolved nodes call openNote;
+// everything else (centre, ghost, ambiguous) is ignored.
+function _attachGraphClickHandler(canvas) {
+  if (canvas._graphClickAttached) return;
+  canvas._graphClickAttached = true;
+  canvas.style.cursor = 'default';
+  canvas.addEventListener('click', function(ev) {
+    const layout = _layoutCache && _layoutCache.get(canvas);
+    if (!layout) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = ev.clientX - rect.left;
+    const y = ev.clientY - rect.top;
+    const hit = _graphHitTest(layout, x, y);
+    if (!hit || hit.status !== 'resolved' || hit.noteId == null) return;
+    // Resolved node clicked — navigate via the same path as the text list.
+    if (typeof openNote === 'function') openNote(hit.noteId);
+  });
+  canvas.addEventListener('mousemove', function(ev) {
+    const layout = _layoutCache && _layoutCache.get(canvas);
+    if (!layout) return;
+    const rect = canvas.getBoundingClientRect();
+    const hit = _graphHitTest(layout, ev.clientX - rect.left, ev.clientY - rect.top);
+    const clickable = hit && hit.status === 'resolved';
+    canvas.style.cursor = clickable ? 'pointer' : 'default';
+    canvas.title = clickable ? (hit.label || '') : '';
+  });
+}
+
+// Hook the click handler into the render path. renderOneHopGraph calls
+// _attachGraphClickHandler on every paint — cheap (idempotent), and it
+// means a freshly created canvas always ends up wired.
+(function _wireGraphClicks() {
+  const orig = renderOneHopGraph;
+  renderOneHopGraph = function(canvas, caption, centre, outbound, backlinks) {
+    orig(canvas, caption, centre, outbound, backlinks);
+    if (canvas) _attachGraphClickHandler(canvas);
+  };
+})();
 
 function applyLintSetting() {
   const enabled = localStorage.getItem('autoLint') === 'true';

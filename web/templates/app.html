@@ -348,6 +348,14 @@ body {
 .links-loading { padding: 6px 12px; color: var(--text-dim); font-style: italic; }
 .links-error { padding: 6px 12px; color: var(--color-error); }
 
+/* ONE-HOP GRAPH VIEW — rendered above the text lists inside .links-panel.
+   Hidden unless the panel is open. The canvas is an enhancement, not the
+   only surface: the text lists below remain the keyboard-accessible path. */
+.links-graph { position: relative; border-bottom: 1px solid var(--border-light); flex-shrink: 0; }
+.links-graph-canvas { display: block; width: 100%; height: 240px; }
+.links-graph-caption { font-size: 10px; color: var(--text-dim); padding: 2px 12px 4px; display: flex; justify-content: space-between; align-items: center; }
+.links-graph-caption:focus { outline: 1px dotted var(--text-dim); outline-offset: 2px; }
+
 /* TABLE PASTE BAR */
 .table-paste-bar { display: none; align-items: center; gap: 8px; padding: 5px 10px; background: var(--bg-hover); border-bottom: 1px solid var(--border-light); font-size: 12px; color: var(--text-mute); flex-shrink: 0; flex-wrap: wrap; }
 .table-paste-bar .tpb-info { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -980,6 +988,7 @@ body {
 <script src="/static/js/vendor/highlight.min.js?v={{.AssetVersion}}"></script>
 <script src="/static/js/vendor/purify.min.js?v={{.AssetVersion}}"></script>
 <script src="/static/js/table-utils.js?v={{.AssetVersion}}"></script>
+<script src="/static/js/graph-utils.js?v={{.AssetVersion}}"></script>
 <script src="/static/js/app.js?v={{.AssetVersion}}"></script>
 </body>
 </html>
