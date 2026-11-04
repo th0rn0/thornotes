@@ -1365,7 +1365,11 @@ function renderOneHopGraph(canvas, caption, centre, outbound, backlinks) {
   layout.nodes.forEach(node => {
     let fill, stroke, textColor;
     if (node.status === 'centre') {
-      fill = c.accent; stroke = c.accent; textColor = c.bg;
+      // The centre dot is filled with the accent colour, so its label cannot
+      // sit inside it (nothing legible fits in a 10px radius, and painting the
+      // label in the background colour made it a smudge). It is drawn below
+      // the dot like every other label, in the normal text colour.
+      fill = c.accent; stroke = c.accent; textColor = c.text;
     } else if (node.status === 'resolved') {
       fill = c.bg; stroke = c.accent; textColor = c.text;
     } else if (node.status === 'ambiguous') {
@@ -1388,9 +1392,9 @@ function renderOneHopGraph(canvas, caption, centre, outbound, backlinks) {
     ctx.font = (node.status === 'centre') ? '600 12px system-ui, sans-serif'
                                           : '11px system-ui, sans-serif';
     ctx.textAlign = 'center';
-    ctx.textBaseline = (node.status === 'centre') ? 'middle' : 'top';
+    ctx.textBaseline = 'top';
     const maxW = Math.max(40, w / 3);
-    const y = (node.status === 'centre') ? node.y : node.y + R + 3;
+    const y = node.y + R + 3;
     const truncated = _truncateLabel(ctx, label, maxW);
     ctx.fillText(truncated, node.x, y);
   });
