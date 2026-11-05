@@ -256,7 +256,11 @@ func TestMigrations_Lint_NegativeControl(t *testing.T) {
 	require.Equal(t, len(entries)-1, copied, "the copy must be complete apart from the deleted down file")
 
 	cmd := exec.Command(os.Args[0], "-test.run=^TestMigrations_SQLite_Structure$", "-test.v")
-	cmd.Env = append(os.Environ(), "THORNOTES_TEST_MIGRATIONS_DIR="+root)
+	cmd.Env = append(os.Environ(),
+		"THORNOTES_TEST_MIGRATIONS_DIR="+root,
+		// This child is not a parallel package: its parent already holds the
+		// shared-database advisory lock, so it must not try to take it again.
+		"THORNOTES_TEST_REEXEC=1")
 	out, err := cmd.CombinedOutput()
 
 	require.Error(t, err, "the guard must fail when a down migration is missing; child output:\n%s", out)
