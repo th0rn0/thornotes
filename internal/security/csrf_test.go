@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -372,4 +373,102 @@ func TestCSRF_HandlerVariantKeepsSameShape(t *testing.T) {
 	assert.Equal(t, CSRFErrorCode, body["code"])
 	assert.Equal(t, "invalid csrf token", body["error"])
 	assert.Equal(t, "application/json; charset=utf-8", rr.Header().Get("Content-Type"))
+}
+
+// ── Idempotent read (the GET /api/v1/csrf contract) ───────────────────────────
+//
+// GET /api/v1/csrf used to mint a new token on every read, so one tab loading
+// its page invalidated the token every sibling tab was holding: a read with
+// side effects, and the reason the client needed a staleness heuristic at all.
+// EnsureCSRFToken is the read behind that route now — it returns what the
+// session already has while that is valid, and mints only when there is
+// nothing or the entry has expired. Rotation that matters is unchanged:
+// login (GenerateCSRFToken), logout (InvalidateCSRFToken) and expiry.
+
+func TestEnsureCSRFToken_RepeatedReadsReturnTheSameToken(t *testing.T) {
+	const session = "ensure-idempotent-session"
+
+	first, err := EnsureCSRFToken(session)
+	require.NoError(t, err)
+	require.NotEmpty(t, first)
+
+	second, err := EnsureCSRFToken(session)
+	require.NoError(t, err)
+	assert.Equal(t, first, second, "a read must not rotate the token")
+
+	// …and the token it keeps handing back is the one the middleware accepts,
+	// so a sibling tab holding the same value keeps working.
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("{}"))
+	req.AddCookie(&http.Cookie{Name: "session", Value: session})
+	req.Header.Set("X-CSRF-Token", second)
+	assert.Equal(t, http.StatusOK, serveGinCSRF(req).Code)
+}
+
+func TestEnsureCSRFToken_MintsWhenSessionHasNoEntry(t *testing.T) {
+	const session = "ensure-no-entry-session"
+
+	token, err := EnsureCSRFToken(session)
+	require.NoError(t, err)
+	require.NotEmpty(t, token)
+
+	stored, ok := loadValidCSRFEntry(session)
+	require.True(t, ok, "the minted token must be stored for the session")
+	assert.Equal(t, token, stored)
+}
+
+func TestEnsureCSRFToken_ExpiredEntryMintsANewToken(t *testing.T) {
+	const session = "ensure-expired-session"
+	// Inject a stale entry directly (waiting a week is not an option).
+	csrfStore.Store(session, csrfEntry{token: "expired-token", expires: time.Now().Add(-time.Second)})
+
+	token, err := EnsureCSRFToken(session)
+	require.NoError(t, err)
+	require.NotEmpty(t, token)
+	assert.NotEqual(t, "expired-token", token, "an expired entry must be replaced, not returned")
+
+	stored, ok := loadValidCSRFEntry(session)
+	require.True(t, ok)
+	assert.Equal(t, token, stored)
+}
+
+func TestEnsureCSRFToken_LogoutThenNewSessionRotates(t *testing.T) {
+	const session = "ensure-logout-session"
+
+	before, err := EnsureCSRFToken(session)
+	require.NoError(t, err)
+
+	InvalidateCSRFToken(session)
+
+	after, err := EnsureCSRFToken(session)
+	require.NoError(t, err)
+	assert.NotEqual(t, before, after, "logout must not be undone by a later read")
+
+	// A new session on login mints its own token too.
+	loginToken, err := GenerateCSRFToken(session)
+	require.NoError(t, err)
+	assert.NotEqual(t, after, loginToken, "login rotates the token")
+}
+
+func TestEnsureCSRFToken_ConcurrentFirstReadsAgree(t *testing.T) {
+	const session = "ensure-concurrent-session"
+
+	const readers = 16
+	results := make([]string, readers)
+	var wg sync.WaitGroup
+	for i := range results {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			token, err := EnsureCSRFToken(session)
+			assert.NoError(t, err)
+			results[i] = token
+		}(i)
+	}
+	wg.Wait()
+
+	// Two tabs hitting a session with no token at the same moment must not
+	// hand out two tokens: whichever loses the race adopts the winner's.
+	for i := 1; i < readers; i++ {
+		assert.Equal(t, results[0], results[i], "concurrent reads must agree on one token")
+	}
 }

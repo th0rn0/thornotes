@@ -45,15 +45,66 @@ type csrfEntry struct {
 // self-hosted deployment this is sufficient.
 var csrfStore sync.Map
 
-// GenerateCSRFToken creates a new CSRF token for the given session token.
-func GenerateCSRFToken(sessionToken string) (string, error) {
+// newCSRFEntry mints a token and the expiry that goes with it. Split out from
+// GenerateCSRFToken so EnsureCSRFToken can build a candidate entry before it
+// knows whether it needs to publish it.
+func newCSRFEntry() (csrfEntry, error) {
 	b := make([]byte, csrfTokenBytes)
 	if _, err := rand.Read(b); err != nil {
+		return csrfEntry{}, err
+	}
+	return csrfEntry{token: hex.EncodeToString(b), expires: time.Now().Add(csrfTokenTTL)}, nil
+}
+
+// isExpired reports whether e has passed its expiry. A zero expiry means
+// "never expires" and is left alone.
+func isExpired(e csrfEntry) bool {
+	return !e.expires.IsZero() && time.Now().After(e.expires)
+}
+
+// GenerateCSRFToken creates a new CSRF token for the given session token,
+// replacing any token already stored for that session. Callers that just want
+// "a token that works" — the GET /api/v1/csrf read — must use EnsureCSRFToken
+// instead: rotating on a read invalidates the token every sibling tab holds.
+func GenerateCSRFToken(sessionToken string) (string, error) {
+	entry, err := newCSRFEntry()
+	if err != nil {
 		return "", err
 	}
-	token := hex.EncodeToString(b)
-	csrfStore.Store(sessionToken, csrfEntry{token: token, expires: time.Now().Add(csrfTokenTTL)})
-	return token, nil
+	csrfStore.Store(sessionToken, entry)
+	return entry.token, nil
+}
+
+// EnsureCSRFToken returns the session's existing CSRF token while it is still
+// valid, and mints a new one only when there is none or it has expired.
+//
+// This is the idempotent read behind GET /api/v1/csrf. Rotation stays where a
+// rotation is meaningful: a new session on login (GenerateCSRFToken) and
+// logout (InvalidateCSRFToken) and expiry. Returning the stored token on a
+// read is what stops one tab's page load from invalidating every other tab's
+// token — a GET must not have side effects.
+func EnsureCSRFToken(sessionToken string) (string, error) {
+	if token, ok := loadValidCSRFEntry(sessionToken); ok {
+		return token, nil
+	}
+
+	entry, err := newCSRFEntry()
+	if err != nil {
+		return "", err
+	}
+
+	// Two concurrent reads on a session with no token would otherwise both
+	// mint: the second Store would invalidate the token the first handed out.
+	// LoadOrStore makes the loser adopt the winner's token instead.
+	actual, loaded := csrfStore.LoadOrStore(sessionToken, entry)
+	if loaded {
+		if existing, ok := actual.(csrfEntry); ok && !isExpired(existing) {
+			return existing.token, nil
+		}
+		// The entry we lost the race to has expired since: replace it.
+		csrfStore.Store(sessionToken, entry)
+	}
+	return entry.token, nil
 }
 
 // loadValidCSRFEntry returns the live CSRF token for sessionToken, or
@@ -68,7 +119,7 @@ func loadValidCSRFEntry(sessionToken string) (string, bool) {
 	if !ok {
 		return "", false
 	}
-	if !entry.expires.IsZero() && time.Now().After(entry.expires) {
+	if isExpired(entry) {
 		csrfStore.Delete(sessionToken)
 		return "", false
 	}

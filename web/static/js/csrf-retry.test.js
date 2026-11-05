@@ -4,16 +4,22 @@ const assert = require('node:assert/strict');
 
 // Tests for the stale-CSRF-token recovery in api() (web/static/js/app.js).
 //
-// Failure mode being guarded: the CSRF token is per-SESSION, not per-tab, and
-// GET /api/v1/csrf rotates it server-side. With one token in a module-level
-// variable, reloading tab A revoked tab B's copy, and tab B's next write was
-// rejected with a bare 403 the UI could not read as "stale token" — so the
-// edit was lost. The server now marks that rejection with
+// Failure mode being guarded: the CSRF token is per-SESSION, not per-tab, so
+// anything that rotates it (a login in another tab) leaves this tab's copy
+// stale. The rejection used to be a bare 403 the UI could not read as "stale
+// token" — so the edit was lost. The server now marks that rejection with
 // {"code":"csrf_invalid"} and api() refetches + replays exactly once.
+//
+// Since GET /api/v1/csrf became an idempotent read (it returns the session's
+// current token instead of minting a new one), a session change is the only
+// remaining cause of staleness, and the focus-refresh heuristic that used to
+// guess at it is gone. What replaces it is this replay.
 //
 // What must stay true:
 //   - 403 + code, then 200  -> two writes and one /api/v1/csrf, new token on
 //                              the replay, call resolves.
+//   - multipart upload      -> same as above, with the FormData body passed
+//                              through untouched and no Content-Type set.
 //   - 403 without the code  -> one write, no refresh, error thrown (a real
 //                              permission refusal must not be replayed).
 //   - 403 + code twice      -> exactly one retry, never a loop.
@@ -50,20 +56,14 @@ function makeNet(routes) {
   return { fetch, log };
 }
 
-// makeClient mirrors api(), refreshCSRFToken(), setCSRFToken() and the 401 hook
-// from app.js.
+// makeClient mirrors api(), refreshCSRFToken() and the 401 hook from app.js.
 function makeClient(net, { startToken = 'token-old', loggedIn = true } = {}) {
   let csrfToken = '';
-  let csrfFetchedAt = 0;
   let currentUser = loggedIn ? { username: 'u' } : null;
   let sessionExpired = false;
   let csrfFetches = 0;
 
-  function setCSRFToken(token) {
-    csrfToken = token;
-    csrfFetchedAt = Date.now();
-  }
-  setCSRFToken(startToken);
+  csrfToken = startToken;
 
   function handleSessionExpired() {
     if (sessionExpired) return;
@@ -76,24 +76,32 @@ function makeClient(net, { startToken = 'token-old', loggedIn = true } = {}) {
     if (!res.ok) throw new Error('csrf refresh failed: HTTP ' + res.status);
     const data = await res.json();
     if (!data || !data.csrf_token) throw new Error('csrf refresh: no token in response');
-    setCSRFToken(data.csrf_token);
+    csrfToken = data.csrf_token;
     return data.csrf_token;
   }
 
+  // Mirrors api() including the FormData passthrough added for the import
+  // modal: a multipart body goes to fetch untouched, with no Content-Type.
   async function api(method, path, body) {
     const mutating = method !== 'GET' && method !== 'HEAD';
+    const isFormData = typeof FormData !== 'undefined' && body instanceof FormData;
 
     const send = () => {
       const opts = {
         method,
-        headers: { 'Content-Type': 'application/json' },
+        headers: {},
         credentials: 'same-origin',
       };
       if (csrfToken && mutating) {
         opts.headers['X-CSRF-Token'] = csrfToken;
       }
-      if (body !== undefined) {
-        opts.body = JSON.stringify(body);
+      if (isFormData) {
+        opts.body = body;
+      } else {
+        opts.headers['Content-Type'] = 'application/json';
+        if (body !== undefined) {
+          opts.body = JSON.stringify(body);
+        }
       }
       return net.fetch(path, opts);
     };
@@ -130,7 +138,7 @@ function makeClient(net, { startToken = 'token-old', loggedIn = true } = {}) {
   return {
     api,
     refreshCSRFToken,
-    state: () => ({ csrfToken, csrfFetches, csrfFetchedAt, sessionExpired, currentUser }),
+    state: () => ({ csrfToken, csrfFetches, sessionExpired, currentUser }),
   };
 }
 
@@ -259,19 +267,54 @@ describe('api() stale-CSRF replay', () => {
   });
 });
 
-describe('token freshness clock', () => {
-  // The focus path is intentionally not exercised here (it needs a DOM); this
-  // pins the invariant it relies on: every path that installs a token also
-  // resets csrfFetchedAt, so "age" can never be measured from a stale clock.
-  test('refreshCSRFToken stamps the fetch time', async () => {
-    const net = makeNet({ '/api/v1/csrf': [csrfBytes] });
-    const client = makeClient(net, { startToken: '' });
+describe('api() multipart upload (import modal)', () => {
+  // POST /api/v1/import is the write with the most at stake: a whole archive
+  // of notes, rejected because another tab rotated the token. It used to be
+  // issued with its own raw fetch and its own X-CSRF-Token, which took it out
+  // of the replay entirely. It goes through api() now, and api() must carry a
+  // FormData body without touching it.
+  test('stale token: one 403, one refetch, one replay with the same FormData', async () => {
+    const net = makeNet({
+      '/api/v1/import': [csrfStale, ok({ notes_created: 3, folders_created: 1 })],
+      '/api/v1/csrf': [csrfBytes],
+    });
+    const client = makeClient(net);
+    const form = new FormData();
+    form.append('file', new Blob(['# archived note']), 'export.zip');
 
-    const before = client.state().csrfFetchedAt;
-    await client.refreshCSRFToken();
+    const result = await client.api('POST', '/api/v1/import', form);
 
+    assert.deepEqual(result, { notes_created: 3, folders_created: 1 });
+    assert.deepEqual(
+      net.log.map((c) => c.path),
+      ['/api/v1/import', '/api/v1/csrf', '/api/v1/import'],
+      'upload, token refetch, upload — exactly one 403 and one replay',
+    );
+    assert.equal(net.log.length, 3);
+
+    // The stale token went out first, the fresh one on the replay.
+    assert.equal(net.log[0].headers['X-CSRF-Token'], 'token-old');
+    assert.equal(net.log[2].headers['X-CSRF-Token'], 'token-new');
     assert.equal(client.state().csrfToken, 'token-new');
-    assert.ok(client.state().csrfFetchedAt >= before);
-    assert.ok(Date.now() - client.state().csrfFetchedAt < 5000);
+
+    // The body is never stringified or re-wrapped: the same FormData instance
+    // goes out both times, and api() sets no Content-Type of its own so the
+    // browser's multipart boundary survives.
+    assert.equal(net.log[0].body, form);
+    assert.equal(net.log[2].body, form);
+    assert.equal(net.log[0].headers['Content-Type'], undefined);
+    assert.equal(net.log[2].headers['Content-Type'], undefined);
+
+    assert.equal(client.state().csrfFetches, 1);
+  });
+
+  test('a JSON body still gets its Content-Type (the passthrough is opt-in by type)', async () => {
+    const net = makeNet({ '/api/v1/notes/7': [ok({ content_hash: 'sha-1' })] });
+    const client = makeClient(net);
+
+    await client.api('PATCH', '/api/v1/notes/7', { content: 'hi' });
+
+    assert.equal(net.log[0].headers['Content-Type'], 'application/json');
+    assert.equal(net.log[0].body, JSON.stringify({ content: 'hi' }));
   });
 });
