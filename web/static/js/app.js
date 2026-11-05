@@ -1952,20 +1952,104 @@ function showNotification(msg, isError = false) {
 }
 
 // ── API helper ─────────────────────────────────────────────────────────────
+//
+// The CSRF token is per-SESSION, not per-tab, so every tab of a session holds
+// the same one and anything that rotates it leaves the others stale. The bare
+// 403 that came back for a stale token was indistinguishable from "you are not
+// allowed", so the edit was lost silently.
+//
+// The fix has two halves:
+//   - server: GET /api/v1/csrf is a read and no longer rotates — it returns
+//     the session's current token while that is valid, and token rejections
+//     carry {"code":"csrf_invalid"} next to the existing 403
+//     (internal/security/csrf.go). The check itself is unchanged; only the
+//     failure became tellable apart.
+//   - here: on exactly that marker, refetch the token once and replay the
+//     request once. Any other 403 is left alone.
+//
+// With the read idempotent there is one cause of staleness left — a session
+// change, i.e. login or logout in another tab — and it surfaces as exactly the
+// 403 above. That is why the old focus refresh is gone: it refetched whenever
+// the cached token was older than CSRF_MAX_AGE_MS, which against a stable read
+// would hand back the same token almost every time, and the replay path
+// already covers the one case it was guessing at. The listener, the constant
+// and its clock went with it rather than being left wired to nothing.
+//
+// Why replaying is safe even for POST (a retried create must not duplicate a
+// note): the CSRF check runs in MIDDLEWARE, before the handler, so a rejected
+// request never executed any write — nothing was created, nothing to undo. If
+// a route ever validated CSRF *after* touching storage, this reasoning breaks
+// and the replay would have to be dropped for it; router.go currently applies
+// csrfMW ahead of every handler.
+const CSRF_ERROR_CODE = 'csrf_invalid';
+
+// refreshCSRFToken fetches and stores a fresh token. Deliberately not built on
+// api(): the 403 replay path calls this, and it must not be able to recurse.
+async function refreshCSRFToken() {
+  const res = await fetch('/api/v1/csrf', { credentials: 'same-origin' });
+  if (!res.ok) throw new Error(`csrf refresh failed: HTTP ${res.status}`);
+  const data = await res.json();
+  if (!data || !data.csrf_token) throw new Error('csrf refresh: no token in response');
+  csrfToken = data.csrf_token;
+  return data.csrf_token;
+}
+
+// api() is the only way the app talks to the API: it attaches the CSRF token
+// to mutations, replays a stale-token rejection once, and centralises the
+// session-expired 401. Every write path belongs here — including multipart
+// uploads, which is why a FormData body is passed through untouched below.
 async function api(method, path, body) {
-  const opts = {
-    method,
-    headers: { 'Content-Type': 'application/json' },
-    credentials: 'same-origin',
+  const mutating = method !== 'GET' && method !== 'HEAD';
+
+  // A FormData body must reach fetch as-is with no Content-Type: the browser
+  // sets multipart/form-data together with the boundary it generated, and a
+  // JSON.stringify or a hand-set header would corrupt the upload. Detecting it
+  // here is what lets the import modal use api() — and therefore the replay —
+  // instead of keeping its own fetch with its own copy of the retry.
+  const isFormData = typeof FormData !== 'undefined' && body instanceof FormData;
+
+  const send = () => {
+    const opts = {
+      method,
+      headers: {},
+      credentials: 'same-origin',
+    };
+    if (csrfToken && mutating) {
+      opts.headers['X-CSRF-Token'] = csrfToken;
+    }
+    if (isFormData) {
+      opts.body = body;
+    } else {
+      opts.headers['Content-Type'] = 'application/json';
+      if (body !== undefined) {
+        opts.body = JSON.stringify(body);
+      }
+    }
+    return fetch(path, opts);
   };
-  if (csrfToken && method !== 'GET' && method !== 'HEAD') {
-    opts.headers['X-CSRF-Token'] = csrfToken;
-  }
-  if (body !== undefined) {
-    opts.body = JSON.stringify(body);
+
+  const readBody = async (res) => {
+    try { return await res.json(); } catch { return {}; }
+  };
+
+  let res = await send();
+  let data = await readBody(res);
+
+  // Stale-token recovery: one refetch, one replay, and only for the marked
+  // rejection. A 403 without the code is never retried, and neither is a
+  // second failure — the retry is attempted once per api() call, so there is
+  // no loop to guard beyond this block.
+  if (res.status === 403 && data && data.code === CSRF_ERROR_CODE && mutating) {
+    try {
+      await refreshCSRFToken();
+      res = await send();
+      data = await readBody(res);
+    } catch (_) {
+      // Refresh failed (offline, session gone). Fall through and report the
+      // original rejection — a "csrf refresh failed" message would hide why.
+    }
   }
 
-  const res = await fetch(path, opts);
   // A 401 on any request once the user is logged in means the login session
   // has died (7-day TTL elapsed, server-side logout, or the cookie was
   // cleared). Surface it loudly here, centrally, so every caller is covered —
@@ -1975,8 +2059,6 @@ async function api(method, path, body) {
   if (res.status === 401 && currentUser) {
     handleSessionExpired();
   }
-  let data;
-  try { data = await res.json(); } catch { data = {}; }
 
   if (!res.ok) {
     const err = new Error(data.error || `HTTP ${res.status}`);
@@ -2803,13 +2885,13 @@ document.getElementById('import-confirm-btn').addEventListener('click', async fu
   statusEl.textContent = 'Importing…';
   this.disabled = true;
   try {
-    const res = await fetch('/api/v1/import', {
-      method: 'POST',
-      headers: { 'X-CSRF-Token': csrfToken },
-      body: formData,
-    });
-    const body = await res.json();
-    if (!res.ok) throw new Error(body.error || 'Import failed');
+    // Through api(), not a raw fetch: this is a mutating request and must get
+    // the same stale-token refetch-and-replay as every other write. A multi-file
+    // import that 403s because another tab rotated the token is the same
+    // edit-loss bug with more at stake. api() passes the FormData through
+    // untouched (no Content-Type of its own) so the browser still sets the
+    // multipart boundary, and attaches X-CSRF-Token itself.
+    const body = await api('POST', '/api/v1/import', formData);
     statusEl.style.color = '#2e7d32';
     statusEl.textContent = `Imported ${body.notes_created} note${body.notes_created !== 1 ? 's' : ''}` +
       (body.folders_created ? ` and ${body.folders_created} folder${body.folders_created !== 1 ? 's' : ''}` : '') + '.';

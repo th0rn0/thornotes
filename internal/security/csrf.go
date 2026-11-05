@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/hex"
+	"encoding/json"
 	"net/http"
 	"sync"
 	"time"
@@ -19,6 +20,19 @@ const (
 	// this bound the in-memory map grows unboundedly when sessions expire
 	// without an explicit logout (which is the common case).
 	csrfTokenTTL = 7 * 24 * time.Hour
+
+	// CSRFErrorCode is the machine-readable marker returned alongside the 403
+	// that rejects a mutating request whose CSRF token is missing, unknown or
+	// stale. A bare 403 is ambiguous: the SPA cannot tell "another tab rotated
+	// the token, refetch /api/v1/csrf and replay this write" from "you are not
+	// allowed, stop". The client matches on this exact string, so it is part of
+	// the API contract — change it and web/static/js/app.js must change too.
+	//
+	// It is attached only to token-value rejections. The missing-session-cookie
+	// branch keeps the plain {"error":"forbidden"} body without a code: no
+	// token refresh can rescue an absent session, and giving that case a code
+	// would make the client replay a request that is guaranteed to fail again.
+	CSRFErrorCode = "csrf_invalid"
 )
 
 type csrfEntry struct {
@@ -31,15 +45,66 @@ type csrfEntry struct {
 // self-hosted deployment this is sufficient.
 var csrfStore sync.Map
 
-// GenerateCSRFToken creates a new CSRF token for the given session token.
-func GenerateCSRFToken(sessionToken string) (string, error) {
+// newCSRFEntry mints a token and the expiry that goes with it. Split out from
+// GenerateCSRFToken so EnsureCSRFToken can build a candidate entry before it
+// knows whether it needs to publish it.
+func newCSRFEntry() (csrfEntry, error) {
 	b := make([]byte, csrfTokenBytes)
 	if _, err := rand.Read(b); err != nil {
+		return csrfEntry{}, err
+	}
+	return csrfEntry{token: hex.EncodeToString(b), expires: time.Now().Add(csrfTokenTTL)}, nil
+}
+
+// isExpired reports whether e has passed its expiry. A zero expiry means
+// "never expires" and is left alone.
+func isExpired(e csrfEntry) bool {
+	return !e.expires.IsZero() && time.Now().After(e.expires)
+}
+
+// GenerateCSRFToken creates a new CSRF token for the given session token,
+// replacing any token already stored for that session. Callers that just want
+// "a token that works" — the GET /api/v1/csrf read — must use EnsureCSRFToken
+// instead: rotating on a read invalidates the token every sibling tab holds.
+func GenerateCSRFToken(sessionToken string) (string, error) {
+	entry, err := newCSRFEntry()
+	if err != nil {
 		return "", err
 	}
-	token := hex.EncodeToString(b)
-	csrfStore.Store(sessionToken, csrfEntry{token: token, expires: time.Now().Add(csrfTokenTTL)})
-	return token, nil
+	csrfStore.Store(sessionToken, entry)
+	return entry.token, nil
+}
+
+// EnsureCSRFToken returns the session's existing CSRF token while it is still
+// valid, and mints a new one only when there is none or it has expired.
+//
+// This is the idempotent read behind GET /api/v1/csrf. Rotation stays where a
+// rotation is meaningful: a new session on login (GenerateCSRFToken) and
+// logout (InvalidateCSRFToken) and expiry. Returning the stored token on a
+// read is what stops one tab's page load from invalidating every other tab's
+// token — a GET must not have side effects.
+func EnsureCSRFToken(sessionToken string) (string, error) {
+	if token, ok := loadValidCSRFEntry(sessionToken); ok {
+		return token, nil
+	}
+
+	entry, err := newCSRFEntry()
+	if err != nil {
+		return "", err
+	}
+
+	// Two concurrent reads on a session with no token would otherwise both
+	// mint: the second Store would invalidate the token the first handed out.
+	// LoadOrStore makes the loser adopt the winner's token instead.
+	actual, loaded := csrfStore.LoadOrStore(sessionToken, entry)
+	if loaded {
+		if existing, ok := actual.(csrfEntry); ok && !isExpired(existing) {
+			return existing.token, nil
+		}
+		// The entry we lost the race to has expired since: replace it.
+		csrfStore.Store(sessionToken, entry)
+	}
+	return entry.token, nil
 }
 
 // loadValidCSRFEntry returns the live CSRF token for sessionToken, or
@@ -54,11 +119,30 @@ func loadValidCSRFEntry(sessionToken string) (string, bool) {
 	if !ok {
 		return "", false
 	}
-	if !entry.expires.IsZero() && time.Now().After(entry.expires) {
+	if isExpired(entry) {
 		csrfStore.Delete(sessionToken)
 		return "", false
 	}
 	return entry.token, true
+}
+
+// writeCSRFRejection writes the 403 body for a rejected token: the human
+// message plus the machine-readable CSRFErrorCode. One helper for both
+// middlewares so the two shapes cannot drift apart.
+func writeCSRFRejection(w http.ResponseWriter, msg string) {
+	body, err := json.Marshal(gin.H{"error": msg, "code": CSRFErrorCode})
+	if err != nil {
+		http.Error(w, `{"error":"forbidden"}`, http.StatusForbidden)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(http.StatusForbidden)
+	_, _ = w.Write(body)
+}
+
+// abortCSRFGin is the gin twin of writeCSRFRejection.
+func abortCSRFGin(c *gin.Context, msg string) {
+	c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": msg, "code": CSRFErrorCode})
 }
 
 // CSRFMiddleware validates the X-CSRF-Token header against the session's stored token.
@@ -80,18 +164,18 @@ func CSRFMiddleware(next http.Handler) http.Handler {
 
 		provided := r.Header.Get("X-CSRF-Token")
 		if provided == "" {
-			http.Error(w, `{"error":"csrf token required"}`, http.StatusForbidden)
+			writeCSRFRejection(w, "csrf token required")
 			return
 		}
 
 		stored, ok := loadValidCSRFEntry(cookie.Value)
 		if !ok {
-			http.Error(w, `{"error":"csrf token not found"}`, http.StatusForbidden)
+			writeCSRFRejection(w, "csrf token not found")
 			return
 		}
 
 		if subtle.ConstantTimeCompare([]byte(provided), []byte(stored)) != 1 {
-			http.Error(w, `{"error":"invalid csrf token"}`, http.StatusForbidden)
+			writeCSRFRejection(w, "invalid csrf token")
 			return
 		}
 
@@ -117,18 +201,18 @@ func CSRFGinMiddleware() gin.HandlerFunc {
 
 		provided := c.Request.Header.Get("X-CSRF-Token")
 		if provided == "" {
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "csrf token required"})
+			abortCSRFGin(c, "csrf token required")
 			return
 		}
 
 		stored, ok := loadValidCSRFEntry(cookie)
 		if !ok {
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "csrf token not found"})
+			abortCSRFGin(c, "csrf token not found")
 			return
 		}
 
 		if subtle.ConstantTimeCompare([]byte(provided), []byte(stored)) != 1 {
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "invalid csrf token"})
+			abortCSRFGin(c, "invalid csrf token")
 			return
 		}
 
