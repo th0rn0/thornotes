@@ -15,7 +15,7 @@ import (
 
 func TestStream_NoUser(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	h := NewEventsHandler(hub.New())
+	h := NewEventsHandler(hub.New(), nil)
 
 	r := gin.New()
 	r.GET("/events", func(c *gin.Context) {
@@ -33,7 +33,7 @@ func TestStream_NoUser(t *testing.T) {
 
 func TestStream_ConnectAndDisconnect(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	h := NewEventsHandler(hub.New())
+	h := NewEventsHandler(hub.New(), nil)
 
 	user := &model.User{ID: 2, Username: "bob"}
 
@@ -62,7 +62,7 @@ func TestStream_ConnectAndDisconnect(t *testing.T) {
 func TestStream_EventReceived(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	h := hub.New()
-	eh := NewEventsHandler(h)
+	eh := NewEventsHandler(h, nil)
 
 	user := &model.User{ID: 3, Username: "carol"}
 

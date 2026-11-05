@@ -22,6 +22,7 @@ import (
 	"github.com/th0rn0/thornotes/internal/config"
 	"github.com/th0rn0/thornotes/internal/db"
 	"github.com/th0rn0/thornotes/internal/devseed"
+	"github.com/th0rn0/thornotes/internal/handler"
 	"github.com/th0rn0/thornotes/internal/hub"
 	"github.com/th0rn0/thornotes/internal/notes"
 	"github.com/th0rn0/thornotes/internal/repository"
@@ -150,6 +151,18 @@ func main() {
 	// Build SSE hub.
 	notifyHub := hub.New()
 
+	// Reap SSE subscribers that stopped receiving writes (a leaked or wedged
+	// stream). 2 keepalive intervals without a successful write is dead.
+	stopReaper := notifyHub.StartReaper(handler.SSEKeepaliveInterval, 2*handler.SSEKeepaliveInterval)
+	defer stopReaper()
+
+	// SSE shutdown: srv.RegisterOnShutdown cancels this context *before*
+	// srv.Shutdown waits for idle connections, so open event streams return
+	// immediately instead of holding the graceful-shutdown window open for
+	// connections that will never go idle on their own.
+	sseShutdown, sseShutdownCancel := context.WithCancel(context.Background())
+	defer sseShutdownCancel()
+
 	// Parse templates from embedded FS.
 	tmpl, err := template.ParseFS(thornotes.TemplatesFS, "web/templates/*.html")
 	if err != nil {
@@ -166,7 +179,7 @@ func main() {
 		log.Error().Err(err).Msg("sub static fs")
 		os.Exit(1)
 	}
-	h := router.New(authSvc, notesSvc, apiTokenRepo, userRepo, rateLimiter, tmpl, http.FS(staticSub), notifyHub, cfg.SecureCookies, cfg.EnableGitHistory, pool)
+	h := router.New(authSvc, notesSvc, apiTokenRepo, userRepo, rateLimiter, tmpl, http.FS(staticSub), notifyHub, cfg.SecureCookies, cfg.EnableGitHistory, pool, sseShutdown)
 
 	srv := &http.Server{
 		Addr:         cfg.Addr,
@@ -175,6 +188,10 @@ func main() {
 		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  60 * time.Second,
 	}
+
+	// Must be registered before Shutdown is called; Shutdown invokes it first
+	// thing so streaming handlers tear down their connections promptly.
+	srv.RegisterOnShutdown(sseShutdownCancel)
 
 	// Graceful shutdown.
 	stop := make(chan os.Signal, 1)

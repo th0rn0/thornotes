@@ -1,6 +1,7 @@
 package router_test
 
 import (
+	"context"
 	"html/template"
 	"net/http"
 	"net/http/httptest"
@@ -51,7 +52,7 @@ func buildHandler(t *testing.T) http.Handler {
 	staticSub, err := iofs.Sub(thornotes.StaticFS, "web/static")
 	require.NoError(t, err)
 
-	return router.New(authSvc, notesSvc, apiTokenRepo, userRepo, rateLimiter, tmpl, http.FS(staticSub), hub.New(), false, false, &stubDBHealth{})
+	return router.New(authSvc, notesSvc, apiTokenRepo, userRepo, rateLimiter, tmpl, http.FS(staticSub), hub.New(), false, false, &stubDBHealth{}, context.Background())
 }
 
 // stubDBHealth satisfies handler.DBHealthChecker for router tests.
@@ -160,7 +161,7 @@ func TestRouter_Healthz_DBError(t *testing.T) {
 	require.NoError(t, err)
 
 	h := router.New(authSvc, notesSvc, apiTokenRepo, userRepo, rateLimiter, tmpl, http.FS(staticSub), hub.New(), false, false,
-		&stubDBHealth{err: "connection refused"})
+		&stubDBHealth{err: "connection refused"}, context.Background())
 
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	rr := httptest.NewRecorder()

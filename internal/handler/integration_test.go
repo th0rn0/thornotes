@@ -2,6 +2,7 @@ package handler_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	iofs "io/fs"
 	"net/http"
@@ -77,7 +78,7 @@ func newTestClientWithRegistration(t *testing.T, allowRegistration bool) *testCl
 	staticSub, err := iofs.Sub(thornotes.StaticFS, "web/static")
 	require.NoError(t, err)
 
-	h := router.New(authSvc, notesSvc, apiTokenRepo, userRepo, rateLimiter, tmpl, http.FS(staticSub), hub.New(), false, false, &stubDBHealth{})
+	h := router.New(authSvc, notesSvc, apiTokenRepo, userRepo, rateLimiter, tmpl, http.FS(staticSub), hub.New(), false, false, &stubDBHealth{}, context.Background())
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
 
@@ -1582,7 +1583,7 @@ func newTestClientGit(t *testing.T) *testClient {
 	staticSub, err := iofs.Sub(thornotes.StaticFS, "web/static")
 	require.NoError(t, err)
 
-	h := router.New(authSvc, notesSvc, apiTokenRepo, userRepo, rateLimiter, tmpl, http.FS(staticSub), hub.New(), false, true, &stubDBHealth{})
+	h := router.New(authSvc, notesSvc, apiTokenRepo, userRepo, rateLimiter, tmpl, http.FS(staticSub), hub.New(), false, true, &stubDBHealth{}, context.Background())
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
 
