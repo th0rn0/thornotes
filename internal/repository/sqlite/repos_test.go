@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"path/filepath"
 	"testing"
@@ -580,6 +581,42 @@ func TestNoteRepo_SetShareToken(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, got2.ShareToken)
 }
+
+func TestNoteRepo_SetShareToken_OtherUsersNote_NotFound(t *testing.T) {
+	pool := openTestDB(t)
+	owner := createUser(t, pool)
+	other, err := NewUserRepo(pool.WriteDB).Create(context.Background(), "user2", "hash", "test-uuid-2")
+	require.NoError(t, err)
+
+	repo := NewNoteRepo(pool.ReadDB, pool.WriteDB)
+	created := createTestNote(t, pool, owner.ID, nil, "Owner Share Note")
+
+	// The owner shares first, so the other user's attempt has a live token to clobber.
+	ownerToken := "owner-token"
+	require.NoError(t, repo.SetShareToken(context.Background(), owner.ID, created.ID, &ownerToken))
+
+	err = repo.SetShareToken(context.Background(), other.ID, created.ID, strPtr("stolen-token"))
+	require.Error(t, err)
+	assert.ErrorIs(t, err, apperror.ErrNotFound)
+
+	var stored sql.NullString
+	require.NoError(t, pool.ReadDB.QueryRow(
+		`SELECT share_token FROM notes WHERE id = ?`, created.ID).Scan(&stored))
+	require.True(t, stored.Valid)
+	assert.Equal(t, ownerToken, stored.String, "the owner's token must be untouched")
+}
+
+func TestNoteRepo_SetShareToken_MissingNote_NotFound(t *testing.T) {
+	pool := openTestDB(t)
+	user := createUser(t, pool)
+	repo := NewNoteRepo(pool.ReadDB, pool.WriteDB)
+
+	err := repo.SetShareToken(context.Background(), user.ID, 99999, strPtr("nowhere-token"))
+	require.Error(t, err)
+	assert.ErrorIs(t, err, apperror.ErrNotFound)
+}
+
+func strPtr(s string) *string { return &s }
 
 func TestNoteRepo_GetByShareToken(t *testing.T) {
 	pool := openTestDB(t)

@@ -243,11 +243,39 @@ func (r *NoteRepo) Delete(ctx context.Context, userID, noteID int64) error {
 }
 
 func (r *NoteRepo) SetShareToken(ctx context.Context, userID, noteID int64, token *string) error {
-	_, err := r.db.ExecContext(ctx,
+	res, err := r.db.ExecContext(ctx,
 		`UPDATE notes SET share_token = ? WHERE id = ? AND user_id = ?`,
 		token, noteID, userID,
 	)
-	return err
+	if err != nil {
+		return err
+	}
+	// MySQL reports *changed* rows, not matched rows, so a no-op UPDATE (clearing
+	// an already-cleared token) is indistinguishable from "no such row" by the
+	// count alone. Confirm ownership before reporting not-found, the same
+	// distinction APITokenRepo.SetScope makes. Returning nil on zero rows matched
+	// would be the bug: a token handed to the caller that was never written.
+	if n, _ := res.RowsAffected(); n == 0 {
+		return r.ensureNoteOwned(ctx, userID, noteID)
+	}
+	return nil
+}
+
+// ensureNoteOwned returns apperror.ErrNotFound unless a note with this id belongs
+// to userID. It is the tie-breaker for a by-(id, user_id) UPDATE that reported
+// zero rows affected on a driver that counts changed rows.
+func (r *NoteRepo) ensureNoteOwned(ctx context.Context, userID, noteID int64) error {
+	var exists bool
+	if err := r.db.QueryRowContext(ctx,
+		`SELECT EXISTS(SELECT 1 FROM notes WHERE id = ? AND user_id = ?)`,
+		noteID, userID,
+	).Scan(&exists); err != nil {
+		return fmt.Errorf("check note ownership: %w", err)
+	}
+	if !exists {
+		return apperror.ErrNotFound
+	}
+	return nil
 }
 
 func (r *NoteRepo) ListForContext(ctx context.Context, userID int64, folderID *int64) ([]*model.Note, error) {

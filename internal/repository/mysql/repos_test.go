@@ -2,6 +2,7 @@ package mysql
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"os"
 	"testing"
@@ -825,6 +826,41 @@ func TestMySQL_NoteRepo_SetShareToken(t *testing.T) {
 	got2, err := repo.GetByID(context.Background(), user.ID, created.ID)
 	require.NoError(t, err)
 	assert.Nil(t, got2.ShareToken)
+}
+
+func TestMySQL_NoteRepo_SetShareToken_OtherUsersNote_NotFound(t *testing.T) {
+	pool := openTestMySQL(t)
+	owner := createMySQLUser(t, pool)
+	other, err := NewUserRepo(pool.WriteDB).Create(context.Background(), "user2", "hash", "test-uuid-2")
+	require.NoError(t, err)
+
+	repo := NewNoteRepo(pool.WriteDB)
+	created := createMySQLNote(t, pool, owner.ID, nil, "Owner Share MySQL Note", "owner-share-mysql-note")
+
+	ownerToken := "mysql-owner-token"
+	require.NoError(t, repo.SetShareToken(context.Background(), owner.ID, created.ID, &ownerToken))
+
+	stolen := "mysql-stolen-token"
+	err = repo.SetShareToken(context.Background(), other.ID, created.ID, &stolen)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, apperror.ErrNotFound)
+
+	var stored sql.NullString
+	require.NoError(t, pool.ReadDB.QueryRow(
+		`SELECT share_token FROM notes WHERE id = ?`, created.ID).Scan(&stored))
+	require.True(t, stored.Valid)
+	assert.Equal(t, ownerToken, stored.String, "the owner's token must be untouched")
+}
+
+func TestMySQL_NoteRepo_SetShareToken_MissingNote_NotFound(t *testing.T) {
+	pool := openTestMySQL(t)
+	user := createMySQLUser(t, pool)
+	repo := NewNoteRepo(pool.WriteDB)
+
+	missing := "mysql-nowhere-token"
+	err := repo.SetShareToken(context.Background(), user.ID, 99999999, &missing)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, apperror.ErrNotFound)
 }
 
 func TestMySQL_NoteRepo_GetByShareToken(t *testing.T) {

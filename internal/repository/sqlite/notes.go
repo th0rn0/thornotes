@@ -245,11 +245,22 @@ func (r *NoteRepo) Delete(ctx context.Context, userID, noteID int64) error {
 }
 
 func (r *NoteRepo) SetShareToken(ctx context.Context, userID, noteID int64, token *string) error {
-	_, err := r.writeDB.ExecContext(ctx,
+	res, err := r.writeDB.ExecContext(ctx,
 		`UPDATE notes SET share_token = ? WHERE id = ? AND user_id = ?`,
 		token, noteID, userID,
 	)
-	return err
+	if err != nil {
+		return err
+	}
+	// Zero rows matched means no note with this id belongs to this user: either
+	// it does not exist or it is somebody else's. SQLite reports every row the
+	// UPDATE matched (even when the value is unchanged), so no distinction is
+	// needed here. Returning nil would let the handler hand out a token that was
+	// never written and tell the caller the note is shared.
+	if n, _ := res.RowsAffected(); n == 0 {
+		return apperror.ErrNotFound
+	}
+	return nil
 }
 
 func (r *NoteRepo) ListForContext(ctx context.Context, userID int64, folderID *int64) ([]*model.Note, error) {
