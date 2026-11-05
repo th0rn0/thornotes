@@ -151,3 +151,14 @@ That statement only rewrites the bookkeeping. It cannot complete a half-applied 
 ## Error text source
 
 The two startup errors above are emitted by `internal/db/schema.go`. The example versions shown here match the source format; actual numbers vary with the database and build.
+
+## CI runner cache volumes (Drone)
+
+The Drone runner keeps expensive tool caches on its host and bind-mounts them into pipeline steps.
+
+| Host path | Mounted at | Used by | Content |
+| --- | --- | --- | --- |
+| `/var/cache/drone/gradle-home` | `/root/.gradle` | `build-android` | Gradle caches |
+
+- Go module downloads are **not** cached on the runner: the Go steps (`lint`, `test`, `build-linux-binary`) each fetch their own module tree. Measured on this runner, a fully cold download adds ~1 s to the `test` step (52 `go: downloading` lines), so a shared module cache does not pay for itself — and while two builds run at once it made them *slower* (~+50 s per `test` step), so it was removed in ticket 597.
+- The `test` step instead retries the *download* once (`go mod download all || go mod download all`): a single stream reset from `proxy.golang.org` (HTTP/2 `stream error`, as on build #226) no longer turns the build red. The download is idempotent and hash-verified against `go.sum`, so the retry cannot mask a corrupted or wrong module; real test failures are never retried.

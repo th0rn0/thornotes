@@ -138,6 +138,16 @@ steps:
       # dropped MySQL variable can never silently disable the MySQL leg again.
       THORNOTES_REQUIRE_MYSQL: "1"
     commands:
+      # Retry policy — retry the DOWNLOAD, never the tests. A module fetch
+      # from proxy.golang.org can fail mid-stream (HTTP/2 "stream error", as
+      # on build #226); `go mod download` is idempotent and every artefact is
+      # hash-verified against go.sum, so the retry cannot mask a corrupted or
+      # wrong module — it either produces the right bytes or fails again.
+      # `all` (not the default) matters: the graph includes modules nothing
+      # imports, exactly the class that broke #230's lint (mongo-driver is
+      # // indirect and imported nowhere). A blanket `go test ... || go test`
+      # would be wrong — it hides genuine test failures.
+      - go mod download all || go mod download all
       - go test -race -coverprofile=coverage.out -covermode=atomic ./...
       - go tool cover -func=coverage.out | tail -1
 
