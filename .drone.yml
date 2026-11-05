@@ -81,6 +81,7 @@ steps:
       - node --test web/static/js/editor-scroll-reset.test.js
       - node --test web/static/js/default-note-view.test.js
       - node --test web/static/js/session-expiry.test.js
+      - node --test web/static/js/csrf-retry.test.js
       - node --test web/static/js/links-panel.test.js
       - node --test web/static/js/sw-version.test.js
       - npm install --prefix web/cm6-bundle
