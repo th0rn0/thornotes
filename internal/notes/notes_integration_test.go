@@ -482,9 +482,10 @@ func TestService_SetShareToken_NotFound(t *testing.T) {
 	ctx := context.Background()
 
 	_, err := svc.SetShareToken(ctx, userID, 99999, false)
-	// SetShareToken doesn't check existence — ExecContext on non-existent note
-	// just affects 0 rows without error in SQLite.
-	_ = err // may or may not error depending on impl
+	// A note that does not exist (or belongs to somebody else) matches no row, so
+	// the repository reports not-found instead of pretending a token was written.
+	require.Error(t, err)
+	assert.ErrorIs(t, err, apperror.ErrNotFound)
 }
 
 func TestService_Reconcile(t *testing.T) {

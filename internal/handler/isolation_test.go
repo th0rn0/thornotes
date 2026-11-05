@@ -228,14 +228,12 @@ func TestIsolation_MoveNote_OtherUserDenied(t *testing.T) {
 func TestIsolation_ShareNote_OtherUserDoesNotPersist(t *testing.T) {
 	f := newIsolationFixture(t)
 
-	// The security property is that bob cannot publish alice's note. The
-	// endpoint currently answers 200 even when the UPDATE matches no row
-	// (repository/sqlite/notes.go SetShareToken ignores RowsAffected), so this
-	// test asserts the persisted state that matters rather than the status code.
-	// Recorded as a follow-up: it should answer 404.
+	// The security property is that bob cannot publish alice's note. Since
+	// repository/sqlite/notes.go SetShareToken checks RowsAffected, a share
+	// attempt that matches no row is a 404, not a 200 with an unwritten token.
 	resp := f.client.do(t, http.MethodPost, "/api/v1/notes/"+i64str(f.noteID)+"/share", map[string]any{})
-	assert.Contains(t, []int{http.StatusOK, http.StatusNotFound}, resp.StatusCode,
-		"bob's share attempt must not fail with a server error")
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode,
+		"bob must not be told he shared alice's note")
 	resp.Body.Close()
 
 	f.asAlice(t)

@@ -2,6 +2,7 @@ package mysql
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"os"
 	"testing"
@@ -825,6 +826,81 @@ func TestMySQL_NoteRepo_SetShareToken(t *testing.T) {
 	got2, err := repo.GetByID(context.Background(), user.ID, created.ID)
 	require.NoError(t, err)
 	assert.Nil(t, got2.ShareToken)
+}
+
+// TestMySQL_NoteRepo_SetShareToken_ClearTwice exercises the branch that the
+// ownership tie-breaker exists for. MySQL counts *changed* rows, so writing NULL
+// over an already-NULL column reports 0 — the same number as an UPDATE that
+// matched no row. The tie-breaker must therefore answer "the note is yours, this
+// was a no-op" rather than not-found.
+func TestMySQL_NoteRepo_SetShareToken_ClearTwice(t *testing.T) {
+	pool := openTestMySQL(t)
+	user := createMySQLUser(t, pool)
+	repo := NewNoteRepo(pool.WriteDB)
+	created := createMySQLNote(t, pool, user.ID, nil, "Clear Twice MySQL Note", "clear-twice-mysql-note")
+	ctx := context.Background()
+
+	// Never shared: the column is already NULL, so the update changes nothing.
+	require.NoError(t, repo.SetShareToken(ctx, user.ID, created.ID, nil))
+	require.NoError(t, repo.SetShareToken(ctx, user.ID, created.ID, nil),
+		"clearing an already-NULL token must succeed, not report not-found")
+
+	var stored sql.NullString
+	require.NoError(t, pool.ReadDB.QueryRow(
+		`SELECT share_token FROM notes WHERE id = ?`, created.ID).Scan(&stored))
+	assert.False(t, stored.Valid, "the column must still be NULL")
+
+	// And again after a real share, where the first clear genuinely changes a row.
+	token := "clear-twice-mysql-token"
+	require.NoError(t, repo.SetShareToken(ctx, user.ID, created.ID, &token))
+	require.NoError(t, repo.SetShareToken(ctx, user.ID, created.ID, nil))
+	require.NoError(t, repo.SetShareToken(ctx, user.ID, created.ID, nil),
+		"a second clear after a real share must also succeed")
+
+	// The generate branch still reports a note that is not the user's, without
+	// consulting the tie-breaker: the fresh token cannot already be stored, so a
+	// zero changed-row count there can only mean no matching row.
+	other, err := NewUserRepo(pool.WriteDB).Create(ctx, "user-clear-twice", "hash", "test-uuid-clear-twice")
+	require.NoError(t, err)
+	foreign := "not-mine"
+	err = repo.SetShareToken(ctx, other.ID, created.ID, &foreign)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, apperror.ErrNotFound)
+}
+
+func TestMySQL_NoteRepo_SetShareToken_OtherUsersNote_NotFound(t *testing.T) {
+	pool := openTestMySQL(t)
+	owner := createMySQLUser(t, pool)
+	other, err := NewUserRepo(pool.WriteDB).Create(context.Background(), "user2", "hash", "test-uuid-2")
+	require.NoError(t, err)
+
+	repo := NewNoteRepo(pool.WriteDB)
+	created := createMySQLNote(t, pool, owner.ID, nil, "Owner Share MySQL Note", "owner-share-mysql-note")
+
+	ownerToken := "mysql-owner-token"
+	require.NoError(t, repo.SetShareToken(context.Background(), owner.ID, created.ID, &ownerToken))
+
+	stolen := "mysql-stolen-token"
+	err = repo.SetShareToken(context.Background(), other.ID, created.ID, &stolen)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, apperror.ErrNotFound)
+
+	var stored sql.NullString
+	require.NoError(t, pool.ReadDB.QueryRow(
+		`SELECT share_token FROM notes WHERE id = ?`, created.ID).Scan(&stored))
+	require.True(t, stored.Valid)
+	assert.Equal(t, ownerToken, stored.String, "the owner's token must be untouched")
+}
+
+func TestMySQL_NoteRepo_SetShareToken_MissingNote_NotFound(t *testing.T) {
+	pool := openTestMySQL(t)
+	user := createMySQLUser(t, pool)
+	repo := NewNoteRepo(pool.WriteDB)
+
+	missing := "mysql-nowhere-token"
+	err := repo.SetShareToken(context.Background(), user.ID, 99999999, &missing)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, apperror.ErrNotFound)
 }
 
 func TestMySQL_NoteRepo_GetByShareToken(t *testing.T) {

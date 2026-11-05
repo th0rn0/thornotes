@@ -6,6 +6,11 @@ All notable changes to thornotes are documented here.
 
 ### Changed
 - Startup now refuses databases whose schema version is newer than the running build supports; the recovery path is documented in [docs/operations.md](docs/operations.md).
+- `POST /api/v1/notes/:id/share` answers `404 Not Found` when the note does not belong to the caller (it previously answered `200` with a share token that had not been written, so a failed share was indistinguishable from a successful one). Behaviour change for any tooling that treated the old `200` as success.
+
+### Fixed
+- **Unsharing a note can no longer publish it.** The share handler discarded the error from decoding the request body, so an unpublish attempt whose payload it could not parse — `{"clear":"true"}`, `{"clear":1}`, or a body that is not JSON — fell through to the "generate a token" branch: the caller was told the note was unpublished and was handed a fresh, working public link. A body that does not decode is now `400 Bad Request`, and a refused request neither revokes nor rotates the note's existing token. A request with no body at all still means "share"; `{"clear":true}` still unpublishes; clearing an already-cleared note stays `200` with a `null` token.
+- Both `SetShareToken` repository implementations now treat a failure to read `RowsAffected` as an error instead of inferring success, and the MySQL change-count/ownership tie-breaker is scoped to the clear branch, where "no rows changed" can legitimately mean "already unpublished". On the generate branch a freshly minted token cannot already be stored, so a zero change count there can only mean the note does not exist for that user.
 
 ## [1.5.14.0] - 2026-06-13
 
