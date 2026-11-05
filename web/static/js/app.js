@@ -92,7 +92,7 @@ async function applyRegistrationConfig() {
     currentUser = me;
     document.getElementById('topbar-username').textContent = me.username;
     const csrf = await api('GET', '/api/v1/csrf');
-    csrfToken = csrf.csrf_token;
+    setCSRFToken(csrf.csrf_token);
     await Promise.all([loadFolderTree(), loadJournals()]);
     showApp();
     await resolveDeepLink(window.location.pathname).catch(() => {});
@@ -124,7 +124,7 @@ async function login() {
   document.getElementById('login-error').textContent = '';
   try {
     const res = await api('POST', '/api/v1/auth/login', { username, password });
-    csrfToken = res.csrf_token;
+    setCSRFToken(res.csrf_token);
     const me = await api('GET', '/api/v1/auth/me');
     currentUser = me;
     document.getElementById('topbar-username').textContent = me.username;
@@ -1952,20 +1952,105 @@ function showNotification(msg, isError = false) {
 }
 
 // ── API helper ─────────────────────────────────────────────────────────────
+//
+// The CSRF token is per-SESSION, not per-tab: GET /api/v1/csrf issues a new
+// token, stores it server-side and thereby invalidates the copy every other
+// tab is holding. With one token in a module-level variable, reloading tab A
+// killed the next save in tab B, and the bare 403 that came back was
+// indistinguishable from "you are not allowed" — so the edit was lost silently.
+//
+// The fix has two halves:
+//   - server: token rejections carry {"code":"csrf_invalid"} next to the
+//     existing 403 (internal/security/csrf.go). The check itself is unchanged;
+//     only the failure became tellable apart.
+//   - here: on exactly that marker, refetch the token once and replay the
+//     request once. Any other 403 is left alone.
+//
+// Why replaying is safe even for POST (a retried create must not duplicate a
+// note): the CSRF check runs in MIDDLEWARE, before the handler, so a rejected
+// request never executed any write — nothing was created, nothing to undo. If
+// a route ever validated CSRF *after* touching storage, this reasoning breaks
+// and the replay would have to be dropped for it; router.go currently applies
+// csrfMW ahead of every handler.
+const CSRF_ERROR_CODE = 'csrf_invalid';
+
+// Refresh a cached token older than this on window focus: short enough that a
+// tab left open through another tab's rotation usually recovers before the
+// user saves, long enough that alt-tabbing does not hammer /api/v1/csrf.
+const CSRF_MAX_AGE_MS = 4 * 60 * 1000;
+
+let csrfFetchedAt = 0;
+
+// setCSRFToken is the single place a token is stored, so the staleness clock
+// can never drift from the value: every path that installs a token (init,
+// login, refresh) goes through here.
+function setCSRFToken(token) {
+  csrfToken = token;
+  csrfFetchedAt = Date.now();
+}
+
+// refreshCSRFToken fetches and stores a fresh token. Deliberately not built on
+// api(): the 403 replay path calls this, and it must not be able to recurse.
+async function refreshCSRFToken() {
+  const res = await fetch('/api/v1/csrf', { credentials: 'same-origin' });
+  if (!res.ok) throw new Error(`csrf refresh failed: HTTP ${res.status}`);
+  const data = await res.json();
+  if (!data || !data.csrf_token) throw new Error('csrf refresh: no token in response');
+  setCSRFToken(data.csrf_token);
+  return data.csrf_token;
+}
+
+// refreshCSRFTokenIfStale is the cheap belt, not the guarantee: it runs on
+// window focus, is never awaited by callers, and stays silent on failure so a
+// failed refresh leaves the old token in place for the replay path to handle.
+function refreshCSRFTokenIfStale() {
+  if (!currentUser) return;                                    // login screen: nothing to refresh
+  if (document.visibilityState === 'hidden') return;
+  if (csrfToken && Date.now() - csrfFetchedAt < CSRF_MAX_AGE_MS) return;
+  refreshCSRFToken().catch(() => {});
+}
+window.addEventListener('focus', refreshCSRFTokenIfStale);
+
 async function api(method, path, body) {
-  const opts = {
-    method,
-    headers: { 'Content-Type': 'application/json' },
-    credentials: 'same-origin',
+  const mutating = method !== 'GET' && method !== 'HEAD';
+
+  const send = () => {
+    const opts = {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+    };
+    if (csrfToken && mutating) {
+      opts.headers['X-CSRF-Token'] = csrfToken;
+    }
+    if (body !== undefined) {
+      opts.body = JSON.stringify(body);
+    }
+    return fetch(path, opts);
   };
-  if (csrfToken && method !== 'GET' && method !== 'HEAD') {
-    opts.headers['X-CSRF-Token'] = csrfToken;
-  }
-  if (body !== undefined) {
-    opts.body = JSON.stringify(body);
+
+  const readBody = async (res) => {
+    try { return await res.json(); } catch { return {}; }
+  };
+
+  let res = await send();
+  let data = await readBody(res);
+
+  // Stale-token recovery: one refetch, one replay, and only for the marked
+  // rejection. A 403 without the code is never retried, and neither is a
+  // second failure — the retry is attempted once per api() call, so there is
+  // no loop to guard beyond this block.
+  if (res.status === 403 && data && data.code === CSRF_ERROR_CODE && mutating) {
+    try {
+      await refreshCSRFToken();
+      res = await send();
+      data = await readBody(res);
+    } catch (_) {
+      // Refresh failed (offline, session gone). Fall through and report the
+      // original rejection — a "csrf refresh failed" message would hide why.
+    }
   }
 
-  const res = await fetch(path, opts);
   // A 401 on any request once the user is logged in means the login session
   // has died (7-day TTL elapsed, server-side logout, or the cookie was
   // cleared). Surface it loudly here, centrally, so every caller is covered —
@@ -1975,8 +2060,6 @@ async function api(method, path, body) {
   if (res.status === 401 && currentUser) {
     handleSessionExpired();
   }
-  let data;
-  try { data = await res.json(); } catch { data = {}; }
 
   if (!res.ok) {
     const err = new Error(data.error || `HTTP ${res.status}`);
