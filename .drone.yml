@@ -21,20 +21,6 @@ steps:
 
 # ── Runner cache bootstrap ───────────────────────────────────────────────────
 
-  # ACCEPTANCE EVIDENCE — TEMPORARY, remove before merge: ticket 597 requires
-  # proof that a cold cache still works. This step deletes the host module
-  # cache in this same build, so the Go steps below repopulate it from
-  # scratch and succeed. Remove this step (not the cache) once a build
-  # holds that proof.
-  - name: cache-flush
-    image: docker:27
-    volumes:
-      - name: docker-sock
-        path: /var/run/docker.sock
-    commands:
-      - |
-        docker run --rm -v /var/cache/drone:/x alpine:3 sh -c 'echo "go-mod cache dir before: [$(ls -ld /x/go-mod 2>&1 || true)]"; rm -rf /x/go-mod; echo "go-mod cache dir after:  [$(ls -ld /x/go-mod 2>&1 || true)]"'
-
   # The Go steps share a module cache from the runner host
   # (/var/cache/drone/go-mod, mounted at /go/pkg/mod). That host path must
   # exist before any step mounts it: on a fresh runner a missing host path
