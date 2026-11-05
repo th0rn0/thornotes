@@ -1,6 +1,7 @@
 package router
 
 import (
+	"context"
 	"html/template"
 	"net/http"
 	"strings"
@@ -28,6 +29,7 @@ func New(
 	secureCookies bool,
 	enableGitHistory bool,
 	dbHealth handler.DBHealthChecker,
+	sseShutdown context.Context,
 ) http.Handler {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
@@ -65,7 +67,7 @@ func New(
 	shareH := handler.NewShareHandler(notesSvc, tmpl)
 	accountH := handler.NewAccountHandler(apiTokenRepo)
 	mcpH := handler.NewMCPHandler(notesSvc)
-	eventsH := handler.NewEventsHandler(h)
+	eventsH := handler.NewEventsHandler(h, sseShutdown)
 	journalsH := handler.NewJournalsHandler(notesSvc)
 	historyH := handler.NewHistoryHandler(notesSvc)
 	importH := handler.NewImportHandler(notesSvc)
