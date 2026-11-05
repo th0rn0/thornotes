@@ -132,6 +132,14 @@ func (h *AuthHandler) Me(c *gin.Context) {
 	})
 }
 
+// CSRF returns the CSRF token for the caller's session.
+//
+// It is a read, so it must not rotate: EnsureCSRFToken hands back the token
+// already stored for this session while it is still valid and mints one only
+// when there is none or it has expired. Rotating here (which is what this did
+// before) meant every page load in one tab invalidated the token every sibling
+// tab was holding — a GET with side effects. Rotation happens on login
+// (GenerateCSRFToken), logout (InvalidateCSRFToken) and expiry instead.
 func (h *AuthHandler) CSRF(c *gin.Context) {
 	cookie, err := c.Cookie("session")
 	if err != nil || cookie == "" {
@@ -139,7 +147,7 @@ func (h *AuthHandler) CSRF(c *gin.Context) {
 		return
 	}
 
-	token, err := security.GenerateCSRFToken(cookie)
+	token, err := security.EnsureCSRFToken(cookie)
 	if err != nil {
 		writeError(c, err)
 		return

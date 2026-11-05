@@ -398,6 +398,69 @@ func TestHandler_CSRF_NoSession(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
 }
 
+// getCSRFToken reads GET /api/v1/csrf and returns the token the server hands
+// out for the client's current session.
+func (c *testClient) getCSRFToken(t *testing.T) string {
+	t.Helper()
+	resp := c.do(t, http.MethodGet, "/api/v1/csrf", nil)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var result map[string]string
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+	require.NotEmpty(t, result["csrf_token"])
+	return result["csrf_token"]
+}
+
+// TestHandler_CSRF_ReadIsIdempotent: a read must not rotate the token. Two
+// reads on one session return the same value — and it is the one login handed
+// out, which is what stops one tab's page load from invalidating every sibling
+// tab's token.
+func TestHandler_CSRF_ReadIsIdempotent(t *testing.T) {
+	c := newTestClient(t)
+	c.registerAndLogin(t)
+	loginToken := c.csrfToken
+	require.NotEmpty(t, loginToken)
+
+	first := c.getCSRFToken(t)
+	second := c.getCSRFToken(t)
+
+	assert.Equal(t, first, second, "a second read must not mint a new token")
+	assert.Equal(t, loginToken, first, "the session's token is the one login issued")
+
+	// The stable token still authorises a write.
+	resp := c.do(t, http.MethodPost, "/api/v1/notes", map[string]interface{}{"title": "still fine"})
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusCreated, resp.StatusCode)
+}
+
+// TestHandler_CSRF_RotatesOnNewSession: the rotation that matters survives —
+// logout drops the token and the next login mints a different one.
+func TestHandler_CSRF_RotatesOnNewSession(t *testing.T) {
+	c := newTestClient(t)
+	c.registerAndLogin(t)
+	before := c.getCSRFToken(t)
+
+	logout := c.do(t, http.MethodPost, "/api/v1/auth/logout", nil)
+	logout.Body.Close()
+	require.Equal(t, http.StatusOK, logout.StatusCode)
+
+	// The browser's cookie is cleared by logout; the client mirrors that.
+	c.cookies = nil
+	c.csrfToken = ""
+
+	// No session, no token — and no machine-readable code either: refetching
+	// cannot rescue an absent session.
+	noSession := c.do(t, http.MethodGet, "/api/v1/csrf", nil)
+	defer noSession.Body.Close()
+	assert.Equal(t, http.StatusUnauthorized, noSession.StatusCode)
+
+	c.login(t, "testuser", "securepassword123!")
+	after := c.getCSRFToken(t)
+
+	assert.NotEqual(t, before, after, "login starts a new session, so a new token")
+}
+
 // ─── Notes handler tests ──────────────────────────────────────────────────────
 
 func TestHandler_CreateNote(t *testing.T) {
