@@ -151,3 +151,17 @@ That statement only rewrites the bookkeeping. It cannot complete a half-applied 
 ## Error text source
 
 The two startup errors above are emitted by `internal/db/schema.go`. The example versions shown here match the source format; actual numbers vary with the database and build.
+
+## CI runner cache volumes (Drone)
+
+The Drone runner keeps expensive tool caches on its host and bind-mounts them into pipeline steps. A step that can't write its mount fails with a confusing permission or mount error, so the pipeline creates the directories itself (the `cache-init` step) instead of relying on a hand-maintained host.
+
+| Host path | Mounted at | Used by | Content |
+| --- | --- | --- | --- |
+| `/var/cache/drone/go-mod` | `/go/pkg/mod` | `lint`, `test`, `build-linux-binary` | Go module download cache |
+| `/var/cache/drone/gradle-home` | `/root/.gradle` | `build-android` | Gradle caches |
+
+- `/var/cache/drone/go-mod` is created by the pipeline's `cache-init` step (idempotent `mkdir -p` + `chmod 0755`, run through the host docker daemon). The Go images used in the pipeline (`golang:1.26.3`, `golangci/golangci-lint:latest`) all run as root, so a root-owned 0755 directory is correct; if the image user ever changes, the cache directory must be chowned too or the steps fail writing to it.
+- Deleting the Go module cache is safe at any time (`rm -rf /var/cache/drone/go-mod`): the next build re-downloads the dependency tree from scratch (watch the `go: downloading` lines in the `test` step — a populated cache avoids them) and succeeds either way. The same is true on a fresh runner with the directory missing entirely.
+- Cache failures are bounded: the `test` step retries once, but only when the log shows a module-download failure from `proxy.golang.org` (an HTTP/2 `stream error`, as on build #226). A real test failure is never retried.
+- The cache is shared between concurrent builds on the same runner; the Go command locks the cache per module, which makes simultaneous `go test`/`go build` safe.

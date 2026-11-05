@@ -19,6 +19,39 @@ services:
 
 steps:
 
+# ── Runner cache bootstrap ───────────────────────────────────────────────────
+
+  # ACCEPTANCE EVIDENCE — TEMPORARY, remove before merge: ticket 597 requires
+  # proof that a cold cache still works. This step deletes the host module
+  # cache in this same build, so the Go steps below repopulate it from
+  # scratch and succeed. Remove this step (not the cache) once a build
+  # holds that proof.
+  - name: cache-flush
+    image: docker:27
+    volumes:
+      - name: docker-sock
+        path: /var/run/docker.sock
+    commands:
+      - |
+        docker run --rm -v /var/cache/drone:/x alpine:3 sh -c 'echo "go-mod cache dir before: [$(ls -ld /x/go-mod 2>&1 || true)]"; rm -rf /x/go-mod; echo "go-mod cache dir after:  [$(ls -ld /x/go-mod 2>&1 || true)]"'
+
+  # The Go steps share a module cache from the runner host
+  # (/var/cache/drone/go-mod, mounted at /go/pkg/mod). That host path must
+  # exist before any step mounts it: on a fresh runner a missing host path
+  # surfaces as a confusing mount error, so create it here instead of by
+  # hand (idempotent: mkdir -p + chmod only). It writes through the host
+  # docker daemon, exactly like the smoke-test step below; the directory
+  # is root-owned 0755 because every Go image used here runs as root —
+  # if the image user ever changes, this step's chmod must change with it.
+  - name: cache-init
+    image: docker:27
+    volumes:
+      - name: docker-sock
+        path: /var/run/docker.sock
+    commands:
+      - |
+        docker run --rm -v /var/cache/drone:/x alpine:3 sh -c 'echo "go-mod cache dir before: [$(ls -ld /x/go-mod 2>&1 || true)]"; mkdir -p /x/go-mod; chmod 0755 /x/go-mod; echo "go-mod cache dir after:  [$(ls -ld /x/go-mod)]"'
+
 # ── Lint ─────────────────────────────────────────────────────────────────────
 
   - name: discord-lint-start
@@ -33,6 +66,9 @@ steps:
 
   - name: lint
     image: golangci/golangci-lint:latest
+    volumes:
+      - name: go-mod
+        path: /go/pkg/mod
     commands:
       - golangci-lint run --timeout 5m ./...
 
@@ -132,13 +168,35 @@ steps:
     # cached at 1.26.2 on Drone runners with GOTOOLCHAIN=local, which
     # refuses to auto-fetch a newer toolchain.
     image: golang:1.26.3
+    volumes:
+      # Shared module cache on the runner host (see cache-init above and
+      # docs/operations.md). Concurrent builds are safe: the go command
+      # locks the cache per module.
+      - name: go-mod
+        path: /go/pkg/mod
     environment:
       THORNOTES_TEST_MYSQL_DSN: "thornotes:thornotes@tcp(mariadb:3306)/thornotes_test?parseTime=true"
       # Fail instead of skipping when the DSN is missing, so a renamed or
       # dropped MySQL variable can never silently disable the MySQL leg again.
       THORNOTES_REQUIRE_MYSQL: "1"
     commands:
-      - go test -race -coverprofile=coverage.out -covermode=atomic ./...
+      # Retry policy — transient infrastructure only, never tests: a module
+      # download from proxy.golang.org can fail mid-stream on the first run
+      # (HTTP/2 "stream error", as on build #226), usually leaving a
+      # partially populated module cache that completes on a second run.
+      # Only a log containing that download failure triggers a retry; a
+      # real test failure exits on the first run and is never rerun.
+      - |
+        C='set -o pipefail; go test -race -coverprofile=coverage.out -covermode=atomic ./... 2>&1 | tee /tmp/go-test.log'
+        bash -c "$C"; code=$?
+        if [ "$code" -ne 0 ] \
+           && grep -q "stream error" /tmp/go-test.log \
+           && grep -q "proxy.golang.org" /tmp/go-test.log; then
+          echo ":: module download error from proxy.golang.org — retrying once with the partially filled module cache"
+          bash -c "$C"
+        else
+          exit "$code"
+        fi
       - go tool cover -func=coverage.out | tail -1
 
   - name: discord-test-success
@@ -429,6 +487,9 @@ steps:
   - name: build-linux-binary
     # Pinned to 1.26.3 for the same reason as the test step above.
     image: golang:1.26.3-bookworm
+    volumes:
+      - name: go-mod
+        path: /go/pkg/mod
     commands:
       - CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o thornotes-linux-amd64 ./cmd/thornotes
     when:
@@ -530,6 +591,12 @@ volumes:
   - name: docker-sock
     host:
       path: /var/run/docker.sock
+  - name: go-mod
+    host:
+      path: /var/cache/drone/go-mod
+      # Shared Go module cache across lint / test / build-linux-binary
+      # (mounted at /go/pkg/mod). Created and kept root-owned 0755 by the
+      # cache-init step; safe to delete at any time — see docs/operations.md.
   - name: gradle-home
     host:
       path: /var/cache/drone/gradle-home
