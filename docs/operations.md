@@ -28,6 +28,61 @@ Check the dump is non-empty, and restore it once into a scratch database before 
 
 Keep the backup outside the database volume or on another durable system. A backup is useful only if you can restore it.
 
+## The deploy-time gate: compare the database against the candidate image
+
+The startup refusal in "Schema too new" happens at container start — after the deploy has already been cut over. Catch it before the swap with the gate script: it compares the **running** instance's `/healthz` `schema.version` with the **candidate** image's `co.thornotes.schema.max` label (SQLite) or `co.thornotes.schema.max.mysql` label (MySQL — production runs MySQL). Run it on the Docker host, after `docker pull` of the candidate image and before swapping containers:
+
+```sh
+docker pull th0rn0/thornotes:latest
+scripts/deploy-gate.sh \
+  --image th0rn0/thornotes:latest \
+  --driver mysql \
+  --healthz https://notes.example.com/healthz \
+  --backup /data/backups/thornotes-before-migration.sql
+```
+
+Its decisions:
+
+- **database version > image ceiling** — refuse. Starting that image is a guaranteed exit 1 at startup; the gate prints both numbers and the remedy (deploy a build with a higher ceiling, or restore the backup taken before that migration, then pin the older image). Nothing is started.
+- **database version < image ceiling** — the image will migrate on start. It refuses to proceed unless the `--backup` path exists, is non-empty, and is no older than the age budget (`--max-backup-age-min`, default 240). Take the backup per "Before deploying migrations" above first.
+- **equal** — proceed; no migration will run on start.
+- **unknown** — refuse. An unreachable `/healthz`, an image that cannot be inspected, a missing or non-numeric label, or a `/healthz` body without a readable `schema.version` all stop the deploy. Absent evidence is not permission.
+
+Exit code 0 means safe to cut over; 1 means refused (one line per failure). The scripted check `scripts/deploy-gate.test.sh` (run on the Docker host) exercises all three decisions plus both refusals — a too-new database refused before any container starts, and a missing backup — against a pulled `th0rn0/thornotes` image so the label path is always real.
+
+## Reverse proxy cache headers: keep /sw.js and the document out of the expires rule
+
+Production sits behind Nginx Proxy Manager (openresty). With its "Cache Assets" behaviour, NPM matches static extensions (`.js` among them) and **overrides** whatever the app sent with `expires` + `cache-control: max-age≈1d`. Since PR #33 asset URLs are versioned (`/static/...?v=<8 hex>`), a pinned stale body can no longer happen for versioned assets — but a long-cached `/sw.js` delays service-worker rotation and leaves dead caches on disk, and `/` is the document that pins those asset URLs.
+
+Paste this into the proxy host's **Advanced** tab (openresty resolves a later exact-match `location` over the generated prefix-match blocks; `conf.d/include/proxy.conf` supplies the upstream proxy directives with the scheme/server/port NPM already `set` at server scope — no upstream address to duplicate):
+
+```nginx
+# The service worker must always revalidate: a stale cached copy delays its
+# rotation and keeps dead caches alive on the client.
+location = /sw.js {
+    expires off;
+    add_header Cache-Control "no-cache" always;
+    include conf.d/include/proxy.conf;
+}
+
+# The document that pins the versioned asset URLs; the app sends no-cache.
+location = / {
+    expires off;
+    add_header Cache-Control "no-cache" always;
+    include conf.d/include/proxy.conf;
+}
+```
+
+After saving and allowing NPM to reload, verify with (curl -sI, three probes — note the header each must show):
+
+```sh
+curl -sI https://notes.th0rn0.co.uk/sw.js            # must show cache-control: no-cache
+curl -sI https://notes.th0rn0.co.uk/                 # must show cache-control: no-cache
+curl -sI "https://notes.th0rn0.co.uk/static/js/app.js?v=<current hex>"   # may keep a long max-age
+```
+
+Operational notes: `expires off` removes the injected `Expires`/`max-age` on those two exact paths and lets the app's own `Cache-Control` stand; the app already serves `no-cache` for `/` and for unversioned or stale-versioned `/static/` URLs (see `internal/router/assets.go`, `cacheControlFor`). If the `?v=` parameter is dropped from a patch-formed URL, the app answers `no-cache` itself — the proxy must not re-add a `max-age` to those paths under any rule that pattern-matches extensions. Versioned assets (`?v=<current hex>`) may keep caching: the URL changes whenever the bytes do.
+
 ## Rollback is restore, then pin
 
 `:latest` is not a rollback target. Once a migration has run, an older image refuses to start against the newer database by design. To roll back, restore the pre-migration backup first, then pin and deploy the older image. Do not expect pulling an older image alone to reverse a schema change; this project does not offer an automatic downgrade recovery path.
