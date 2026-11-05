@@ -252,10 +252,31 @@ func (r *NoteRepo) SetShareToken(ctx context.Context, userID, noteID int64, toke
 	}
 	// MySQL reports *changed* rows, not matched rows, so a no-op UPDATE (clearing
 	// an already-cleared token) is indistinguishable from "no such row" by the
-	// count alone. Confirm ownership before reporting not-found, the same
-	// distinction APITokenRepo.SetScope makes. Returning nil on zero rows matched
-	// would be the bug: a token handed to the caller that was never written.
-	if n, _ := res.RowsAffected(); n == 0 {
+	// count alone. Which invariant rescues us depends on the branch, because the
+	// count means different things on each:
+	//
+	//   - Generating (token != nil): the token is freshly random, so a matched row
+	//     cannot already hold it. changed == matched here, and zero changed rows
+	//     therefore means no note with this (id, user_id) exists — report
+	//     not-found directly. This is why the generated-token path needs no
+	//     tie-breaker: the value it writes is unique.
+	//   - Clearing (token == nil): writing NULL over an already-NULL column is a
+	//     genuine no-op, so zero changed rows cannot distinguish "already
+	//     unpublished" from "no such row". Only on this branch — where the single
+	//     value written is `nil` and "unchanged" really does mean "already
+	//     unpublished" — is asking whether the note is owned sound.
+	//
+	// Returning nil on a zero count would be the bug: a token handed to the
+	// caller that was never written. A count we could not read is an error, not
+	// a success.
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("set share token: rows affected: %w", err)
+	}
+	if n == 0 {
+		if token != nil {
+			return apperror.ErrNotFound
+		}
 		return r.ensureNoteOwned(ctx, userID, noteID)
 	}
 	return nil

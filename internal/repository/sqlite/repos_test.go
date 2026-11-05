@@ -582,6 +582,36 @@ func TestNoteRepo_SetShareToken(t *testing.T) {
 	assert.Nil(t, got2.ShareToken)
 }
 
+// TestNoteRepo_SetShareToken_ClearTwice is the changed-rows case on the driver
+// that reports matched rows: clearing a token that is already NULL is a no-op
+// that must still report success, because the row exists and belongs to the
+// user. Nothing else in the SQLite suite covers "clear a token that is already
+// null", which is exactly the write this PR exists to stop misreporting.
+func TestNoteRepo_SetShareToken_ClearTwice(t *testing.T) {
+	pool := openTestDB(t)
+	user := createUser(t, pool)
+	repo := NewNoteRepo(pool.ReadDB, pool.WriteDB)
+	created := createTestNote(t, pool, user.ID, nil, "Clear Twice Note")
+	ctx := context.Background()
+
+	// A never-shared note already has a NULL token: the first clear is a no-op.
+	require.NoError(t, repo.SetShareToken(ctx, user.ID, created.ID, nil))
+	require.NoError(t, repo.SetShareToken(ctx, user.ID, created.ID, nil),
+		"clearing an already-NULL token must succeed, not report not-found")
+
+	var stored sql.NullString
+	require.NoError(t, pool.ReadDB.QueryRow(
+		`SELECT share_token FROM notes WHERE id = ?`, created.ID).Scan(&stored))
+	assert.False(t, stored.Valid, "the column must still be NULL")
+
+	// The same after a real share, so the no-op path is not the only one tested.
+	token := "clear-twice-token"
+	require.NoError(t, repo.SetShareToken(ctx, user.ID, created.ID, &token))
+	require.NoError(t, repo.SetShareToken(ctx, user.ID, created.ID, nil))
+	require.NoError(t, repo.SetShareToken(ctx, user.ID, created.ID, nil),
+		"a second clear after a real share must also succeed")
+}
+
 func TestNoteRepo_SetShareToken_OtherUsersNote_NotFound(t *testing.T) {
 	pool := openTestDB(t)
 	owner := createUser(t, pool)

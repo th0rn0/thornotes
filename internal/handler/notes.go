@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"errors"
+	"io"
 	"net/http"
 	"strconv"
 
@@ -196,7 +198,17 @@ func (h *NotesHandler) Share(c *gin.Context) {
 	}
 
 	var req shareRequest
-	_ = readJSON(c, &req) // optional body
+	// The body is optional — a request with no body at all means "share" — but a
+	// body that is present and does not decode must never be treated as one. The
+	// decode error used to be discarded, so a typo'd unshare payload
+	// ({"clear":"true"}, {"clear":1}, or a truncated/not-JSON body) fell through
+	// to the generate branch: the caller was told the note was unpublished and
+	// handed a fresh working public link. An unreadable request is a 400 and
+	// touches nothing. Only io.EOF (empty body) is tolerated.
+	if err := readJSON(c, &req); err != nil && !errors.Is(err, io.EOF) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "request body must be a JSON object: " + err.Error()})
+		return
+	}
 
 	token, err := h.svc.SetShareToken(c.Request.Context(), user.ID, noteID, req.Clear)
 	if err != nil {

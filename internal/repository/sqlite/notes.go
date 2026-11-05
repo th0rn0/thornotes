@@ -256,8 +256,14 @@ func (r *NoteRepo) SetShareToken(ctx context.Context, userID, noteID int64, toke
 	// it does not exist or it is somebody else's. SQLite reports every row the
 	// UPDATE matched (even when the value is unchanged), so no distinction is
 	// needed here. Returning nil would let the handler hand out a token that was
-	// never written and tell the caller the note is shared.
-	if n, _ := res.RowsAffected(); n == 0 {
+	// never written and tell the caller the note is shared. A driver that cannot
+	// report the count is an error, not a success: we do not know the write
+	// landed, so we must not claim it did.
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("set share token: rows affected: %w", err)
+	}
+	if n == 0 {
 		return apperror.ErrNotFound
 	}
 	return nil
