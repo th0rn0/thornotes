@@ -9,6 +9,7 @@ import (
 
 	"github.com/th0rn0/thornotes/internal/apperror"
 	"github.com/th0rn0/thornotes/internal/model"
+	"github.com/th0rn0/thornotes/internal/repository"
 )
 
 type FolderRepo struct {
@@ -131,21 +132,29 @@ func (r *FolderRepo) Move(ctx context.Context, userID, folderID int64, newParent
 }
 
 func (r *FolderRepo) UpdateDescendantPaths(ctx context.Context, oldPrefix, newPrefix string) error {
-	// Update all folders whose disk_path starts with oldPrefix.
+	// Scope the cascade to the real subtree: the folder's own disk_path, or a
+	// path underneath it by a separator. The unscoped `LIKE oldPrefix || '%'`
+	// this replaces also matched siblings whose name merely shared a prefix, and
+	// treated '%'/'_' in a folder name as wildcards (ticket 598). The boundary
+	// and the escaping live in repository.DescendantPathPredicate.
+	predicate, scopeArgs := repository.DescendantPathPredicate(oldPrefix)
+	args := append([]any{newPrefix, oldPrefix}, scopeArgs...)
+
+	// Update all folders in the subtree.
 	_, err := r.writeDB.ExecContext(ctx,
 		`UPDATE folders SET disk_path = ? || SUBSTR(disk_path, LENGTH(?)+1)
-		 WHERE disk_path LIKE ? || '%'`,
-		newPrefix, oldPrefix, oldPrefix,
+		 WHERE `+predicate,
+		args...,
 	)
 	if err != nil {
 		return fmt.Errorf("update descendant folder paths: %w", err)
 	}
 
-	// Update all notes whose disk_path starts with oldPrefix.
+	// Update all notes in the subtree.
 	_, err = r.writeDB.ExecContext(ctx,
 		`UPDATE notes SET disk_path = ? || SUBSTR(disk_path, LENGTH(?)+1)
-		 WHERE disk_path LIKE ? || '%'`,
-		newPrefix, oldPrefix, oldPrefix,
+		 WHERE `+predicate,
+		args...,
 	)
 	if err != nil {
 		return fmt.Errorf("update descendant note paths: %w", err)
