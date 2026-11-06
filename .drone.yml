@@ -670,8 +670,17 @@ steps:
       - echo "== general LAN reach from the runner box (gateway + MAX ping)"
       - ping -c1 -W2 10.0.0.1 2>&1 | tail -1
       - ping -c1 -W2 10.0.0.14 2>&1 | tail -1
-      - echo "== runner host own network =="
+      - echo "== runner box own network =="
       - ip -4 addr show | grep inet || cat /proc/net/fib_trie | head -20
+
+  - name: probe-cleanup
+    image: docker:27
+    volumes:
+      - name: docker-sock
+        path: /var/run/docker.sock
+    commands:
+      - echo "== remove the marker written by earlier probe steps =="
+      - docker run --rm -v /servdata/thornotes/backups:/p busybox sh -c 'rm -f /p/.reachability-probe; ls -la /p'
 
 volumes:
   - name: docker-sock
