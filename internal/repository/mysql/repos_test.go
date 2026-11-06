@@ -572,6 +572,52 @@ func TestMySQL_FolderRepo_UpdateDescendantPaths_EscapesLikeWildcards(t *testing.
 	assert.Equal(t, "uuid-1/1000Xdone-notes", mysqlFolderPath(t, pool, user.ID, bystander.ID), "'%' and '_' must not act as wildcards against unrelated folders")
 }
 
+// TestMySQL_FolderRepo_UpdateDescendantPaths_NonASCIIFolderName is the test
+// SQLite structurally cannot write: SQLite's LENGTH() counts characters, so
+// `SUBSTRING(disk_path, LENGTH(?)+1)` slices at the right offset there and every
+// SQLite test stays green. MySQL's LENGTH() counts *bytes*, so a prefix holding
+// a multi-byte character overshoots by exactly (bytes - chars) and the tail is
+// sliced after the separator — "Renamedinside.md" instead of
+// "Renamed/inside.md". That path points at nothing, so the next reconcile reads
+// the row as a deleted note, deletes and reimports it, and the reimported row is
+// a new row with no share token.
+//
+// The assertion is on the disk_path column, not on anything derived from it, so
+// a rewrite that drops the separator cannot pass by being internally consistent.
+func TestMySQL_FolderRepo_UpdateDescendantPaths_NonASCIIFolderName(t *testing.T) {
+	for _, folderName := range []string{"Café", "日本語"} {
+		t.Run(folderName, func(t *testing.T) {
+			pool := openTestMySQL(t)
+			user := createMySQLUser(t, pool)
+			folders := NewFolderRepo(pool.WriteDB)
+			ctx := context.Background()
+
+			oldPath := "uuid-1/" + folderName
+			newPath := "uuid-1/Renamed"
+
+			parent, err := folders.Create(ctx, user.ID, nil, folderName, oldPath)
+			require.NoError(t, err)
+			child, err := folders.Create(ctx, user.ID, &parent.ID, "Sub", oldPath+"/Sub")
+			require.NoError(t, err)
+			inside := createMySQLNoteAt(t, pool, user.ID, &parent.ID, "Inside", "inside", oldPath+"/inside.md")
+			deep := createMySQLNoteAt(t, pool, user.ID, &child.ID, "Deep", "deep", oldPath+"/Sub/deep.md")
+
+			require.NoError(t, folders.Rename(ctx, user.ID, parent.ID, "Renamed", newPath))
+			require.NoError(t, folders.UpdateDescendantPaths(ctx, oldPath, newPath))
+
+			assert.Equal(t, newPath+"/Sub", mysqlFolderPath(t, pool, user.ID, child.ID),
+				"the separator after the renamed prefix must survive the cascade")
+			assert.Equal(t, newPath+"/inside.md", mysqlNotePath(t, pool, user.ID, inside.ID),
+				"the separator after the renamed prefix must survive the cascade")
+			assert.Equal(t, newPath+"/Sub/deep.md", mysqlNotePath(t, pool, user.ID, deep.ID),
+				"the separator after the renamed prefix must survive the cascade")
+
+			// The renamed folder's own row is written by Rename, not by the cascade.
+			assert.Equal(t, newPath, mysqlFolderPath(t, pool, user.ID, parent.ID))
+		})
+	}
+}
+
 func TestMySQL_FolderRepo_GetByDiskPath(t *testing.T) {
 	pool := openTestMySQL(t)
 	user := createMySQLUser(t, pool)

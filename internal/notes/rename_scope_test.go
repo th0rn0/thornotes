@@ -168,6 +168,51 @@ func TestRenameFolder_PercentUnderscoreName(t *testing.T) {
 	assert.Zero(t, changes)
 }
 
+// TestRenameFolder_NonASCIIFolderName pins the reconcile property for a folder
+// name containing multi-byte characters: after the rename cascade the rows must
+// point at files that exist, and reconcile must find nothing to change.
+//
+// It cannot see the MySQL byte-vs-character defect this ticket fixed — SQLite's
+// LENGTH() counts characters, so the old MySQL expression happened to be right
+// here. The regression test for that lives in
+// internal/repository/mysql.TestMySQL_FolderRepo_UpdateDescendantPaths_NonASCIIFolderName;
+// this one guards the service-level consequence (total_changes=0, so no
+// delete/reimport and no lost share token) on the dialect the default suite runs.
+func TestRenameFolder_NonASCIIFolderName(t *testing.T) {
+	for _, folderName := range []string{"Café", "日本語"} {
+		t.Run(folderName, func(t *testing.T) {
+			st := newTestStackFull(t)
+			ctx := context.Background()
+
+			source, err := st.svc.CreateFolder(ctx, st.userID, st.user.UUID, nil, folderName)
+			require.NoError(t, err)
+			child, err := st.svc.CreateFolder(ctx, st.userID, st.user.UUID, &source.ID, "Sub")
+			require.NoError(t, err)
+			inner, err := st.svc.CreateNote(ctx, st.userID, st.user.UUID, &source.ID, "Inner", nil)
+			require.NoError(t, err)
+			deep, err := st.svc.CreateNote(ctx, st.userID, st.user.UUID, &child.ID, "Deep", nil)
+			require.NoError(t, err)
+
+			require.NoError(t, st.svc.RenameFolder(ctx, st.userID, st.user.UUID, source.ID, "Renamed"))
+
+			gotInner, err := st.svc.GetNote(ctx, st.userID, inner.ID)
+			require.NoError(t, err)
+			assert.Equal(t, filepath.Join(st.user.UUID, "Renamed", "inner.md"), gotInner.DiskPath)
+
+			gotDeep, err := st.svc.GetNote(ctx, st.userID, deep.ID)
+			require.NoError(t, err)
+			assert.Equal(t, filepath.Join(st.user.UUID, "Renamed", "Sub", "deep.md"), gotDeep.DiskPath)
+
+			requirePathExists(t, st.notesDir, gotInner.DiskPath)
+			requirePathExists(t, st.notesDir, gotDeep.DiskPath)
+
+			changes, err := st.svc.Reconcile(ctx, st.user)
+			require.NoError(t, err)
+			assert.Zero(t, changes, "total_changes must be 0 — a non-zero count here is the delete/reimport that drops share tokens")
+		})
+	}
+}
+
 // TestRenameFolder_ShareTokenSurvivesSiblingPrefixRename is the property the
 // defect actually broke: a corrupted sibling path makes reconcile delete and
 // reimport the row, and a reimported row is a new row with no share token, so a

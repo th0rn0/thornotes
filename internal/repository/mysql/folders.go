@@ -142,9 +142,17 @@ func (r *FolderRepo) UpdateDescendantPaths(ctx context.Context, oldPrefix, newPr
 	predicate, scopeArgs := repository.DescendantPathPredicate(oldPrefix)
 	args := append([]any{newPrefix, oldPrefix}, scopeArgs...)
 
+	// CHAR_LENGTH, not LENGTH: MariaDB/MySQL LENGTH() counts BYTES while
+	// SUBSTRING() counts CHARACTERS, so for an old prefix containing a
+	// multi-byte character LENGTH() overshoots by exactly (bytes - chars) and
+	// the tail is sliced past the separator — "uuid/Renamed/note.md" becomes
+	// "uuid/Renamednote.md". That path points at nothing, and the next reconcile
+	// reads it as a deleted note, deletes and reimports it, which drops its share
+	// token. SQLite's LENGTH() counts characters, so the SQLite suite cannot see
+	// this: keep these two expressions in step and do not "simplify" them back.
 	_, err := r.db.ExecContext(ctx,
 		`UPDATE folders
-		 SET disk_path = CONCAT(?, SUBSTRING(disk_path, LENGTH(?)+1))
+		 SET disk_path = CONCAT(?, SUBSTRING(disk_path, CHAR_LENGTH(?)+1))
 		 WHERE `+predicate,
 		args...,
 	)
@@ -154,7 +162,7 @@ func (r *FolderRepo) UpdateDescendantPaths(ctx context.Context, oldPrefix, newPr
 
 	_, err = r.db.ExecContext(ctx,
 		`UPDATE notes
-		 SET disk_path = CONCAT(?, SUBSTRING(disk_path, LENGTH(?)+1))
+		 SET disk_path = CONCAT(?, SUBSTRING(disk_path, CHAR_LENGTH(?)+1))
 		 WHERE `+predicate,
 		args...,
 	)
