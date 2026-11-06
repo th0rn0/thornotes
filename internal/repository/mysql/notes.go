@@ -150,10 +150,17 @@ func (r *NoteRepo) Update(ctx context.Context, n *model.Note) error {
 		return fmt.Errorf("marshal tags: %w", err)
 	}
 
-	res, err := r.db.ExecContext(ctx, `
+	// A same-value save (a PUT that repeats the current title and tags, or an
+	// edit whose updated_at does not move within the same second) changes no
+	// column and so reports 0 rows affected. The row still matched: success. Only
+	// a row that is not the caller's — or does not exist — is not-found, and both
+	// answer 404 so a foreign id leaks nothing.
+	matched, err := updateScoped(ctx, r.db, `
 		UPDATE notes SET title = ?, slug = ?, title_key = ?, disk_path = ?, tags = ?, updated_at = UTC_TIMESTAMP()
 		WHERE id = ? AND user_id = ?`,
-		n.Title, n.Slug, n.TitleKey, n.DiskPath, string(tagsJSON), n.ID, n.UserID,
+		[]any{n.Title, n.Slug, n.TitleKey, n.DiskPath, string(tagsJSON), n.ID, n.UserID},
+		`SELECT EXISTS(SELECT 1 FROM notes WHERE id = ? AND user_id = ?)`,
+		[]any{n.ID, n.UserID},
 	)
 	if err != nil {
 		if isUniqueConstraint(err) {
@@ -161,39 +168,42 @@ func (r *NoteRepo) Update(ctx context.Context, n *model.Note) error {
 		}
 		return fmt.Errorf("update note: %w", err)
 	}
-	rows, _ := res.RowsAffected()
-	if rows == 0 {
+	if !matched {
 		return apperror.ErrNotFound
 	}
 	return nil
 }
 
 func (r *NoteRepo) UpdateContent(ctx context.Context, userID, noteID int64, content, contentHash, expectedHash string) error {
-	res, err := r.db.ExecContext(ctx, `
+	// The CAS predicate includes content_hash, so it must be the existence check
+	// too: a row that matched on (id, user_id, content_hash) but changed no
+	// column was re-saved with the content it already had — a no-op write, and
+	// success. Treating that as "the hash is stale" reported a 409 conflict for
+	// an unchanged save (ticket 599).
+	matched, err := updateScoped(ctx, r.db, `
 		UPDATE notes
 		SET content = ?, content_hash = ?, fts_synced_at = NULL, updated_at = UTC_TIMESTAMP()
 		WHERE id = ? AND user_id = ? AND content_hash = ?`,
-		content, contentHash, noteID, userID, expectedHash,
+		[]any{content, contentHash, noteID, userID, expectedHash},
+		`SELECT EXISTS(SELECT 1 FROM notes WHERE id = ? AND user_id = ? AND content_hash = ?)`,
+		[]any{noteID, userID, expectedHash},
 	)
 	if err != nil {
 		return fmt.Errorf("update content: %w", err)
 	}
-	rows, _ := res.RowsAffected()
-	if rows == 0 {
-		var exists bool
-		err = r.db.QueryRowContext(ctx,
-			`SELECT EXISTS(SELECT 1 FROM notes WHERE id = ? AND user_id = ?)`,
-			noteID, userID,
-		).Scan(&exists)
-		if err != nil {
-			return err
-		}
-		if !exists {
-			return apperror.ErrNotFound
-		}
-		return apperror.ErrConflict
+	if matched {
+		return nil
 	}
-	return nil
+
+	// No row matched the CAS predicate. Two causes, and the caller cannot tell
+	// them apart from here: the note is not the caller's (or gone) — 404 — or it
+	// is the caller's and its content_hash moved on since expectedHash was read,
+	// which is the optimistic-concurrency conflict the write API documents as
+	// 409. The note's existence decides which.
+	if err := r.ensureNoteOwned(ctx, userID, noteID); err != nil {
+		return err
+	}
+	return apperror.ErrConflict
 }
 
 func (r *NoteRepo) SetTitleKey(ctx context.Context, userID, noteID int64, titleKey string) error {
@@ -243,48 +253,43 @@ func (r *NoteRepo) Delete(ctx context.Context, userID, noteID int64) error {
 }
 
 func (r *NoteRepo) SetShareToken(ctx context.Context, userID, noteID int64, token *string) error {
-	res, err := r.db.ExecContext(ctx,
+	// Both branches go through updateScoped, because both can write a value the
+	// row already holds and MySQL would count that as "no rows affected":
+	//
+	//   - Clearing (token == nil): writing NULL over an already-NULL column is a
+	//     genuine no-op, so the zero count cannot distinguish "already
+	//     unpublished" — which is success — from "no such row".
+	//   - Generating (token != nil): the token is freshly random, so a matched row
+	//     practically cannot already hold it and the changed count is decisive;
+	//     the existence check never runs. It stays wired up anyway so both
+	//     branches share one rule: matched means success, unmatched means
+	//     not-found.
+	//
+	// The predicate comparison uses MySQL's NULL-safe `<=>`, so the existence
+	// check matches a NULL share_token as well as a set one.
+	//
+	// Returning nil on an unmatched row would be the bug: a token handed to the
+	// caller that was never written.
+	matched, err := updateScoped(ctx, r.db,
 		`UPDATE notes SET share_token = ? WHERE id = ? AND user_id = ?`,
-		token, noteID, userID,
+		[]any{token, noteID, userID},
+		`SELECT EXISTS(SELECT 1 FROM notes WHERE id = ? AND user_id = ? AND share_token <=> ?)`,
+		[]any{noteID, userID, token},
 	)
 	if err != nil {
-		return err
+		return fmt.Errorf("set share token: %w", err)
 	}
-	// MySQL reports *changed* rows, not matched rows, so a no-op UPDATE (clearing
-	// an already-cleared token) is indistinguishable from "no such row" by the
-	// count alone. Which invariant rescues us depends on the branch, because the
-	// count means different things on each:
-	//
-	//   - Generating (token != nil): the token is freshly random, so a matched row
-	//     cannot already hold it. changed == matched here, and zero changed rows
-	//     therefore means no note with this (id, user_id) exists — report
-	//     not-found directly. This is why the generated-token path needs no
-	//     tie-breaker: the value it writes is unique.
-	//   - Clearing (token == nil): writing NULL over an already-NULL column is a
-	//     genuine no-op, so zero changed rows cannot distinguish "already
-	//     unpublished" from "no such row". Only on this branch — where the single
-	//     value written is `nil` and "unchanged" really does mean "already
-	//     unpublished" — is asking whether the note is owned sound.
-	//
-	// Returning nil on a zero count would be the bug: a token handed to the
-	// caller that was never written. A count we could not read is an error, not
-	// a success.
-	n, err := res.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("set share token: rows affected: %w", err)
-	}
-	if n == 0 {
-		if token != nil {
-			return apperror.ErrNotFound
-		}
-		return r.ensureNoteOwned(ctx, userID, noteID)
+	if !matched {
+		return apperror.ErrNotFound
 	}
 	return nil
 }
 
 // ensureNoteOwned returns apperror.ErrNotFound unless a note with this id belongs
-// to userID. It is the tie-breaker for a by-(id, user_id) UPDATE that reported
-// zero rows affected on a driver that counts changed rows.
+// to userID. It is the tie-breaker for a by-(id, user_id) UPDATE that matched no
+// row on a driver that counts changed rows: it separates "the note is not
+// yours", which is not-found, from "the note is yours but the update's further
+// predicate did not match", which the caller reports as a conflict.
 func (r *NoteRepo) ensureNoteOwned(ctx context.Context, userID, noteID int64) error {
 	var exists bool
 	if err := r.db.QueryRowContext(ctx,
