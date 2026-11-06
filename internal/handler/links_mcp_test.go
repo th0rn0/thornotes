@@ -183,8 +183,12 @@ func TestMCP_GetLinks_ScopedToken_DropsOutOfScopeLinksAndBacklinks(t *testing.T)
 	assert.Equal(t, "Inside Source", back.Backlinks[0]["title"])
 	assert.NotContains(t, mcpToolText(t, res2), "Outside Source", "out-of-scope source title must not leak")
 
-	// A note entirely outside the token's scope is refused outright.
+	// A note entirely outside the token's scope is refused — and refused with
+	// the same answer a note that does not exist gets, so the caller cannot
+	// tell the two apart (finding N11).
 	res3 := mcpToolCall(t, m, sessionID, 3, "get_links", map[string]interface{}{"id": outsideTarget})
-	require.NotNil(t, res3["error"], "out-of-scope note read must be forbidden")
-	assert.Equal(t, float64(-32001), res3["error"].(map[string]interface{})["code"], "expected rpcErrForbidden")
+	require.NotNil(t, res3["error"], "out-of-scope note read must be refused")
+	errObj := res3["error"].(map[string]interface{})
+	assert.Equal(t, float64(-32002), errObj["code"], "expected rpcErrNotFound")
+	assert.Equal(t, "not found", errObj["message"], "out-of-scope and missing must share the message text")
 }

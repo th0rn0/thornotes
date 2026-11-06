@@ -668,10 +668,12 @@ func TestMCP_ToolsCall_GetNote_NotFound(t *testing.T) {
 
 	var result map[string]interface{}
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
-	// Should return an RPC-level error, not a transport error.
+	// Should return an RPC-level error, not a transport error. A missing note
+	// answers rpcErrNotFound (-32002) — the same answer an out-of-scope note
+	// gets, so the pair stays indistinguishable.
 	assert.NotNil(t, result["error"])
 	errObj := result["error"].(map[string]interface{})
-	assert.Equal(t, float64(-32603), errObj["code"])
+	assert.Equal(t, float64(-32002), errObj["code"])
 }
 
 func TestMCP_ToolsCall_UpdateNote_NotFound(t *testing.T) {
@@ -766,7 +768,9 @@ func TestMCP_ResourcesRead_NotFound(t *testing.T) {
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
 	assert.NotNil(t, result["error"])
 	errObj := result["error"].(map[string]interface{})
-	assert.Equal(t, float64(-32603), errObj["code"])
+	// A URI naming a note that does not exist answers rpcErrNotFound, the same
+	// as one naming a note outside the token's scope (finding N11).
+	assert.Equal(t, float64(-32002), errObj["code"])
 }
 
 func TestMCP_ResourcesRead_NonNumericID(t *testing.T) {

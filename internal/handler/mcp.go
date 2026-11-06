@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -98,7 +99,22 @@ const (
 	rpcMethodNotFound = -32601
 	rpcInvalidParams  = -32602
 	rpcInternalError  = -32603
+
+	// Implementation-defined server errors; JSON-RPC reserves -32000..-32099.
+	rpcErrForbidden = -32001
+	// rpcErrNotFound answers both "there is no such note" and "that note is
+	// outside this token's folder scope", with the same message, so the two
+	// are indistinguishable to a caller walking ids. -32002 is MCP's own
+	// "resource not found" code (specified for resources/read), so it needs no
+	// bespoke convention and leaves rpcErrForbidden meaning what it says for
+	// denials that reveal nothing about the store.
+	rpcErrNotFound = -32002
 )
+
+// rpcNotFoundMsg is the only text ever paired with rpcErrNotFound. A matching
+// code with different wording is the same oracle, so the two cases share this
+// constant instead of each writing its own message.
+const rpcNotFoundMsg = "not found"
 
 // isNotification returns true when the JSON-RPC message has no id field (or
 // id is null), meaning it is a notification and requires no response.
@@ -550,8 +566,7 @@ var writeTools = map[string]bool{
 	"delete_folder": true,
 }
 
-const rpcErrForbidden = -32001
-
+// handleToolsCall dispatches a tools/call to the named tool.
 func (h *MCPHandler) handleToolsCall(r *http.Request, req rpcRequest, user *model.User) rpcResponse {
 	var params struct {
 		Name      string          `json:"name"`
@@ -607,8 +622,6 @@ func (h *MCPHandler) handleToolsCall(r *http.Request, req rpcRequest, user *mode
 		}
 		return nil
 	}
-	_ = checkRead
-	_ = checkWrite
 
 	switch params.Name {
 	case "search_notes":
@@ -637,12 +650,9 @@ func (h *MCPHandler) handleToolsCall(r *http.Request, req rpcRequest, user *mode
 		if err := json.Unmarshal(params.Arguments, &args); err != nil || args.ID == 0 {
 			return rpcErr(req.ID, rpcInvalidParams, "id is required")
 		}
-		note, err := h.notes.GetNote(ctx, userID, args.ID)
-		if err != nil {
-			return rpcErr(req.ID, rpcInternalError, errorString(err))
-		}
-		if resp := checkRead(note.FolderID); resp != nil {
-			return *resp
+		note, denied := h.resolveNote(ctx, req, authz, folders, userID, args.ID, noteRead)
+		if denied != nil {
+			return *denied
 		}
 		text, _ := json.Marshal(note)
 		return rpcOK(req.ID, toolResult(string(text)))
@@ -713,12 +723,9 @@ func (h *MCPHandler) handleToolsCall(r *http.Request, req rpcRequest, user *mode
 		if err := json.Unmarshal(params.Arguments, &args); err != nil || args.ID == 0 || args.Content == "" {
 			return rpcErr(req.ID, rpcInvalidParams, "id and content are required")
 		}
-		note, err := h.notes.GetNote(ctx, userID, args.ID)
-		if err != nil {
-			return rpcErr(req.ID, rpcInternalError, errorString(err))
-		}
-		if resp := checkWrite(note.FolderID); resp != nil {
-			return *resp
+		note, denied := h.resolveNote(ctx, req, authz, folders, userID, args.ID, noteWrite)
+		if denied != nil {
+			return *denied
 		}
 		newHash, err := h.notes.UpdateNoteContent(ctx, userID, args.ID, args.Content, note.ContentHash)
 		if err != nil {
@@ -816,12 +823,8 @@ func (h *MCPHandler) handleToolsCall(r *http.Request, req rpcRequest, user *mode
 		if err := json.Unmarshal(params.Arguments, &args); err != nil || args.ID == 0 {
 			return rpcErr(req.ID, rpcInvalidParams, "id is required")
 		}
-		note, err := h.notes.GetNote(ctx, userID, args.ID)
-		if err != nil {
-			return rpcErr(req.ID, rpcInternalError, errorString(err))
-		}
-		if resp := checkRead(note.FolderID); resp != nil {
-			return *resp
+		if _, denied := h.resolveNote(ctx, req, authz, folders, userID, args.ID, noteRead); denied != nil {
+			return *denied
 		}
 		outView, err := buildOutgoingLinkView(ctx, authz, h.notes, userID, args.ID)
 		if err != nil {
@@ -850,12 +853,9 @@ func (h *MCPHandler) handleToolsCall(r *http.Request, req rpcRequest, user *mode
 		if args.Title == nil && args.Tags == nil {
 			return rpcErr(req.ID, rpcInvalidParams, "at least one of title or tags must be provided")
 		}
-		note, err := h.notes.GetNote(ctx, userID, args.ID)
-		if err != nil {
-			return rpcErr(req.ID, rpcInternalError, errorString(err))
-		}
-		if resp := checkWrite(note.FolderID); resp != nil {
-			return *resp
+		note, denied := h.resolveNote(ctx, req, authz, folders, userID, args.ID, noteWrite)
+		if denied != nil {
+			return *denied
 		}
 		newTitle := note.Title
 		if args.Title != nil {
@@ -878,12 +878,8 @@ func (h *MCPHandler) handleToolsCall(r *http.Request, req rpcRequest, user *mode
 		if err := json.Unmarshal(params.Arguments, &args); err != nil || args.ID == 0 {
 			return rpcErr(req.ID, rpcInvalidParams, "id is required")
 		}
-		note, err := h.notes.GetNote(ctx, userID, args.ID)
-		if err != nil {
-			return rpcErr(req.ID, rpcInternalError, errorString(err))
-		}
-		if resp := checkWrite(note.FolderID); resp != nil {
-			return *resp
+		if _, denied := h.resolveNote(ctx, req, authz, folders, userID, args.ID, noteWrite); denied != nil {
+			return *denied
 		}
 		if resp := checkWrite(args.FolderID); resp != nil {
 			return *resp
@@ -904,12 +900,8 @@ func (h *MCPHandler) handleToolsCall(r *http.Request, req rpcRequest, user *mode
 		if err := json.Unmarshal(params.Arguments, &args); err != nil || args.ID == 0 {
 			return rpcErr(req.ID, rpcInvalidParams, "id is required")
 		}
-		note, err := h.notes.GetNote(ctx, userID, args.ID)
-		if err != nil {
-			return rpcErr(req.ID, rpcInternalError, errorString(err))
-		}
-		if resp := checkWrite(note.FolderID); resp != nil {
-			return *resp
+		if _, denied := h.resolveNote(ctx, req, authz, folders, userID, args.ID, noteWrite); denied != nil {
+			return *denied
 		}
 		if err := h.notes.DeleteNote(ctx, userID, args.ID); err != nil {
 			return rpcErr(req.ID, rpcInternalError, errorString(err))
@@ -1043,25 +1035,106 @@ func (h *MCPHandler) handleResourcesRead(r *http.Request, req rpcRequest, userID
 	}
 
 	ctx := r.Context()
-	note, err := h.notes.GetNote(ctx, userID, id)
-	if err != nil {
-		return rpcErr(req.ID, rpcInternalError, errorString(err))
-	}
-	authz := auth.AuthzFromContext(ctx)
-	if authz != nil {
-		ok, err := authz.CanRead(ctx, h.notes.Folders(), userID, note.FolderID)
-		if err != nil {
-			return rpcErr(req.ID, rpcInternalError, "authz check failed")
-		}
-		if !ok {
-			return rpcErr(req.ID, rpcErrForbidden, "this API token does not have read access to the target folder")
-		}
+	note, denied := h.resolveNote(ctx, req, auth.AuthzFromContext(ctx), h.notes.Folders(), userID, id, noteRead)
+	if denied != nil {
+		return *denied
 	}
 	return rpcOK(req.ID, map[string]any{
 		"contents": []mcpTextContent{
 			{Type: "text", Text: note.Content},
 		},
 	})
+}
+
+// ── Note resolution ───────────────────────────────────────────────────────────
+
+// noteAccess is the permission a tool needs on the note it targets.
+type noteAccess int
+
+const (
+	noteRead noteAccess = iota
+	noteWrite
+)
+
+// resolveNote loads a note and resolves the token's access to it in one step.
+//
+// It exists so that no call site can present "that id does not exist" and
+// "that id exists but is outside your folder scope" as different answers: both
+// produce rpcErrNotFound with rpcNotFoundMsg, so the two responses serialise
+// byte for byte identically and a folder-scoped token cannot walk note ids to
+// learn which ones exist.
+//
+// Malformed arguments are deliberately not this function's business. Callers
+// still reject a missing, zero or non-integer id with rpcInvalidParams before
+// reaching here; that is JSON-RPC telling the client its request was malformed
+// and reveals nothing about the store.
+//
+// A denial on a note the token *can* read (a read grant used against a write
+// tool) still answers rpcErrForbidden: the caller can already see the note
+// through the read tools, so naming the missing write permission leaks no
+// existence and is the honest answer. Only denials on notes the token cannot
+// read collapse into not-found.
+//
+// The second return value is the response to send instead; nil means proceed
+// with the note.
+func (h *MCPHandler) resolveNote(
+	ctx context.Context,
+	req rpcRequest,
+	authz *auth.TokenAuthz,
+	folders repository.FolderRepository,
+	userID, noteID int64,
+	need noteAccess,
+) (*model.Note, *rpcResponse) {
+	note, err := h.notes.GetNote(ctx, userID, noteID)
+	if err != nil {
+		if isNoteNotFound(err) {
+			resp := rpcErr(req.ID, rpcErrNotFound, rpcNotFoundMsg)
+			return nil, &resp
+		}
+		resp := rpcErr(req.ID, rpcInternalError, errorString(err))
+		return nil, &resp
+	}
+	if authz == nil {
+		return note, nil
+	}
+
+	var allowed bool
+	if need == noteWrite {
+		allowed, err = authz.CanWrite(ctx, folders, userID, note.FolderID)
+	} else {
+		allowed, err = authz.CanRead(ctx, folders, userID, note.FolderID)
+	}
+	if err != nil {
+		resp := rpcErr(req.ID, rpcInternalError, "authz check failed")
+		return nil, &resp
+	}
+	if allowed {
+		return note, nil
+	}
+	if need == noteWrite {
+		readable, err := authz.CanRead(ctx, folders, userID, note.FolderID)
+		if err != nil {
+			resp := rpcErr(req.ID, rpcInternalError, "authz check failed")
+			return nil, &resp
+		}
+		if readable {
+			resp := rpcErr(req.ID, rpcErrForbidden, "this API token does not have write access to the target folder")
+			return nil, &resp
+		}
+	}
+	resp := rpcErr(req.ID, rpcErrNotFound, rpcNotFoundMsg)
+	return nil, &resp
+}
+
+// isNoteNotFound reports whether err means "no such note for this user". The
+// repositories return the apperror.ErrNotFound sentinel; service layers may
+// wrap it in an AppError with the 404 code.
+func isNoteNotFound(err error) bool {
+	if errors.Is(err, apperror.ErrNotFound) {
+		return true
+	}
+	var appErr *apperror.AppError
+	return errors.As(err, &appErr) && appErr.Code == http.StatusNotFound
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
