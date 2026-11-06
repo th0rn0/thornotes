@@ -44,6 +44,14 @@ func (r *SessionRepo) Get(ctx context.Context, token string) (*model.Session, er
 }
 
 func (r *SessionRepo) Delete(ctx context.Context, token string) error {
+	// Logout, and a zero-row result is success (ticket 600): the statement is
+	// scoped by the session token the caller presented, never by user, and a
+	// session that is already gone is exactly the state logout asks for.
+	// Reporting not-found would fail a logout the user has already completed
+	// (two tabs, a retry, an expired row swept by DeleteExpired) while leaving
+	// nothing behind that could still authenticate. The revocation that must
+	// not swallow zero rows is the API-token delete, and that one does return
+	// ErrNotFound.
 	_, err := r.db.ExecContext(ctx, `DELETE FROM sessions WHERE token = ?`, token)
 	return err
 }

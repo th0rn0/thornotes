@@ -265,6 +265,41 @@ func TestIsolation_RenameFolder_OtherUserDenied(t *testing.T) {
 	assert.Contains(t, string(folders), "Alice folder")
 }
 
+func TestIsolation_MoveFolder_OtherUserDenied(t *testing.T) {
+	f := newIsolationFixture(t)
+
+	// Bob moves alice's folder to the root. A folder that is not his and a
+	// folder that does not exist are both 404 (ticket 600: the repo answers
+	// matched-vs-unmatched, so a foreign id can never come back as a no-op
+	// success).
+	resp := f.client.do(t, http.MethodPatch, "/api/v1/folders/"+i64str(f.folderID)+"/move",
+		map[string]any{"parent_id": nil})
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode, "bob must not move alice's folder")
+	resp.Body.Close()
+
+	f.asAlice(t)
+	resp = f.client.do(t, http.MethodGet, "/api/v1/folders", nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	defer resp.Body.Close()
+	var folders json.RawMessage
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&folders))
+	assert.Contains(t, string(folders), "Alice folder")
+}
+
+// The positive control for the folder-move write: the owner moving a folder to
+// the parent it already has must be a 200. On SQLite this passes either way
+// (it counts matched rows); the zero-changed-rows case is covered on MariaDB by
+// TestMySQL_FolderRepo_Move_ToCurrentParent_IsSuccess.
+func TestIsolation_MoveFolder_ToCurrentParentSucceeds(t *testing.T) {
+	f := newIsolationFixture(t)
+	f.asAlice(t)
+
+	resp := f.client.do(t, http.MethodPatch, "/api/v1/folders/"+i64str(f.folderID)+"/move",
+		map[string]any{"parent_id": nil})
+	assert.Equal(t, http.StatusOK, resp.StatusCode, "moving a folder to where it already is must succeed")
+	resp.Body.Close()
+}
+
 func TestIsolation_DeleteFolder_OtherUserDenied(t *testing.T) {
 	f := newIsolationFixture(t)
 

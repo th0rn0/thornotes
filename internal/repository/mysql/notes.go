@@ -207,24 +207,41 @@ func (r *NoteRepo) UpdateContent(ctx context.Context, userID, noteID int64, cont
 }
 
 func (r *NoteRepo) SetTitleKey(ctx context.Context, userID, noteID int64, titleKey string) error {
-	res, err := r.db.ExecContext(ctx,
+	// A backfill that finds the key already correct changes no column and so
+	// reports 0 rows affected on MySQL, the same count a note that is not the
+	// caller's produces. The row matched either way: success. Today's only
+	// caller (the reindex pass) writes a key it has just compared, so the
+	// ambiguity is latent rather than reachable — it is fixed here so every
+	// by-(id, user_id) UPDATE in this package answers matched, not changed
+	// (ticket 600).
+	matched, err := updateScoped(ctx, r.db,
 		`UPDATE notes SET title_key = ? WHERE id = ? AND user_id = ?`,
-		titleKey, noteID, userID,
+		[]any{titleKey, noteID, userID},
+		`SELECT EXISTS(SELECT 1 FROM notes WHERE id = ? AND user_id = ?)`,
+		[]any{noteID, userID},
 	)
 	if err != nil {
 		return fmt.Errorf("set title key: %w", err)
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
+	if !matched {
 		return apperror.ErrNotFound
 	}
 	return nil
 }
 
 func (r *NoteRepo) Move(ctx context.Context, userID, noteID int64, newFolderID *int64, newDiskPath string) error {
-	res, err := r.db.ExecContext(ctx,
+	// Moving a note into the folder it already sits in changes no column — and
+	// when updated_at does not move either (a second move inside the same
+	// second), MySQL reports 0 rows affected: the count a note that is not the
+	// caller's produces. A matched row is success; not-found stays for the note
+	// that is not the caller's or does not exist, and both answer 404 so a
+	// foreign note id leaks nothing (ticket 600).
+	matched, err := updateScoped(ctx, r.db,
 		`UPDATE notes SET folder_id = ?, disk_path = ?, updated_at = NOW()
 		 WHERE id = ? AND user_id = ?`,
-		newFolderID, newDiskPath, noteID, userID,
+		[]any{newFolderID, newDiskPath, noteID, userID},
+		`SELECT EXISTS(SELECT 1 FROM notes WHERE id = ? AND user_id = ?)`,
+		[]any{noteID, userID},
 	)
 	if err != nil {
 		if isUniqueConstraint(err) {
@@ -232,8 +249,7 @@ func (r *NoteRepo) Move(ctx context.Context, userID, noteID int64, newFolderID *
 		}
 		return fmt.Errorf("move note: %w", err)
 	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
+	if !matched {
 		return apperror.ErrNotFound
 	}
 	return nil

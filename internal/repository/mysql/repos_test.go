@@ -72,6 +72,7 @@ func truncateAll(t *testing.T, pool *db.Pool) {
 		"api_token_folder_permissions",
 		"api_tokens",
 		"journals",
+		"note_links",
 		"notes",
 		"sessions",
 		"folders",

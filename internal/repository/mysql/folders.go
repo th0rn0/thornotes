@@ -122,9 +122,18 @@ func (r *FolderRepo) Rename(ctx context.Context, userID, folderID int64, newName
 }
 
 func (r *FolderRepo) Move(ctx context.Context, userID, folderID int64, newParentID *int64, newDiskPath string) error {
-	res, err := r.db.ExecContext(ctx,
+	// Moving a folder to the parent it already has — the drag that lands where
+	// it started — writes no column and so reports 0 rows affected on MySQL,
+	// the same count a folder that is not the caller's produces. A matched row
+	// is success; a row that is not the caller's, or does not exist, is
+	// not-found, and both answer 404 so a foreign folder id leaks nothing
+	// (ticket 600; folders carries no updated_at, so this is a genuine no-op
+	// without a pinned clock).
+	matched, err := updateScoped(ctx, r.db,
 		`UPDATE folders SET parent_id = ?, disk_path = ? WHERE id = ? AND user_id = ?`,
-		newParentID, newDiskPath, folderID, userID,
+		[]any{newParentID, newDiskPath, folderID, userID},
+		`SELECT EXISTS(SELECT 1 FROM folders WHERE id = ? AND user_id = ?)`,
+		[]any{folderID, userID},
 	)
 	if err != nil {
 		if isUniqueConstraint(err) {
@@ -132,8 +141,7 @@ func (r *FolderRepo) Move(ctx context.Context, userID, folderID int64, newParent
 		}
 		return fmt.Errorf("move folder: %w", err)
 	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
+	if !matched {
 		return apperror.ErrNotFound
 	}
 	return nil

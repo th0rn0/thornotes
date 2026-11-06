@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/th0rn0/thornotes/internal/apperror"
 	"github.com/th0rn0/thornotes/internal/model"
 )
 
@@ -129,10 +130,28 @@ func (r *LinkRepo) UpdateResolution(ctx context.Context, userID, linkID int64, t
 		now := time.Now().UTC()
 		resolvedAt = &now
 	}
-	_, err := r.writeDB.ExecContext(ctx,
+	res, err := r.writeDB.ExecContext(ctx,
 		`UPDATE note_links SET to_note_id = ?, ambiguous = ?, resolved_at = ? WHERE id = ? AND user_id = ?`,
 		toNoteID, linkBoolInt(ambiguous), resolvedAt, linkID, userID)
-	return err
+	if err != nil {
+		return fmt.Errorf("update link resolution: %w", err)
+	}
+	// Zero rows matched means no edge with this id belongs to this user: it is
+	// gone (a concurrent full reindex deletes and rebuilds the graph) or was
+	// never theirs. Returning nil would report a link as re-resolved while its
+	// row still points at the old target, so the count decides. SQLite reports
+	// every row the UPDATE matched — even when the values written are the ones
+	// already stored — so no follow-up query is needed here; MySQL counts
+	// changed rows and goes through updateScoped instead.
+	n, err := res.RowsAffected()
+	if err != nil {
+		// A count we could not read is an error, never a success.
+		return fmt.Errorf("update link resolution: rows affected: %w", err)
+	}
+	if n == 0 {
+		return apperror.ErrNotFound
+	}
+	return nil
 }
 
 func scanNoteLinks(rows *sql.Rows) ([]model.NoteLink, error) {

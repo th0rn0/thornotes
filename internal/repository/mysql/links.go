@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/th0rn0/thornotes/internal/apperror"
 	"github.com/th0rn0/thornotes/internal/model"
 )
 
@@ -128,10 +129,26 @@ func (r *LinkRepo) UpdateResolution(ctx context.Context, userID, linkID int64, t
 		now := time.Now().UTC()
 		resolvedAt = &now
 	}
-	_, err := r.db.ExecContext(ctx,
+	// Zero rows affected means no edge with this id belongs to this user: it is
+	// gone (a concurrent full reindex deletes and rebuilds the graph) or was
+	// never theirs. Discarding the count reported a link as re-resolved while
+	// its row still pointed at the old target. The matched/unmatched question
+	// goes through updateScoped because MySQL counts *changed* rows: re-marking
+	// an edge unresolved when it already is (to_note_id NULL, ambiguous 0,
+	// resolved_at NULL) writes no new value and must still be success.
+	matched, err := updateScoped(ctx, r.db,
 		`UPDATE note_links SET to_note_id = ?, ambiguous = ?, resolved_at = ? WHERE id = ? AND user_id = ?`,
-		toNoteID, linkBoolInt(ambiguous), resolvedAt, linkID, userID)
-	return err
+		[]any{toNoteID, linkBoolInt(ambiguous), resolvedAt, linkID, userID},
+		`SELECT EXISTS(SELECT 1 FROM note_links WHERE id = ? AND user_id = ?)`,
+		[]any{linkID, userID},
+	)
+	if err != nil {
+		return fmt.Errorf("update link resolution: %w", err)
+	}
+	if !matched {
+		return apperror.ErrNotFound
+	}
+	return nil
 }
 
 func scanNoteLinks(rows *sql.Rows) ([]model.NoteLink, error) {

@@ -92,6 +92,15 @@ func (r *UserRepo) IDs(ctx context.Context) ([]int64, error) {
 }
 
 func (r *UserRepo) SetUUID(ctx context.Context, id int64, uuid string) error {
+	// Zero rows affected is not an error here, and the result stays discarded
+	// on purpose (ticket 600): this is a backfill for a user the caller has
+	// just listed as uuid-less, and the uuid is freshly generated, so a row
+	// that exists is always changed. A zero-row result therefore means only
+	// that the user was deleted between the list and this write — nothing left
+	// to backfill, which is exactly what the caller asked for. The predicate is
+	// the primary key with no user scoping, so there is no "not yours" case to
+	// report either. (The startup migration in internal/db writes this column
+	// with its own statement; this method has no production caller today.)
 	_, err := r.db.ExecContext(ctx, `UPDATE users SET uuid = ? WHERE id = ?`, uuid, id)
 	return err
 }
