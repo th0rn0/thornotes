@@ -465,6 +465,159 @@ func TestMySQL_FolderRepo_UpdateDescendantPaths(t *testing.T) {
 	assert.Equal(t, "uuid-1/Renamed-MySQL/Child-MySQL", updated.DiskPath)
 }
 
+// createMySQLNoteAt inserts a note row at an explicit disk path so the cascade
+// tests can assert on the disk_path column directly.
+func createMySQLNoteAt(t *testing.T, pool *db.Pool, userID int64, folderID *int64, title, slug, diskPath string) *model.Note {
+	t.Helper()
+	repo := NewNoteRepo(pool.WriteDB)
+	note := &model.Note{
+		UserID:      userID,
+		FolderID:    folderID,
+		Title:       title,
+		Slug:        slug,
+		DiskPath:    diskPath,
+		Content:     "",
+		ContentHash: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+		Tags:        []string{},
+	}
+	created, err := repo.Create(context.Background(), note)
+	require.NoError(t, err)
+	return created
+}
+
+func mysqlFolderPath(t *testing.T, pool *db.Pool, userID, folderID int64) string {
+	t.Helper()
+	repo := NewFolderRepo(pool.WriteDB)
+	f, err := repo.GetByID(context.Background(), userID, folderID)
+	require.NoError(t, err)
+	return f.DiskPath
+}
+
+func mysqlNotePath(t *testing.T, pool *db.Pool, userID, noteID int64) string {
+	t.Helper()
+	repo := NewNoteRepo(pool.WriteDB)
+	n, err := repo.GetByID(context.Background(), userID, noteID)
+	require.NoError(t, err)
+	return n.DiskPath
+}
+
+// TestMySQL_FolderRepo_UpdateDescendantPaths_SiblingSharingPrefixUntouched is
+// the MySQL leg of the ticket-598 guard: a sibling whose name shares a prefix
+// must not be rewritten by the rename cascade.
+func TestMySQL_FolderRepo_UpdateDescendantPaths_SiblingSharingPrefixUntouched(t *testing.T) {
+	pool := openTestMySQL(t)
+	user := createMySQLUser(t, pool)
+	folders := NewFolderRepo(pool.WriteDB)
+	ctx := context.Background()
+
+	source, err := folders.Create(ctx, user.ID, nil, "Notes-MySQL", "uuid-1/Notes-MySQL")
+	require.NoError(t, err)
+	sibling, err := folders.Create(ctx, user.ID, nil, "Notes-MySQL2", "uuid-1/Notes-MySQL2")
+	require.NoError(t, err)
+	child, err := folders.Create(ctx, user.ID, &source.ID, "Sub-MySQL", "uuid-1/Notes-MySQL/Sub-MySQL")
+	require.NoError(t, err)
+
+	inside := createMySQLNoteAt(t, pool, user.ID, &source.ID, "Inside", "inside", "uuid-1/Notes-MySQL/inside.md")
+	siblingNote := createMySQLNoteAt(t, pool, user.ID, &sibling.ID, "Sibling", "sibling", "uuid-1/Notes-MySQL2/sibling.md")
+
+	require.NoError(t, folders.Rename(ctx, user.ID, source.ID, "Renamed-MySQL2", "uuid-1/Renamed-MySQL2"))
+	require.NoError(t, folders.UpdateDescendantPaths(ctx, "uuid-1/Notes-MySQL", "uuid-1/Renamed-MySQL2"))
+
+	assert.Equal(t, "uuid-1/Renamed-MySQL2", mysqlFolderPath(t, pool, user.ID, source.ID))
+	assert.Equal(t, "uuid-1/Renamed-MySQL2/Sub-MySQL", mysqlFolderPath(t, pool, user.ID, child.ID))
+	assert.Equal(t, "uuid-1/Renamed-MySQL2/inside.md", mysqlNotePath(t, pool, user.ID, inside.ID))
+
+	assert.Equal(t, "uuid-1/Notes-MySQL2", mysqlFolderPath(t, pool, user.ID, sibling.ID), "sibling that merely shares a prefix must not be rewritten")
+	assert.Equal(t, "uuid-1/Notes-MySQL2/sibling.md", mysqlNotePath(t, pool, user.ID, siblingNote.ID))
+}
+
+// TestMySQL_FolderRepo_UpdateDescendantPaths_DoesNotRewriteOwnRow is the MySQL
+// leg of the "Proj" -> "Proj-old" -> "Proj-old-old" reproduction.
+func TestMySQL_FolderRepo_UpdateDescendantPaths_DoesNotRewriteOwnRow(t *testing.T) {
+	pool := openTestMySQL(t)
+	user := createMySQLUser(t, pool)
+	folders := NewFolderRepo(pool.WriteDB)
+	ctx := context.Background()
+
+	proj, err := folders.Create(ctx, user.ID, nil, "Proj-MySQL", "uuid-1/Proj-MySQL")
+	require.NoError(t, err)
+
+	require.NoError(t, folders.Rename(ctx, user.ID, proj.ID, "Proj-MySQL-old", "uuid-1/Proj-MySQL-old"))
+	require.NoError(t, folders.UpdateDescendantPaths(ctx, "uuid-1/Proj-MySQL", "uuid-1/Proj-MySQL-old"))
+
+	assert.Equal(t, "uuid-1/Proj-MySQL-old", mysqlFolderPath(t, pool, user.ID, proj.ID))
+}
+
+// TestMySQL_FolderRepo_UpdateDescendantPaths_EscapesLikeWildcards is the MySQL
+// leg of the '%' / '_' escaping guard.
+func TestMySQL_FolderRepo_UpdateDescendantPaths_EscapesLikeWildcards(t *testing.T) {
+	pool := openTestMySQL(t)
+	user := createMySQLUser(t, pool)
+	folders := NewFolderRepo(pool.WriteDB)
+	ctx := context.Background()
+
+	wildcard, err := folders.Create(ctx, user.ID, nil, "100%_done", "uuid-1/100%_done")
+	require.NoError(t, err)
+	bystander, err := folders.Create(ctx, user.ID, nil, "1000Xdone-notes", "uuid-1/1000Xdone-notes")
+	require.NoError(t, err)
+	child, err := folders.Create(ctx, user.ID, &wildcard.ID, "Child", "uuid-1/100%_done/Child")
+	require.NoError(t, err)
+	note := createMySQLNoteAt(t, pool, user.ID, &wildcard.ID, "Child", "child", "uuid-1/100%_done/child.md")
+
+	require.NoError(t, folders.Rename(ctx, user.ID, wildcard.ID, "done", "uuid-1/done"))
+	require.NoError(t, folders.UpdateDescendantPaths(ctx, "uuid-1/100%_done", "uuid-1/done"))
+
+	assert.Equal(t, "uuid-1/done/Child", mysqlFolderPath(t, pool, user.ID, child.ID))
+	assert.Equal(t, "uuid-1/done/child.md", mysqlNotePath(t, pool, user.ID, note.ID))
+	assert.Equal(t, "uuid-1/1000Xdone-notes", mysqlFolderPath(t, pool, user.ID, bystander.ID), "'%' and '_' must not act as wildcards against unrelated folders")
+}
+
+// TestMySQL_FolderRepo_UpdateDescendantPaths_NonASCIIFolderName is the test
+// SQLite structurally cannot write: SQLite's LENGTH() counts characters, so
+// `SUBSTRING(disk_path, LENGTH(?)+1)` slices at the right offset there and every
+// SQLite test stays green. MySQL's LENGTH() counts *bytes*, so a prefix holding
+// a multi-byte character overshoots by exactly (bytes - chars) and the tail is
+// sliced after the separator — "Renamedinside.md" instead of
+// "Renamed/inside.md". That path points at nothing, so the next reconcile reads
+// the row as a deleted note, deletes and reimports it, and the reimported row is
+// a new row with no share token.
+//
+// The assertion is on the disk_path column, not on anything derived from it, so
+// a rewrite that drops the separator cannot pass by being internally consistent.
+func TestMySQL_FolderRepo_UpdateDescendantPaths_NonASCIIFolderName(t *testing.T) {
+	for _, folderName := range []string{"Café", "日本語"} {
+		t.Run(folderName, func(t *testing.T) {
+			pool := openTestMySQL(t)
+			user := createMySQLUser(t, pool)
+			folders := NewFolderRepo(pool.WriteDB)
+			ctx := context.Background()
+
+			oldPath := "uuid-1/" + folderName
+			newPath := "uuid-1/Renamed"
+
+			parent, err := folders.Create(ctx, user.ID, nil, folderName, oldPath)
+			require.NoError(t, err)
+			child, err := folders.Create(ctx, user.ID, &parent.ID, "Sub", oldPath+"/Sub")
+			require.NoError(t, err)
+			inside := createMySQLNoteAt(t, pool, user.ID, &parent.ID, "Inside", "inside", oldPath+"/inside.md")
+			deep := createMySQLNoteAt(t, pool, user.ID, &child.ID, "Deep", "deep", oldPath+"/Sub/deep.md")
+
+			require.NoError(t, folders.Rename(ctx, user.ID, parent.ID, "Renamed", newPath))
+			require.NoError(t, folders.UpdateDescendantPaths(ctx, oldPath, newPath))
+
+			assert.Equal(t, newPath+"/Sub", mysqlFolderPath(t, pool, user.ID, child.ID),
+				"the separator after the renamed prefix must survive the cascade")
+			assert.Equal(t, newPath+"/inside.md", mysqlNotePath(t, pool, user.ID, inside.ID),
+				"the separator after the renamed prefix must survive the cascade")
+			assert.Equal(t, newPath+"/Sub/deep.md", mysqlNotePath(t, pool, user.ID, deep.ID),
+				"the separator after the renamed prefix must survive the cascade")
+
+			// The renamed folder's own row is written by Rename, not by the cascade.
+			assert.Equal(t, newPath, mysqlFolderPath(t, pool, user.ID, parent.ID))
+		})
+	}
+}
+
 func TestMySQL_FolderRepo_GetByDiskPath(t *testing.T) {
 	pool := openTestMySQL(t)
 	user := createMySQLUser(t, pool)

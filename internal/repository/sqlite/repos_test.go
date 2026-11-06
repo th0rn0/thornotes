@@ -313,6 +313,129 @@ func TestFolderRepo_UpdateDescendantPaths(t *testing.T) {
 	assert.Equal(t, "1/Renamed/Child", updated.DiskPath)
 }
 
+// createNoteAt inserts a note row directly at an explicit disk path, so a
+// cascade test can assert on the disk_path column without going through the
+// service (which would rewrite paths itself and hide the defect).
+func createNoteAt(t *testing.T, pool *db.Pool, userID int64, folderID *int64, title, slug, diskPath string) *model.Note {
+	t.Helper()
+	repo := NewNoteRepo(pool.ReadDB, pool.WriteDB)
+	note := &model.Note{
+		UserID:      userID,
+		FolderID:    folderID,
+		Title:       title,
+		Slug:        slug,
+		DiskPath:    diskPath,
+		Content:     "",
+		ContentHash: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+		Tags:        []string{},
+	}
+	created, err := repo.Create(context.Background(), note)
+	require.NoError(t, err)
+	return created
+}
+
+// folderPath reads the disk_path column straight from the row.
+func folderPath(t *testing.T, pool *db.Pool, userID, folderID int64) string {
+	t.Helper()
+	repo := NewFolderRepo(pool.ReadDB, pool.WriteDB)
+	f, err := repo.GetByID(context.Background(), userID, folderID)
+	require.NoError(t, err)
+	return f.DiskPath
+}
+
+// notePath reads the disk_path column straight from the row.
+func notePath(t *testing.T, pool *db.Pool, userID, noteID int64) string {
+	t.Helper()
+	repo := NewNoteRepo(pool.ReadDB, pool.WriteDB)
+	n, err := repo.GetByID(context.Background(), userID, noteID)
+	require.NoError(t, err)
+	return n.DiskPath
+}
+
+// TestFolderRepo_UpdateDescendantPaths_SiblingSharingPrefixUntouched guards the
+// ticket-598 defect: the cascade matched `disk_path LIKE oldPrefix || '%'` with
+// no path-boundary separator, so renaming "Notes" also rewrote sibling "Notes2"
+// — a note in the sibling ended up at a path that does not exist, and the next
+// reconcile deleted and reimported its row (losing the share token).
+func TestFolderRepo_UpdateDescendantPaths_SiblingSharingPrefixUntouched(t *testing.T) {
+	pool := openTestDB(t)
+	user := createUser(t, pool)
+	folders := NewFolderRepo(pool.ReadDB, pool.WriteDB)
+	ctx := context.Background()
+
+	source, err := folders.Create(ctx, user.ID, nil, "Notes", "1/Notes")
+	require.NoError(t, err)
+	sibling, err := folders.Create(ctx, user.ID, nil, "Notes2", "1/Notes2")
+	require.NoError(t, err)
+	child, err := folders.Create(ctx, user.ID, &source.ID, "Sub", "1/Notes/Sub")
+	require.NoError(t, err)
+
+	inside := createNoteAt(t, pool, user.ID, &source.ID, "Inside", "inside", "1/Notes/inside.md")
+	siblingNote := createNoteAt(t, pool, user.ID, &sibling.ID, "Sibling", "sibling", "1/Notes2/sibling.md")
+
+	// The service updates the renamed folder's own row first, then cascades;
+	// reproduce that order so the cascade sees the state the service creates.
+	require.NoError(t, folders.Rename(ctx, user.ID, source.ID, "Renamed2", "1/Renamed2"))
+	require.NoError(t, folders.UpdateDescendantPaths(ctx, "1/Notes", "1/Renamed2"))
+
+	// Assert row content, not just "no error".
+	assert.Equal(t, "1/Renamed2", folderPath(t, pool, user.ID, source.ID))
+	assert.Equal(t, "1/Renamed2/Sub", folderPath(t, pool, user.ID, child.ID), "descendant folder must move with its parent")
+	assert.Equal(t, "1/Renamed2/inside.md", notePath(t, pool, user.ID, inside.ID), "descendant note must move with its parent")
+
+	assert.Equal(t, "1/Notes2", folderPath(t, pool, user.ID, sibling.ID), "sibling that merely shares a prefix must not be rewritten")
+	assert.Equal(t, "1/Notes2/sibling.md", notePath(t, pool, user.ID, siblingNote.ID), "note in a prefix-sharing sibling must not be rewritten")
+}
+
+// TestFolderRepo_UpdateDescendantPaths_DoesNotRewriteOwnRow guards the second
+// reproduction: renaming "Proj" to "Proj-old" re-matched the folder's own
+// (already updated) row and produced "Proj-old-old".
+func TestFolderRepo_UpdateDescendantPaths_DoesNotRewriteOwnRow(t *testing.T) {
+	pool := openTestDB(t)
+	user := createUser(t, pool)
+	folders := NewFolderRepo(pool.ReadDB, pool.WriteDB)
+	ctx := context.Background()
+
+	proj, err := folders.Create(ctx, user.ID, nil, "Proj", "1/Proj")
+	require.NoError(t, err)
+
+	require.NoError(t, folders.Rename(ctx, user.ID, proj.ID, "Proj-old", "1/Proj-old"))
+	require.NoError(t, folders.UpdateDescendantPaths(ctx, "1/Proj", "1/Proj-old"))
+
+	assert.Equal(t, "1/Proj-old", folderPath(t, pool, user.ID, proj.ID), "a rename must not be applied twice to the folder's own row")
+}
+
+// TestFolderRepo_UpdateDescendantPaths_EscapesLikeWildcards guards the third:
+// a folder name may legally contain '%' and '_', which the old pattern passed
+// straight into LIKE as wildcards. "100%_done" matched "1000Xdone" (and nearly
+// anything else starting with "100").
+func TestFolderRepo_UpdateDescendantPaths_EscapesLikeWildcards(t *testing.T) {
+	pool := openTestDB(t)
+	user := createUser(t, pool)
+	folders := NewFolderRepo(pool.ReadDB, pool.WriteDB)
+	ctx := context.Background()
+
+	// "1000Xdone" is exactly "100" + one char ('0') + one char ('X') + "done";
+	// under the unescaped pattern `100%_done%` it matches, and used to be
+	// rewritten to "1/done-notes" — a path that does not exist.
+	wildcard, err := folders.Create(ctx, user.ID, nil, "100%_done", "1/100%_done")
+	require.NoError(t, err)
+	bystander, err := folders.Create(ctx, user.ID, nil, "1000Xdone-notes", "1/1000Xdone-notes")
+	require.NoError(t, err)
+	child, err := folders.Create(ctx, user.ID, &wildcard.ID, "Child", "1/100%_done/Child")
+	require.NoError(t, err)
+	note := createNoteAt(t, pool, user.ID, &wildcard.ID, "Child", "child", "1/100%_done/child.md")
+
+	require.NoError(t, folders.Rename(ctx, user.ID, wildcard.ID, "done", "1/done"))
+	require.NoError(t, folders.UpdateDescendantPaths(ctx, "1/100%_done", "1/done"))
+
+	assert.Equal(t, "1/done", folderPath(t, pool, user.ID, wildcard.ID))
+	assert.Equal(t, "1/done/Child", folderPath(t, pool, user.ID, child.ID), "'%' and '_' in the renamed folder's own name must not break the subtree match")
+	assert.Equal(t, "1/done/child.md", notePath(t, pool, user.ID, note.ID))
+
+	assert.Equal(t, "1/1000Xdone-notes", folderPath(t, pool, user.ID, bystander.ID), "'%' and '_' must not act as wildcards against unrelated folders")
+}
+
 // ─── NoteRepo tests ───────────────────────────────────────────────────────────
 
 func createTestNote(t *testing.T, pool *db.Pool, userID int64, folderID *int64, title string) *model.Note {

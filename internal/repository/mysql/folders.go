@@ -8,6 +8,7 @@ import (
 
 	"github.com/th0rn0/thornotes/internal/apperror"
 	"github.com/th0rn0/thornotes/internal/model"
+	"github.com/th0rn0/thornotes/internal/repository"
 )
 
 type FolderRepo struct {
@@ -133,11 +134,27 @@ func (r *FolderRepo) Move(ctx context.Context, userID, folderID int64, newParent
 }
 
 func (r *FolderRepo) UpdateDescendantPaths(ctx context.Context, oldPrefix, newPrefix string) error {
+	// Scope the cascade to the real subtree: the folder's own disk_path, or a
+	// path underneath it by a separator. The unscoped `LIKE CONCAT(?, '%')`
+	// this replaces also matched siblings whose name merely shared a prefix, and
+	// treated '%'/'_' in a folder name as wildcards (ticket 598). The boundary
+	// and the escaping live in repository.DescendantPathPredicate.
+	predicate, scopeArgs := repository.DescendantPathPredicate(oldPrefix)
+	args := append([]any{newPrefix, oldPrefix}, scopeArgs...)
+
+	// CHAR_LENGTH, not LENGTH: MariaDB/MySQL LENGTH() counts BYTES while
+	// SUBSTRING() counts CHARACTERS, so for an old prefix containing a
+	// multi-byte character LENGTH() overshoots by exactly (bytes - chars) and
+	// the tail is sliced past the separator — "uuid/Renamed/note.md" becomes
+	// "uuid/Renamednote.md". That path points at nothing, and the next reconcile
+	// reads it as a deleted note, deletes and reimports it, which drops its share
+	// token. SQLite's LENGTH() counts characters, so the SQLite suite cannot see
+	// this: keep these two expressions in step and do not "simplify" them back.
 	_, err := r.db.ExecContext(ctx,
 		`UPDATE folders
-		 SET disk_path = CONCAT(?, SUBSTRING(disk_path, LENGTH(?)+1))
-		 WHERE disk_path LIKE CONCAT(?, '%')`,
-		newPrefix, oldPrefix, oldPrefix,
+		 SET disk_path = CONCAT(?, SUBSTRING(disk_path, CHAR_LENGTH(?)+1))
+		 WHERE `+predicate,
+		args...,
 	)
 	if err != nil {
 		return fmt.Errorf("update descendant folder paths: %w", err)
@@ -145,9 +162,9 @@ func (r *FolderRepo) UpdateDescendantPaths(ctx context.Context, oldPrefix, newPr
 
 	_, err = r.db.ExecContext(ctx,
 		`UPDATE notes
-		 SET disk_path = CONCAT(?, SUBSTRING(disk_path, LENGTH(?)+1))
-		 WHERE disk_path LIKE CONCAT(?, '%')`,
-		newPrefix, oldPrefix, oldPrefix,
+		 SET disk_path = CONCAT(?, SUBSTRING(disk_path, CHAR_LENGTH(?)+1))
+		 WHERE `+predicate,
+		args...,
 	)
 	if err != nil {
 		return fmt.Errorf("update descendant note paths: %w", err)
