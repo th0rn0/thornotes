@@ -240,19 +240,22 @@ Folders nest as deep as you like. The path becomes the file path on disk: `notes
 
 ## Using Tags
 
-Add tags to a note by typing in the **Tags** field at the top of the editor (comma-separated). Press Enter to confirm.
+**Add tags to a note:** Type in the **Tags** field at the top of the editor (comma-separated). Press Enter to confirm.
 
 Tags let you cross-reference notes across folders. A note in `work/projects/` can share tags with a note in `personal/ideas/`.
 
-**Browse by tag:** Click **Tags** in the sidebar to open the tag browser. Click a tag to see all notes with that tag. You can select multiple tags — results narrow to notes that have *all* selected tags.
+> Note: the UI currently has no tag browser and no tag-filter panel. Tags are write-only from the editor, and the search box sends only a text query. Two ways to filter by tag exist today, and neither is a "browse by tag" view:
+>
+> - **MCP:** the `list_tags` and `find_notes_by_tag` tools, and `search_notes` with its `tags` argument (AND across tags).
+> - **HTTP:** `GET /api/v1/notes?q=…&tag=one&tag=two`. The `q` parameter is required, so this is a search narrowed by tag rather than a tag listing. Multi-tag filtering is affected by the search-semantics defect tracked as H-02.
 
 ---
 
 ## Search
 
-Click the **Search** icon or use the search box at the top of the sidebar. Search runs across note titles and full content. Results show the matching snippet with the search term highlighted and the folder path for context.
+Click the **Search** icon or use the search box at the top of the sidebar. Search runs across note titles and full content. Results show the matching snippet and the folder path for context.
 
-Combine search with tag filters: search for a term, then click tags in the filter panel to narrow results to notes that match both the text and the selected tags.
+> Note: highlighting is not implemented, and the two database backends differ. On SQLite the server returns a matching excerpt with `<mark>…</mark>` around the match, but the UI HTML-escapes the snippet before rendering, so the markers appear as literal text. That escaping is deliberate: the snippet comes from author-controlled note content, and rendering it unescaped would hand a note author an XSS primitive. On MySQL, which is what the bundled container image runs, the snippet is the first 200 characters of the note with no markers at all, so the excerpt has no relationship to the query. Both behaviours are tracked as H-02.
 
 ---
 
@@ -265,7 +268,9 @@ Every note can be shared as a read-only public link — no login required for th
 3. A link is generated in the format `https://your-instance.example.com/s/{token}`.
 4. Copy and send the link. Anyone with the URL can read the rendered note.
 
-To stop sharing, click Share again and select **Clear token**. The old link immediately stops working. Click Share again to generate a new token if you need to re-share.
+To stop sharing, open the note and click **Unshare** (it appears only while a link exists). The link stops working immediately, and sharing again issues a different link. The old one is never restored.
+
+Clicking **Share** on a note that already has a link asks for confirmation, then replaces the link: the previous URL stops working at that moment. That is why the button warns instead of silently rotating it.
 
 ---
 
@@ -302,9 +307,7 @@ What gets tracked:
 
 ## Import
 
-**Single note:** Drag and drop a `.md` file onto the folder tree, or use the import button. The filename becomes the note title. The file content is preserved exactly.
-
-**ZIP archive:** Import a `.zip` containing `.md` files. Thornotes recreates the directory structure inside the ZIP as folders and creates a note for each `.md` file. Files in subdirectories go into the corresponding folder (created automatically).
+**Single note or ZIP archive:** Click the **↑ Import** button in the sidebar. The import modal opens with a file picker — choose one `.md` file or one `.zip` file, then click **Import** to confirm. The filename becomes the note title for a single file; for a ZIP, Thornotes recreates the directory structure inside the archive as folders and creates a note for each `.md` file. The file content is preserved exactly.
 
 Maximum import size is 10 MB. Files larger than that need to be split before importing.
 
