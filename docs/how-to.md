@@ -240,19 +240,19 @@ Folders nest as deep as you like. The path becomes the file path on disk: `notes
 
 ## Using Tags
 
-Add tags to a note by typing in the **Tags** field at the top of the editor (comma-separated). Press Enter to confirm.
+**Add tags to a note:** Type in the **Tags** field at the top of the editor (comma-separated). Press Enter to confirm.
 
 Tags let you cross-reference notes across folders. A note in `work/projects/` can share tags with a note in `personal/ideas/`.
 
-**Browse by tag:** Click **Tags** in the sidebar to open the tag browser. Click a tag to see all notes with that tag. You can select multiple tags — results narrow to notes that have *all* selected tags.
+> Note: the UI currently has no tag browser and no tag-filter panel — tags are write-only from the editor, and the search box sends only a text query. Listing, browsing, or filtering notes by tag is available through the API (`GET /api/v1/tags`, `GET /api/v1/notes?tag=…`) and the MCP tools (`list_tags`, `find_notes_by_tag`, `search_notes` with `tags`).
 
 ---
 
 ## Search
 
-Click the **Search** icon or use the search box at the top of the sidebar. Search runs across note titles and full content. Results show the matching snippet with the search term highlighted and the folder path for context.
+Click the **Search** icon or use the search box at the top of the sidebar. Search runs across note titles and full content. Results show the matching snippet and the folder path for context.
 
-Combine search with tag filters: search for a term, then click tags in the filter panel to narrow results to notes that match both the text and the selected tags.
+> Note: the backend returns match markers (`<mark>…</mark>`) in snippets, but the UI HTML-escapes the snippet before rendering — so the markers currently appear as literal text rather than as visual highlights. This is deliberate: the snippet comes from author-controlled note content, and rendering the markers unescaped would hand a note author an XSS primitive. Highlighting will be restored once the escaping question is resolved server-side (H-02).
 
 ---
 
@@ -302,9 +302,7 @@ What gets tracked:
 
 ## Import
 
-**Single note:** Drag and drop a `.md` file onto the folder tree, or use the import button. The filename becomes the note title. The file content is preserved exactly.
-
-**ZIP archive:** Import a `.zip` containing `.md` files. Thornotes recreates the directory structure inside the ZIP as folders and creates a note for each `.md` file. Files in subdirectories go into the corresponding folder (created automatically).
+**Single note or ZIP archive:** Click the **↑ Import** button in the sidebar. The import modal opens with a file picker — choose one `.md` file or one `.zip` file, then click **Import** to confirm. The filename becomes the note title for a single file; for a ZIP, Thornotes recreates the directory structure inside the archive as folders and creates a note for each `.md` file. The file content is preserved exactly.
 
 Maximum import size is 10 MB. Files larger than that need to be split before importing.
 

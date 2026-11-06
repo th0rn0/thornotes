@@ -1900,7 +1900,30 @@ async function copyToClipboard(text) {
 
 async function shareNote() {
   if (!currentNote) return;
-  const res = await api('POST', `/api/v1/notes/${currentNote.id}/share`, {});
+  let res;
+  if (currentNote.share_token) {
+    // Note already has a live share link. User must explicitly confirm
+    // before we revoke it — otherwise a stray click would kill a link
+    // that may already be in someone else's chat log.
+    const confirmed = confirm(
+      'This note already has a share link. Generating a new one will ' +
+      'permanently revoke the existing link.'
+    );
+    if (!confirmed) return;
+    // Backend contract (as of #40): POST with {clear: true} revokes the
+    // token and returns {share_token: null}; POST with {} or without the
+    // field issues/rotates a token. Sending {} here was the M-03 bug —
+    // the UI told the user the link was dead while the old token kept
+    // resolving.
+    const cleared = await api('POST', `/api/v1/notes/${currentNote.id}/share`, { clear: true });
+    if (cleared.share_token !== null) {
+      throw new Error('clear did not revoke the existing token');
+    }
+    currentNote.share_token = null;
+    res = await api('POST', `/api/v1/notes/${currentNote.id}/share`, {});
+  } else {
+    res = await api('POST', `/api/v1/notes/${currentNote.id}/share`, {});
+  }
   const url = `${location.origin}/s/${res.share_token}`;
   await copyToClipboard(url).catch(() => {});
   showNotification(`Share link copied: ${url}`);
