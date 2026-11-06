@@ -98,9 +98,16 @@ func (r *FolderRepo) Tree(ctx context.Context, userID int64) ([]*model.FolderTre
 }
 
 func (r *FolderRepo) Rename(ctx context.Context, userID, folderID int64, newName, newDiskPath string) error {
-	res, err := r.db.ExecContext(ctx,
+	// Renaming a folder to the name it already has (or re-asserting its path)
+	// changes no column, so MySQL reports 0 rows affected — the same count a
+	// folder that is not the caller's produces. A matched row is success; a row
+	// that is not the caller's, or does not exist, is not-found. Both answer 404,
+	// so a foreign folder id leaks nothing (ticket 599).
+	matched, err := updateScoped(ctx, r.db,
 		`UPDATE folders SET name = ?, disk_path = ? WHERE id = ? AND user_id = ?`,
-		newName, newDiskPath, folderID, userID,
+		[]any{newName, newDiskPath, folderID, userID},
+		`SELECT EXISTS(SELECT 1 FROM folders WHERE id = ? AND user_id = ?)`,
+		[]any{folderID, userID},
 	)
 	if err != nil {
 		if isUniqueConstraint(err) {
@@ -108,8 +115,7 @@ func (r *FolderRepo) Rename(ctx context.Context, userID, folderID int64, newName
 		}
 		return fmt.Errorf("rename folder: %w", err)
 	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
+	if !matched {
 		return apperror.ErrNotFound
 	}
 	return nil
