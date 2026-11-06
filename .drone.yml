@@ -614,3 +614,55 @@ volumes:
   - name: backups
     host:
       path: /servdata/thornotes/backups
+
+---
+
+# ── TEMPORARY reachability probe (ticket 602) — REMOVE AFTER EVIDENCE ────────
+# Read-only proof of where this runner's docker daemon lives: identity, the
+# container names ONLY that daemon would have, and what /servdata looks like
+# from inside this step. Pushes a single marker file into /servdata/thornotes/
+# backups via the same bind the backup step uses, then leaves it.
+kind: pipeline
+type: docker
+name: reachability-probe
+trigger:
+  event:
+    - push
+  branch:
+    - ops/safety-net
+
+steps:
+  - name: probe
+    image: docker:27
+    volumes:
+      - name: docker-sock
+        path: /var/run/docker.sock
+      - name: backups
+        path: /servdata/thornotes/backups
+    commands:
+      - echo "== step identity =="; hostname; uname -m; cat /etc/hostname
+      - echo "== docker server =="; docker version --format "server={{.Server.Version}}"
+      - docker info --format "hostname={{.Name}} kernel={{.KernelVersion}} os={{.OperatingSystem}} arch={{.Architecture}} cpus={{.NCPU}}"
+      - echo "== containers only this daemon would have =="
+      - docker ps --format '{{.Names}}\t{{.Image}}\t{{.Status}}' | head -60
+      - echo "== /servdata as this step sees it =="
+      - ls -la /servdata /servdata/thornotes /servdata/thornotes/backups 2>&1
+      - echo "== write probe into the real backup dir =="
+      - docker run --rm -v /servdata/thornotes/backups:/p busybox sh -c 'echo runner-write-probe $(date -u +%Y-%m-%dT%H:%M:%SZ) > /p/.reachability-probe && ls -l /p/.reachability-probe'
+
+  - name: probe-files
+    image: docker:27
+    volumes:
+      - name: docker-sock
+        path: /var/run/docker.sock
+    commands:
+      - echo "== the marker, read back through a second container =="
+      - docker run --rm -v /servdata/thornotes/backups:/p busybox cat /p/.reachability-probe
+
+volumes:
+  - name: docker-sock
+    host:
+      path: /var/run/docker.sock
+  - name: backups
+    host:
+      path: /servdata/thornotes/backups
