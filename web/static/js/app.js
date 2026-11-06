@@ -284,7 +284,7 @@ async function loadFolderTree() {
 
 async function loadFolderNotes(folderId) {
   if (loadedFolderIds.has(folderId)) return;
-  const items = await api('GET', `/api/v1/folders/${folderId}/notes`);
+  const items = await api('GET', `/api/v1/folders/${folderId}/notes`).catch(() => []);
   notesByFolder[folderId] = items || [];
   loadedFolderIds.add(folderId);
   renderTree();
