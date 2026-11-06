@@ -109,8 +109,24 @@ func (s *Service) GetNoteByShareToken(ctx context.Context, token string) (*model
 }
 
 // ListNotes returns note metadata for a given folder (nil = root).
+//
+// It does NOT prove that folderID exists or belongs to userID: ListByFolder
+// filters on user_id and answers an empty list for a folder that is somebody
+// else's. Anything id-addressed must use FolderNotes instead, so that "not
+// yours" and "not there" are the same answer.
 func (s *Service) ListNotes(ctx context.Context, userID int64, folderID *int64) ([]*model.NoteListItem, error) {
 	return s.notes.ListByFolder(ctx, userID, folderID)
+}
+
+// FolderNotes lists the notes in one folder, after proving the folder belongs
+// to userID. A folder owned by another user and a folder that does not exist
+// are indistinguishable here — both return apperror.ErrNotFound — so an
+// id-addressed route cannot be used to enumerate other users' folder ids.
+func (s *Service) FolderNotes(ctx context.Context, userID, folderID int64) ([]*model.NoteListItem, error) {
+	if _, err := s.folders.GetByID(ctx, userID, folderID); err != nil {
+		return nil, err
+	}
+	return s.notes.ListByFolder(ctx, userID, &folderID)
 }
 
 // ListAllNotes returns note metadata for all notes owned by userID, across all folders.

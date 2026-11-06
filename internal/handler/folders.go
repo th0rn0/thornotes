@@ -127,7 +127,7 @@ func (h *FoldersHandler) ListNotes(c *gin.Context) {
 		return
 	}
 
-	items, err := h.svc.ListNotes(c.Request.Context(), user.ID, &folderID)
+	items, err := h.svc.FolderNotes(c.Request.Context(), user.ID, folderID)
 	if err != nil {
 		writeError(c, err)
 		return

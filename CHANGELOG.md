@@ -6,6 +6,7 @@ All notable changes to thornotes are documented here.
 
 ### Changed
 - Startup now refuses databases whose schema version is newer than the running build supports; the recovery path is documented in [docs/operations.md](docs/operations.md).
+- `GET /api/v1/folders/:id/notes` answers `404 Not Found` for a folder the caller does not own. It previously answered `200` with an empty list, which confirmed that the folder id existed and let any account enumerate other accounts' folder ids one integer at a time. A folder owned by another user and a folder that has been deleted are now indistinguishable — same status, same `{"error":"not found"}` body as the note routes. Behaviour change for any client that read the old empty `200` as "this folder is empty"; the SPA only requests folder ids from its own tree, and two of its three call sites already tolerate an error.
 - `POST /api/v1/notes/:id/share` answers `404 Not Found` when the note does not belong to the caller (it previously answered `200` with a share token that had not been written, so a failed share was indistinguishable from a successful one). Behaviour change for any tooling that treated the old `200` as success.
 
 ### Fixed
