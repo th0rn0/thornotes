@@ -15,7 +15,7 @@ A self-hosted Markdown note-taking app with file-as-canonical storage. Every not
 - Folder tree with lazy-loaded notes
 - **Folder overview** — click a folder to see a card grid of all its notes with content snippets
 - **Wiki-style note linking** — use `[[Note Title]]` in any note to link to another note; clicking the link in preview opens it, building a navigable note graph
-- Full-text search with snippet highlighting
+- Full-text search with snippet excerpts (see [the How-To](docs/how-to.md#search) for the current highlighting caveat)
 - Tags
 - Shareable read-only note links
 - MCP server — full CRUD over notes and folders via 14 tools; read-only or read-write token scopes; works with Claude Desktop, Open WebUI, Cursor, and any MCP-compatible client
