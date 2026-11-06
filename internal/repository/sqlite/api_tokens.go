@@ -99,6 +99,14 @@ func (r *APITokenRepo) Delete(ctx context.Context, userID, tokenID int64) error 
 }
 
 func (r *APITokenRepo) TouchLastUsed(ctx context.Context, tokenID int64) error {
+	// Best-effort side effect, and the result is discarded on purpose (ticket
+	// 600): the token id comes from an auth path that has already validated the
+	// token, so a zero-row update means the row was revoked between validation
+	// and this write. Failing the request for that would turn a harmless
+	// timestamp miss into a 500 on a request whose authentication already
+	// succeeded; the next request re-reads the token and gets a truthful 401.
+	// The statement is also unscoped by user_id — it matches the primary key
+	// alone — so it is not one of the user-scoped writes this ticket is about.
 	const q = `UPDATE api_tokens SET last_used_at = datetime('now') WHERE id = ?`
 	_, err := r.writeDB.ExecContext(ctx, q, tokenID)
 	if err != nil {
@@ -146,6 +154,11 @@ func (r *APITokenRepo) SetName(ctx context.Context, userID, tokenID int64, name 
 // pair exists. Used after an UPDATE that reported 0 rows affected to distinguish
 // "the row is missing" from "the value was unchanged so the driver reported no
 // change."
+//
+// SQLite reports every row an UPDATE matched, even when the values written are
+// the ones already stored, so this follow-up query is a belt-and-braces check
+// rather than the load-bearing one (ticket 600). The MySQL twin has no such
+// helper: it asks the same question through updateScoped.
 func (r *APITokenRepo) ensureTokenOwned(ctx context.Context, userID, tokenID int64) error {
 	var exists bool
 	if err := r.readDB.QueryRowContext(ctx,
