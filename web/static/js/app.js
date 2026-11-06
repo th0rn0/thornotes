@@ -1458,7 +1458,10 @@ function _attachGraphClickHandler(canvas) {
     const x = ev.clientX - rect.left;
     const y = ev.clientY - rect.top;
     const hit = _graphHitTest(layout, x, y);
-    if (!hit || hit.status !== 'resolved' || hit.noteId == null) return;
+    // isNavigableHit (graph-utils.js) is the single definition of "this click
+    // navigates": resolved node with a concrete note id. Ghost, ambiguous,
+    // centre and empty-canvas clicks all fall through as no-ops.
+    if (!isNavigableHit(hit)) return;
     // Resolved node clicked — navigate via the same path as the text list.
     if (typeof openNote === 'function') openNote(hit.noteId);
   });
@@ -1467,7 +1470,9 @@ function _attachGraphClickHandler(canvas) {
     if (!layout) return;
     const rect = canvas.getBoundingClientRect();
     const hit = _graphHitTest(layout, ev.clientX - rect.left, ev.clientY - rect.top);
-    const clickable = hit && hit.status === 'resolved';
+    // Same predicate as the click handler — a node the cursor calls
+    // "clickable" is exactly one a click will navigate.
+    const clickable = isNavigableHit(hit);
     canvas.style.cursor = clickable ? 'pointer' : 'default';
     canvas.title = clickable ? (hit.label || '') : '';
   });
