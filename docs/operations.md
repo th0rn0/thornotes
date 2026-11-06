@@ -162,3 +162,24 @@ The Drone runner keeps expensive tool caches on its host and bind-mounts them in
 
 - Go module downloads are **not** cached on the runner: the Go steps (`lint`, `test`, `build-linux-binary`) each fetch their own module tree. Measured on this runner, a fully cold download adds ~1 s to the `test` step (52 `go: downloading` lines), so a shared module cache does not pay for itself — and while two builds run at once it made them *slower* (~+50 s per `test` step), so it was removed in ticket 597.
 - The `test` step instead retries the *download* once (`go mod download all || go mod download all`): a single stream reset from `proxy.golang.org` (HTTP/2 `stream error`, as on build #226) no longer turns the build red. The download is idempotent and hash-verified against `go.sum`, so the retry cannot mask a corrupted or wrong module; real test failures are never retried.
+
+## Safety-net backups (ticket 602) — what runs where
+
+Thornotes production auto-deploys `th0rn0/thornotes:latest` via watchtower; nobody runs `scripts/deploy-gate.sh` on that path. `scripts/host-backup.sh` is the protection for it: a rolling dump-plus-bundle taken **before** an unseen deploy can matter, with a restore proof every run.
+
+| What | Where |
+| --- | --- |
+| `safety-net` pipeline (cron trigger, branch `ops/safety-net`, defined in `.drone.yml`) | Drone cron → docker-runner step (`image: docker:27`) with the host docker socket and the host backup directory bound in |
+| `scripts/host-backup.sh backup` | On the Docker host of the production stack. `mariadb-dump --single-transaction --hex-blob` runs in a throwaway helper that shares the db container's network namespace; a `git bundle create --all` of the notes tree runs read-only against the tree bind |
+| Both artefacts | `/servdata/thornotes/backups` on the host (`SAFETY_BACKUP_DIR`), outside the db volume and outside the notes tree. Part files are renamed only after integrity checks, so a canonical name is never a half-written file |
+| `scripts/host-backup.sh verify` | Stand up a **tmpfs** MariaDB from the *same image as the running db*, restore the newest dump into it, require the `notes` and `users` row counts to equal production's, and clone the newest bundle to prove it resolves. The scratch container (`thornotes-scratch-restore`) is removed even on failure paths |
+| Discord alert | On pipeline failure only (secret `discord_webhook_url`) |
+
+Two mount rules keep the step honest (docker `v:` sources resolve against the **host** daemon, not the step's filesystem):
+
+1. The host backup directory is bound into the step at the **same named path** (`/servdata/thornotes/backups` → `/servdata/thornotes/backups`), so what the step can `ls` is exactly what the helper containers write.
+2. Never bind it at `/out` inside the step — that was the 2026-11-06 bug: bundles landed where the step could not see them.
+
+**Rotation bound: 168 of each artefact** (`KEEP_HOURLY`, one pair per hour). This bound is primarily a **disk** decision — on top of it, the 24-hour coverage requirement ("reach the evening before a bad pull, any day of the week") is met with margin: 168 hours is a full week, so a bad pull on a Monday morning still reaches far past the whole weekend, not just the last day. Each hourly pair is small (a compressed dump plus a bundle; real per-run sizes are printed by the `BACKUP OK` line and accumulated in `scripts/host-backup.sh status`).
+
+If the host-side reachability of the runner from Drone is ever not available, the same script runs standalone on the host — see `scripts/host-backup.sh` usage for the cron alternative.

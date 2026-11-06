@@ -559,6 +559,14 @@ volumes:
 # The main CI pipeline above does not run for cron events (its trigger lists
 # push/pull_request/tag only), and this pipeline only runs for cron events on
 # the ops/safety-net branch — the two never interact.
+# Mount rules (the 2026-11-06 `/out` bug): inside the step, container `docker
+# run` calls resolve their `-v` sources against the HOST daemon, not against
+# the step's filesystem. So the backup directory must exist as a host path and
+# is bound into the step at the SAME named path (`/servdata/thornotes/backups`
+# -> `/servdata/thornotes/backups`): the artefacts the step can `ls` are then
+# exactly the artefacts the helper containers write. Never bind it at `/out`
+# inside the step — that deviates from the path the helpers use and lands
+# writes somewhere the step cannot see.
 kind: pipeline
 type: docker
 name: safety-net
@@ -574,11 +582,14 @@ steps:
     volumes:
       - name: docker-sock
         path: /var/run/docker.sock
+      - name: backups
+        path: /servdata/thornotes/backups
     environment:
       KEEP_HOURLY: "168"
     commands:
       - sh scripts/host-backup.sh backup
       - sh scripts/host-backup.sh verify
+      - ls -l /servdata/thornotes/backups
 
   - name: discord-safety-failure
     image: curlimages/curl:8.7.1
@@ -600,3 +611,6 @@ volumes:
   - name: docker-sock
     host:
       path: /var/run/docker.sock
+  - name: backups
+    host:
+      path: /servdata/thornotes/backups

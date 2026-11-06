@@ -46,15 +46,24 @@ die() { printf '[safety-net] FATAL: %s\n' "$*" >&2; exit 1; }
 docker ps >/dev/null 2>&1 || die "docker CLI/socket unavailable"
 
 # ---------- discovery: unique match each time, never a guess -------------------
-DB=$(docker ps --format '{{.Names}}\t{{.Image}}' | awk -F'\t' \
+# ... and in test envs a SAFETY_NAME_PREFIX scope limits discovery to
+# containers whose names begin with that prefix (production leaves it unset,
+# so production behaviour is the code below with prefix logic inert).
+NAME_SCOPE() { # renders the awk name-filter snippet shared by both discoveries
+  awk -F'\t' -v pre="${SAFETY_NAME_PREFIX:-}" \
+      'pre != "" && index($1, pre) != 1 { next }
+       { print $0 }'
+}
+
+DB=$(docker ps --format '{{.Names}}\t{{.Image}}' | NAME_SCOPE | awk -F'\t' \
   'tolower($2) ~ /maria|mysql/ && $1 !~ /thornotes-smoke|thornotes-scratch|thornotes-backup-helper/ {print $1}' | head -1)
-APP=$(docker ps --format '{{.Names}}\t{{.Image}}' | awk -F'\t' \
+APP=$(docker ps --format '{{.Names}}\t{{.Image}}' | NAME_SCOPE | awk -F'\t' \
   'tolower($2) ~ /th0rn0\/thornotes/ && $1 !~ /thornotes-smoke|thornotes-scratch|thornotes-backup-helper|ci-/ {print $1}' | head -1)
 [ -n "$DB" ]  || die "no mysql/mariadb container running"
 [ -n "$APP" ] || die "no thornotes app container running"
-DB_COUNT=$(docker ps --format '{{.Names}}\t{{.Image}}' | awk -F'\t' \
+DB_COUNT=$(docker ps --format '{{.Names}}\t{{.Image}}' | NAME_SCOPE | awk -F'\t' \
   'tolower($2) ~ /maria|mysql/ && $1 !~ /thornotes-smoke|thornotes-scratch|thornotes-backup-helper/ {print $1}' | wc -l)
-APP_COUNT=$(docker ps --format '{{.Names}}\t{{.Image}}' | awk -F'\t' \
+APP_COUNT=$(docker ps --format '{{.Names}}\t{{.Image}}' | NAME_SCOPE | awk -F'\t' \
   'tolower($2) ~ /th0rn0\/thornotes/ && $1 !~ /thornotes-smoke|thornotes-scratch|thornotes-backup-helper|ci-/ {print $1}' | wc -l)
 [ "$DB_COUNT"  = "1" ] || die "expected exactly 1 mysql/mariadb container, found $DB_COUNT"
 [ "$APP_COUNT" = "1" ] || die "expected exactly 1 thornotes app container, found $APP_COUNT"
@@ -63,32 +72,34 @@ APP_IMAGE=$(docker inspect "$APP" --format '{{.Config.Image}}')
 log "discovered: db=$DB ($DB_IMAGE)  app=$APP ($APP_IMAGE)"
 
 CREDS=$(docker exec "$DB" sh -c '
-  c="" ; d=""
+  c="" ; q="" ; d=""
   for x in mariadb-admin mysqladmin; do command -v "$x" >/dev/null 2>&1 && { c=$x; break; }; done
-  for x in mariadb-dump mysqldump;    do command -v "$x" >/dev/null 2>&1 && { d=$x; break; }; done
-  [ -n "$c" ] && [ -n "$d" ] || { echo NOCLIENT; exit 0; }
+  for x in mariadb mysql;                do command -v "$x" >/dev/null 2>&1 && { q=$x; break; }; done
+  for x in mariadb-dump mysqldump;       do command -v "$x" >/dev/null 2>&1 && { d=$x; break; }; done
+  [ -n "$c" ] && [ -n "$d" ] && [ -n "$q" ] || { echo NOCLIENT; exit 0; }
   for v in MYSQL_ROOT_PASSWORD MARIADB_ROOT_PASSWORD; do
-    eval "test -n \"\${$v:-}\" && { echo \"CLIENT=$c DUMP=$d PWVAR=$v\"; exit 0; }"
+    eval "test -n \"\${$v:-}\" && { echo \"ADMIN=$c SQLCL=$q DUMP=$d PWVAR=$v\"; exit 0; }"
   done
   echo NOPW')
 case "$CREDS" in
-  CLIENT=*) : ;;
+  ADMIN=*) : ;;
   NOPW)     die "db container exposes neither MYSQL_ROOT_PASSWORD nor MARIADB_ROOT_PASSWORD" ;;
   NOCLIENT) die "db container has no mariadb/mysql client binaries" ;;
   *)        die "could not read db credential layout ('$CREDS')" ;;
 esac
-CLIENT=$(printf '%s\n' "$CREDS" | sed -n 's/.*CLIENT=\([^ ]*\).*/\1/p')
+ADMINBIN=$(printf '%s\n' "$CREDS" | sed -n 's/.*ADMIN=\([^ ]*\).*/\1/p')
+SQLCLIENT=$(printf '%s\n' "$CREDS" | sed -n 's/.*SQLCL=\([^ ]*\).*/\1/p')
 DUMPBIN=$(printf '%s\n' "$CREDS" | sed -n 's/.*DUMP=\([^ ]*\).*/\1/p')
 PWVAR=$(printf '%s\n'  "$CREDS" | sed -n 's/.*PWVAR=\([^ ]*\).*/\1/p')
 PW=$(docker exec "$DB" sh -c "printf '%s' \"\${$PWVAR:-}\"") || true
 [ -n "$PW" ] || die "db root password is empty; refusing to dump"
-log "creds: root password taken from $PWVAR of the db container env (never printed); client=$CLIENT dump=$DUMPBIN"
+log "creds: root password taken from $PWVAR of the db container env (never printed); sqlclient=$SQLCLIENT dump=$DUMPBIN admin=$ADMINBIN"
 
 # database schemas: everything except the system schemas; require exactly one
 # thornotes-like database.
-DBLIST=$(docker run --rm -e DBPW="$PW" -e CLIENT="$CLIENT" \
+DBLIST=$(docker run --rm -e DBPW="$PW" -e SQLCLIENT="$SQLCLIENT" \
   --network "container:$DB" "$DB_IMAGE" \
-  sh -c '$CLIENT -uroot -p"$DBPW" -NBe "SHOW DATABASES"' 2>/dev/null) \
+  sh -c '$SQLCLIENT -h127.0.0.1 -uroot -p"$DBPW" -NBe "SHOW DATABASES"' 2>/dev/null) \
   || die "could not list databases"
 DBNAME=$(printf '%s\n' "$DBLIST" | awk '
   $0 ~ /^(information_schema|performance_schema|mysql|sys)$/ { next }
@@ -117,8 +128,8 @@ prep_dir() {
   docker run --rm -v "$BACKUP_DIR:/out" "$BUSYBOX" mkdir -p /out
 }
 counts() { # $1 = container (scratch) or empty -> producer via docker run, $2 = client, $3 = pw value
-  docker exec -e DBPW="$3" -e CLIENT="$2" -e CSQL="$COUNT_SQL" \
-    "$1" sh -c '$CLIENT -uroot -p"$DBPW" -NBe "$CSQL"' 2>/dev/null || true
+  docker exec -e DBPW="$3" -e SQLCLIENT="$2" -e CSQL="$COUNT_SQL" \
+    "$1" sh -c '$SQLCLIENT -uroot -p"$DBPW" -NBe "$CSQL"' 2>/dev/null || true
 }
 
 case "${1:-help}" in
@@ -131,10 +142,12 @@ backup)
   # dump through a helper sharing the db container network namespace, the
   # password handed over via -e; the part file is committed after integrity
   # checking so a half-written dump never carries the canonical name.
+  # (127.0.0.1: the helper shares the db's NETNS but not its filesystem, so the
+  # unix socket path does not exist there; TCP over the shared loopback works.)
   docker run --rm -v "$BACKUP_DIR:/out" -e DBPW="$PW" -e DUMPBIN="$DUMPBIN" \
     -e DBNAME="$DBNAME" --network "container:$DB" "$DB_IMAGE" \
     sh -c '$DUMPBIN --single-transaction --hex-blob --routines --triggers --events \
-      --databases "$DBNAME" -uroot -p"$DBPW" | gzip -c > /out/'"$DUMP_TMP" \
+      --databases "$DBNAME" -h127.0.0.1 -uroot -p"$DBPW" | gzip -c > /out/'"$DUMP_TMP" \
     || die "mariadb-dump through helper failed"
   docker run --rm -v "$BACKUP_DIR:/out" "$BUSYBOX" sh -c '
     test -s /out/'"$DUMP_TMP"' || { echo "dump part file empty"; exit 1; }
@@ -143,11 +156,18 @@ backup)
     || die "dump integrity check failed; fragment left for inspection"
 
   # git bundle of the notes tree; the repo itself is mounted READ-ONLY.
+  # safe.directory is whitelisted in the container's own global config because
+  # the tree on disk is owned by an app uid, never by root (git 2.35+ refuses
+  # "dubious ownership" and `bundle create` then reports "Need a repository").
   docker run --rm -v "$NOTES_SRC:/notes:ro" -v "$BACKUP_DIR:/out" -w /notes \
-    "$GIT_IMAGE" bundle create "/out/$BUNDLE_TMP" --all >/dev/null \
+    --entrypoint sh "$GIT_IMAGE" -c \
+    'git config --global --add safe.directory /notes
+     git bundle create "/out/'"$BUNDLE_TMP"'" --all >/dev/null' \
     || die "git bundle create failed (src=$NOTES_SRC)"
   docker run --rm -v "$NOTES_SRC:/notes:ro" -v "$BACKUP_DIR:/out" -w /notes \
-    "$GIT_IMAGE" bundle verify "/out/$BUNDLE_TMP" >/dev/null \
+    --entrypoint sh "$GIT_IMAGE" -c \
+    'git config --global --add safe.directory /notes
+     git bundle verify "/out/'"$BUNDLE_TMP"'" >/dev/null' \
     || die "git bundle verify failed on fragment"
   docker run --rm -v "$BACKUP_DIR:/out" "$BUSYBOX" mv "/out/$BUNDLE_TMP" "/out/$BUNDLE_FILE"
 
@@ -191,9 +211,9 @@ verify)
 
   # fresh production counts, read minutes after the dump (same build) so the
   # comparison is exact.
-  PROD_COUNTS=$(docker run --rm -e DBPW="$PW" -e CLIENT="$CLIENT" -e CSQL="$COUNT_SQL" \
+  PROD_COUNTS=$(docker run --rm -e DBPW="$PW" -e SQLCLIENT="$SQLCLIENT" -e CSQL="$COUNT_SQL" \
     --network "container:$DB" "$DB_IMAGE" \
-    sh -c '$CLIENT -uroot -p"$DBPW" -NBe "$CSQL"' 2>/dev/null) \
+    sh -c '$SQLCLIENT -h127.0.0.1 -uroot -p"$DBPW" -NBe "$CSQL"' 2>/dev/null) \
     || PROD_COUNTS=""
   [ -n "$PROD_COUNTS" ] || die "could not read production row counts"
   log "counts production: $(printf '%s' "$PROD_COUNTS" | tr '\n' '; ')"
@@ -205,7 +225,7 @@ verify)
   docker run -d --name "$SCRATCH_DB" -e MARIADB_ROOT_PASSWORD="$SCRATCH_PW" \
     --tmpfs /var/lib/mysql "$DB_IMAGE" >/dev/null || die "scratch db could not start"
   waited=0
-  until docker exec "$SCRATCH_DB" mariadb-admin ping -uroot -p"$SCRATCH_PW" 2>/dev/null | grep -q alive; do
+  until docker exec -e ADMINBIN="$ADMINBIN" "$SCRATCH_DB" sh -c '$ADMINBIN ping -uroot -p"'"$SCRATCH_PW"'" 2>/dev/null' | grep -q alive; do
     waited=$((waited + 1))
     [ "$waited" -lt 60 ] || die "scratch db never came up"
     sleep 1
@@ -213,12 +233,12 @@ verify)
   log "scratch db up from the same image ($DB_IMAGE), tmpfs only — nothing of production touched"
 
   docker run --rm -v "$BACKUP_DIR:/srv:ro" "$BUSYBOX" sh -c 'gzip -dc /srv/'"$NEWEST_DUMP" \
-    | docker exec -i -e DBPW="$SCRATCH_PW" -e CLIENT="$CLIENT" "$SCRATCH_DB" \
-        sh -c '$CLIENT -uroot -p"$DBPW"' \
+    | docker exec -i -e DBPW="$SCRATCH_PW" -e SQLCLIENT="$SQLCLIENT" "$SCRATCH_DB" \
+        sh -c '$SQLCLIENT -uroot -p"$DBPW"' \
     || die "restoring $NEWEST_DUMP into scratch failed"
   log "restore complete: $NEWEST_DUMP -> $SCRATCH_DB (tmpfs)"
 
-  SCRATCH_COUNTS=$(counts "$SCRATCH_DB" "$CLIENT" "$SCRATCH_PW")
+  SCRATCH_COUNTS=$(counts "$SCRATCH_DB" "$SQLCLIENT" "$SCRATCH_PW")
   [ -n "$SCRATCH_COUNTS" ] || die "could not read scratch row counts"
   log "counts scratch:    $(printf '%s' "$SCRATCH_COUNTS" | tr '\n' '; ')"
 
