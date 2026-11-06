@@ -546,15 +546,23 @@ volumes:
 
 ---
 
-# ── Watchtower safety-net (ticket 602) — DEPLOYED BY DRONE CRON ONLY ─────────
+# ── Watchtower safety-net (ticket 602) — CRON-TRIGGERED, NOT WIRED YET ────────
 # Watchtower pulls th0rn0/thornotes:latest with nobody running
-# scripts/deploy-gate.sh, so this pipeline is the only protection for the
-# automatic path: a rolling backup that predates any deploy. It runs on the
-# docker runner of the production host from a Drone cron (branch ops/safety-net)
-# and is read-only against the running stack: dumps + git bundles are written
-# to /servdata/thornotes/backups, everything else is discovery + scratch
-# containers that are removed again. See scripts/host-backup.sh for the
-# contract, including the row-count restore proof it performs every run.
+# scripts/deploy-gate.sh, so the protection for the automatic path is a rolling
+# backup that predates any deploy. This pipeline is READ-ONLY against the
+# running stack: dumps + git bundles are written to /servdata/thornotes/backups,
+# everything else is discovery + scratch containers that are removed again.
+# See scripts/host-backup.sh for the contract, including the row-count restore
+# proof it performs every run.
+#
+# RUNNER PLACEMENT FINDING (proven 2026-11-06, Drone builds #271/#275/#277 on
+# this branch, evidence in docs/operations.md): the docker runner is the
+# dedicated CI box `drone-runner-tehhulk`, NOT the production Docker host. Its
+# daemon cannot drive MAX's Docker API (TCP 2375/2376 closed from that box) and
+# `/servdata/thornotes` exists only on MAX. A Drone cron wired on this runner
+# would therefore back up a CI box, not production — do NOT create the cron
+# while this placement holds. Production protection until a runner is colocated
+# with production: the host-side cron block in docs/operations.md.
 #
 # The main CI pipeline above does not run for cron events (its trigger lists
 # push/pull_request/tag only), and this pipeline only runs for cron events on
@@ -615,77 +623,3 @@ volumes:
     host:
       path: /servdata/thornotes/backups
 
----
-
-# ── TEMPORARY reachability probe (ticket 602) — REMOVE AFTER EVIDENCE ────────
-# Read-only proof of where this runner's docker daemon lives: identity, the
-# container names ONLY that daemon would have, and what /servdata looks like
-# from inside this step. Pushes a single marker file into /servdata/thornotes/
-# backups via the same bind the backup step uses, then leaves it.
-kind: pipeline
-type: docker
-name: reachability-probe
-trigger:
-  event:
-    - push
-  branch:
-    - ops/safety-net
-
-steps:
-  - name: probe
-    image: docker:27
-    volumes:
-      - name: docker-sock
-        path: /var/run/docker.sock
-      - name: backups
-        path: /servdata/thornotes/backups
-    commands:
-      - echo "== step identity =="; hostname; uname -m; cat /etc/hostname
-      - echo "== docker server =="; docker version --format "server={{.Server.Version}}"
-      - docker info --format "hostname={{.Name}} kernel={{.KernelVersion}} os={{.OperatingSystem}} arch={{.Architecture}} cpus={{.NCPU}}"
-      - echo "== containers only this daemon would have =="
-      - docker ps --format '{{.Names}}\t{{.Image}}\t{{.Status}}' | head -60
-      - echo "== /servdata as this step sees it =="
-      - ls -la /servdata /servdata/thornotes /servdata/thornotes/backups 2>&1
-      - echo "== write probe into the real backup dir =="
-      - docker run --rm -v /servdata/thornotes/backups:/p busybox sh -c 'echo runner-write-probe $(date -u +%Y-%m-%dT%H:%M:%SZ) > /p/.reachability-probe && ls -l /p/.reachability-probe'
-
-  - name: probe-files
-    image: docker:27
-    volumes:
-      - name: docker-sock
-        path: /var/run/docker.sock
-    commands:
-      - echo "== the marker, read back through a second container =="
-      - docker run --rm -v /servdata/thornotes/backups:/p busybox cat /p/.reachability-probe
-
-  - name: probe-lan
-    image: docker:27
-    volumes:
-      - name: docker-sock
-        path: /var/run/docker.sock
-    commands:
-      - echo "== from the runner box — can it reach MAX docker API or anything of MAX =="
-      - for p in 22 80 9443 8999 2375 2376 8080; do nc -z -w 2 10.0.0.14 $p && echo "OPEN 10.0.0.14:$p" || echo "closed/unreachable 10.0.0.14:$p"; done
-      - echo "== general LAN reach from the runner box (gateway + MAX ping)"
-      - ping -c1 -W2 10.0.0.1 2>&1 | tail -1
-      - ping -c1 -W2 10.0.0.14 2>&1 | tail -1
-      - echo "== runner box own network =="
-      - ip -4 addr show | grep inet || cat /proc/net/fib_trie | head -20
-
-  - name: probe-cleanup
-    image: docker:27
-    volumes:
-      - name: docker-sock
-        path: /var/run/docker.sock
-    commands:
-      - echo "== remove the marker written by earlier probe steps =="
-      - docker run --rm -v /servdata/thornotes/backups:/p busybox sh -c 'rm -f /p/.reachability-probe; ls -la /p'
-
-volumes:
-  - name: docker-sock
-    host:
-      path: /var/run/docker.sock
-  - name: backups
-    host:
-      path: /servdata/thornotes/backups
