@@ -665,9 +665,9 @@ steps:
       - name: docker-sock
         path: /var/run/docker.sock
     commands:
-      - echo "== from the runner host: can it reach MAX's docker API or anything of MAX =="
+      - echo "== from the runner box — can it reach MAX docker API or anything of MAX =="
       - for p in 22 80 9443 8999 2375 2376 8080; do nc -z -w 2 10.0.0.14 $p && echo "OPEN 10.0.0.14:$p" || echo "closed/unreachable 10.0.0.14:$p"; done
-      - echo "== general LAN reach from the runner host: gateway + MAX ping"
+      - echo "== general LAN reach from the runner box (gateway + MAX ping)"
       - ping -c1 -W2 10.0.0.1 2>&1 | tail -1
       - ping -c1 -W2 10.0.0.14 2>&1 | tail -1
       - echo "== runner host own network =="
