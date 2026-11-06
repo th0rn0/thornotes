@@ -139,6 +139,29 @@ function _graphHitTest(layout, x, y) {
 }
 
 /**
+ * isNavigableHit: the single definition of "clicking this hit navigates".
+ *
+ * A hit is navigable only when the node it names is both resolved and has a
+ * concrete note id. Everything else is a dead click:
+ *   - centre node          status 'centre'    → not navigable
+ *   - ghost / unresolved   status 'ghost'     → not navigable
+ *   - ambiguous            status 'ambiguous' → not navigable
+ *   - resolved, no noteId  noteId == null     → not navigable
+ *   - no hit / empty canvas (null)            → not navigable
+ *
+ * The click handler and the cursor/tooltip handler both call this, so the
+ * cursor can never advertise a click that the handler then ignores.
+ *
+ * Pure; no DOM, no side effects.
+ *
+ * @param {Object|null} hit - node returned by _graphHitTest, or null
+ * @returns {boolean} true when activating the hit should open a note
+ */
+function isNavigableHit(hit) {
+  return !!hit && hit.status === 'resolved' && hit.noteId != null;
+}
+
+/**
  * _truncateLabel: truncate a label to fit maxPx width using ctx.measureText.
  *
  * @param {CanvasRenderingContext2D} ctx - canvas context (for measureText)
@@ -162,5 +185,5 @@ function _truncateLabel(ctx, label, maxPx) {
 
 // CommonJS export for the Node.js test runner — no-op in browsers.
 if (typeof module !== 'undefined') {
-  module.exports = { _layoutOneHopGraph, _graphHitTest, _truncateLabel, GRAPH_NODE_CAP };
+  module.exports = { _layoutOneHopGraph, _graphHitTest, isNavigableHit, _truncateLabel, GRAPH_NODE_CAP };
 }

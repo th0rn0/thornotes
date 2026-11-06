@@ -4,7 +4,9 @@
 
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
-const { _layoutOneHopGraph, _graphHitTest, _truncateLabel, GRAPH_NODE_CAP } = require('./graph-utils.js');
+const { _layoutOneHopGraph, _graphHitTest, isNavigableHit, _truncateLabel, GRAPH_NODE_CAP } = require('./graph-utils.js');
+const fs = require('node:fs');
+const path = require('node:path');
 
 describe('graph-utils', () => {
   describe('_layoutOneHopGraph', () => {
@@ -139,6 +141,132 @@ describe('graph-utils', () => {
       };
       const hit = _graphHitTest(layout, 400, 300);
       assert.equal(hit.id, 2); // later node wins
+    });
+  });
+
+  describe('isNavigableHit', () => {
+    // isNavigableHit is the single definition of "clicking this hit opens a
+    // note". A dead click must stay dead: ghost, ambiguous, centre, a resolved
+    // node with no note id, and empty canvas. Ticket 603.
+
+    it('should navigate a resolved node with a note id', () => {
+      assert.equal(isNavigableHit({ status: 'resolved', noteId: 7 }), true);
+    });
+
+    it('should not navigate a resolved node with a null note id', () => {
+      assert.equal(isNavigableHit({ status: 'resolved', noteId: null }), false);
+    });
+
+    it('should not navigate a resolved node with no noteId property at all', () => {
+      assert.equal(isNavigableHit({ status: 'resolved' }), false);
+    });
+
+    it('should not navigate an ambiguous node even when it carries a note id', () => {
+      assert.equal(isNavigableHit({ status: 'ambiguous', noteId: 3 }), false);
+    });
+
+    it('should not navigate a ghost (unresolved) node', () => {
+      assert.equal(isNavigableHit({ status: 'ghost', label: 'Missing' }), false);
+    });
+
+    it('should not navigate the centre node, which has a note id but status centre', () => {
+      assert.equal(isNavigableHit({ status: 'centre', noteId: 1 }), false);
+    });
+
+    it('should not navigate when there is no hit (click on empty canvas)', () => {
+      assert.equal(isNavigableHit(null), false);
+      assert.equal(isNavigableHit(undefined), false);
+    });
+
+    it('should treat note id 0 as a concrete id, not a missing one', () => {
+      // The rule is "noteId == null", not truthiness — preserves app.js's
+      // original semantics exactly (no behaviour change in this refactor).
+      assert.equal(isNavigableHit({ status: 'resolved', noteId: 0 }), true);
+    });
+  });
+
+  describe('isNavigableHit against real layout output', () => {
+    // The predicate must agree with what _layoutOneHopGraph actually emits, so
+    // these tests build a layout from link objects (the same shape the API
+    // returns) rather than hand-written node literals.
+
+    function hitAtNode(layout, node) {
+      return _graphHitTest(layout, node.x, node.y);
+    }
+
+    const centre = { id: 1, title: 'Centre' };
+    const outbound = [
+      { to_note_id: 2, to_title: 'Resolved', raw_target: 'Resolved' },
+      { ambiguous: true, raw_target: 'Unknown', to_title: 'Unknown' },
+      { unresolved: true, raw_target: 'Missing' },
+    ];
+
+    it('should navigate only the resolved neighbour', () => {
+      const layout = _layoutOneHopGraph(centre, outbound, [], 800, 600);
+      const navigable = layout.nodes.filter(n => isNavigableHit(hitAtNode(layout, n)));
+
+      assert.equal(navigable.length, 1);
+      assert.equal(navigable[0].noteId, 2);
+      assert.equal(navigable[0].status, 'resolved');
+    });
+
+    it('should not navigate the centre node of a populated graph', () => {
+      const layout = _layoutOneHopGraph(centre, outbound, [], 800, 600);
+      const hit = hitAtNode(layout, layout.centre);
+
+      assert.equal(hit.status, 'centre');
+      assert.equal(isNavigableHit(hit), false);
+    });
+
+    it('should not navigate ambiguous and ghost neighbours', () => {
+      const layout = _layoutOneHopGraph(centre, outbound, [], 800, 600);
+      const byStatus = {};
+      layout.nodes.forEach(n => { byStatus[n.status] = n; });
+
+      assert.ok(byStatus.ambiguous, 'layout should contain an ambiguous node');
+      assert.ok(byStatus.ghost, 'layout should contain a ghost node');
+      assert.equal(isNavigableHit(hitAtNode(layout, byStatus.ambiguous)), false);
+      assert.equal(isNavigableHit(hitAtNode(layout, byStatus.ghost)), false);
+    });
+
+    it('should not navigate a click on empty canvas between nodes', () => {
+      const layout = _layoutOneHopGraph(centre, outbound, [], 800, 600);
+      // Top-left corner: outside the node radius of every node in the layout.
+      const hit = _graphHitTest(layout, 0, 0);
+
+      assert.equal(hit, null);
+      assert.equal(isNavigableHit(hit), false);
+    });
+  });
+
+  describe('graph click rule has one home (ticket 603)', () => {
+    // The click handler and the cursor/tooltip handler must both call
+    // isNavigableHit. This guards against the rule being re-inlined in app.js,
+    // which is exactly the drift the extraction exists to prevent.
+    const APP = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+
+    function clickHandlerBody() {
+      const start = APP.indexOf('function _attachGraphClickHandler');
+      assert.notEqual(start, -1, 'app.js should still define _attachGraphClickHandler');
+      const end = APP.indexOf('// Hook the click handler', start);
+      assert.notEqual(end, -1, 'app.js click-handler section should keep its end marker');
+      return APP.slice(start, end);
+    }
+
+    it('should call isNavigableHit from both the click and mousemove handlers', () => {
+      const body = clickHandlerBody();
+      const calls = body.match(/isNavigableHit\(/g) || [];
+      assert.equal(calls.length, 2, 'expected one call in the click handler and one in mousemove');
+      assert.ok(body.includes("addEventListener('click'"));
+      assert.ok(body.includes("addEventListener('mousemove'"));
+    });
+
+    it('should not re-inline the resolved-status rule in the click handler', () => {
+      const body = clickHandlerBody();
+      assert.ok(!/status\s*[!=]==\s*'resolved'/.test(body),
+        'click/cursor handlers must not compare status themselves — call isNavigableHit');
+      assert.ok(!/noteId\s*[!=]=/.test(body),
+        'click/cursor handlers must not test noteId themselves — call isNavigableHit');
     });
   });
 
