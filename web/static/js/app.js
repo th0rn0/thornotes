@@ -557,6 +557,7 @@ async function openNote(noteId, { historyMode = 'push', isNew = false } = {}) {
   document.getElementById('note-path').textContent = note.disk_path;
   document.getElementById('note-stats').textContent = noteStats(note.content);
   setSaveStatus('saved');
+  syncShareControls();
 
   loadLinksPanel();
 
@@ -1900,10 +1901,68 @@ async function copyToClipboard(text) {
 
 async function shareNote() {
   if (!currentNote) return;
-  const res = await api('POST', `/api/v1/notes/${currentNote.id}/share`, {});
+  // A note has exactly one share token, and issuing a new one replaces the
+  // old value in a single UPDATE. So this is one request: a clear-then-issue
+  // pair would open a window where the note is unshared, and a failure in the
+  // second request would kill the existing link without replacing it.
+  if (currentNote.share_token) {
+    const confirmed = confirm(
+      'This note already has a share link. Generating a new one replaces it, ' +
+      'and the existing link stops working immediately.'
+    );
+    if (!confirmed) return;
+  }
+  let res;
+  try {
+    res = await api('POST', `/api/v1/notes/${currentNote.id}/share`, {});
+  } catch (e) {
+    showNotification(`Could not create share link: ${e.message || 'request failed'}`);
+    return;
+  }
+  // A 200 that carries no usable token would be reported as success while no
+  // link exists, so it is treated as a failure rather than copying an empty URL.
+  if (!res || typeof res.share_token !== 'string' || res.share_token === '') {
+    showNotification('Share link could not be created.');
+    return;
+  }
+  currentNote.share_token = res.share_token;
+  syncShareControls();
   const url = `${location.origin}/s/${res.share_token}`;
   await copyToClipboard(url).catch(() => {});
   showNotification(`Share link copied: ${url}`);
+}
+
+// revokeShare stops sharing and leaves it stopped. It never issues a token:
+// generating one here would revoke and immediately re-publish, which is the
+// behaviour that made the old "clear" button a lie.
+async function revokeShare() {
+  if (!currentNote || !currentNote.share_token) return;
+  if (!confirm('Revoke the share link? The existing link stops working immediately.')) return;
+  let res;
+  try {
+    res = await api('POST', `/api/v1/notes/${currentNote.id}/share`, { clear: true });
+  } catch (e) {
+    showNotification(`Could not revoke share link: ${e.message || 'request failed'}`);
+    return;
+  }
+  // Only a response reporting no token proves the revoke. A 200 that still
+  // carries a token means the link is live whatever the status says.
+  if (!res || res.share_token !== null) {
+    showNotification('Revoke did not take effect; the share link is still live.');
+    return;
+  }
+  currentNote.share_token = null;
+  syncShareControls();
+  showNotification('Share link revoked.');
+}
+
+// The share control reflects whether the open note has a live link: Unshare is
+// only useful when there is something to revoke, and showing it otherwise would
+// invite a click that cannot do anything.
+function syncShareControls() {
+  const btn = document.getElementById('unshare-btn');
+  if (!btn) return;
+  btn.hidden = !(currentNote && currentNote.share_token);
 }
 
 // ── Note deletion ───────────────────────────────────────────────────────────
@@ -2650,6 +2709,7 @@ document.querySelector('.journal-manage-btn').addEventListener('click', showMana
 document.getElementById('note-title').addEventListener('change', onTitleChange);
 document.getElementById('note-tags').addEventListener('change', onTagsChange);
 document.querySelector('.share-btn').addEventListener('click', shareNote);
+document.querySelector('.unshare-btn').addEventListener('click', revokeShare);
 
 // Conflict modal
 document.getElementById('conflict-discard-btn').addEventListener('click', function() { resolveConflict('discard'); });
