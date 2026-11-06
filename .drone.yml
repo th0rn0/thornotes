@@ -543,3 +543,60 @@ volumes:
   - name: gradle-home
     host:
       path: /var/cache/drone/gradle-home
+
+---
+
+# ── Watchtower safety-net (ticket 602) — DEPLOYED BY DRONE CRON ONLY ─────────
+# Watchtower pulls th0rn0/thornotes:latest with nobody running
+# scripts/deploy-gate.sh, so this pipeline is the only protection for the
+# automatic path: a rolling backup that predates any deploy. It runs on the
+# docker runner of the production host from a Drone cron (branch ops/safety-net)
+# and is read-only against the running stack: dumps + git bundles are written
+# to /servdata/thornotes/backups, everything else is discovery + scratch
+# containers that are removed again. See scripts/host-backup.sh for the
+# contract, including the row-count restore proof it performs every run.
+#
+# The main CI pipeline above does not run for cron events (its trigger lists
+# push/pull_request/tag only), and this pipeline only runs for cron events on
+# the ops/safety-net branch — the two never interact.
+kind: pipeline
+type: docker
+name: safety-net
+trigger:
+  event:
+    - cron
+  branch:
+    - ops/safety-net
+
+steps:
+  - name: backup-and-verify
+    image: docker:27
+    volumes:
+      - name: docker-sock
+        path: /var/run/docker.sock
+    environment:
+      KEEP_HOURLY: "168"
+    commands:
+      - sh scripts/host-backup.sh backup
+      - sh scripts/host-backup.sh verify
+
+  - name: discord-safety-failure
+    image: curlimages/curl:8.7.1
+    failure: ignore
+    environment:
+      DISCORD_WEBHOOK_URL:
+        from_secret: discord_webhook_url
+    commands:
+      - |
+        echo "webhook available: $(test -n "$DISCORD_WEBHOOK_URL" && echo yes || echo no)"
+        if [ -n "$DISCORD_WEBHOOK_URL" ]; then
+          curl -sS -X POST "$DISCORD_WEBHOOK_URL" -H "Content-Type: application/json" -d "{\"embeds\":[{\"title\":\"[safety-net] BACKUP FAILED on MAX - $DRONE_REPO\",\"url\":\"$DRONE_BUILD_LINK\",\"description\":\"The hourly safety-net backup or its restore-proof failed. Restore/manual paths: docs/operations.md; scratch evidence in this build log.\"}]}"
+        fi
+    when:
+      status:
+        - failure
+
+volumes:
+  - name: docker-sock
+    host:
+      path: /var/run/docker.sock
