@@ -2,11 +2,14 @@ kind: pipeline
 type: docker
 name: ci-disk-report
 
-# Reports which runner host a build lands on and how full its Docker filesystem
-# is. Read-only on purpose: automated pruning kept failing on this runner's shell
-# mangling of multi-line scripts (builds #300-#305), and a report that is always
-# right beats a prune that silently does nothing. Reclaim manually with the
-# commands in docs/operations.md when the number is high.
+# Read-only report of which runner a build lands on and how full its Docker
+# filesystem is. No pruning: a conditional prune would not run on this runner
+# (Drone substitutes $VAR at dispatch, so shell variables need $$), and a report
+# that is always right beats a prune that silently does nothing.
+#
+# Strings here avoid a colon before the closing quote: Drone's YAML parser
+# read `echo "filesystem:"` as a map and rejected the pipeline outright
+# (build #306, "cannot unmarshal !!map into string").
 
 steps:
   - name: report
@@ -15,14 +18,11 @@ steps:
       - name: docker-sock
         path: /var/run/docker.sock
     commands:
-      - echo "runner host:"
-      - docker info --format '{{.Name}}'
-      - echo "filesystem:"
+      - docker info --format 'runner={{.Name}}'
       - df -h / | tail -1
-      - echo "docker usage:"
       - docker system df
-      - echo "exited step containers: $(docker ps -aq --filter status=exited | wc -l)"
-      - echo "dangling images: $(docker images --filter dangling=true -q | wc -l)"
+      - docker ps -aq --filter status=exited | wc -l
+      - docker images --filter dangling=true -q | wc -l
 
 volumes:
   - name: docker-sock
