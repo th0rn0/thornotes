@@ -17,7 +17,7 @@ steps:
       - df -h / | tail -1
       - docker system df
       # BusyBox df has no --output; parse POSIX output instead.
-      - USE=$(df -P / | awk 'NR==2{gsub("%","",$5); print $5}')
+      - USE=$(df -P / | tail -1 | sed 's/  */ /g' | cut -d' ' -f5 | tr -dc '0-9')
       - echo "used=${USE}% threshold=80%"
       - if [ "$USE" -ge 80 ]; then
           echo "--- above threshold, reclaiming ---";
