@@ -300,6 +300,25 @@ What gets tracked:
 
 ---
 
+## Export
+
+Right-click a note or a folder in the tree and choose **Download as zip**, or call the route directly:
+
+| Route | Archive |
+|-------|---------|
+| `GET /api/v1/notes/:id/zip` | One entry, `<title>.md`. |
+| `GET /api/v1/folders/:id/zip` | The folder and everything under it. The folder's own name is the top-level directory, so exporting `work/` re-imports as `work/` rather than as a loose pile of files. |
+
+Entries are sorted by path and each one's modified time is the note's `updated_at`, so the same tree always exports the same archive. Only `[A-Za-z0-9 ._-]` survives in an entry name: a note called `Q3/Q4 plan` becomes `Q3 Q4 plan.md`, never a directory, and two names that sanitise to the same thing get `-2`, `-3` suffixes. An empty folder exports as just its directory entry.
+
+A note or folder that is not yours and one that does not exist both answer `404` with the API's usual not-found body.
+
+Notes are read from disk as the archive streams (no temporary file, one note in memory at a time). If a note's row outlived its file — a half-finished delete — the entry is skipped and `_export-report.txt` at the top of the archive lists what is missing, so a short archive is never silent.
+
+Exporting and re-importing is the supported way to move a folder between instances: the import format is the same zip.
+
+---
+
 ## Import
 
 **Single note:** Drag and drop a `.md` file onto the folder tree, or use the import button. The filename becomes the note title. The file content is preserved exactly.

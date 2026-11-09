@@ -71,6 +71,7 @@ func New(
 	journalsH := handler.NewJournalsHandler(notesSvc)
 	historyH := handler.NewHistoryHandler(notesSvc)
 	importH := handler.NewImportHandler(notesSvc)
+	exportH := handler.NewExportHandler(notesSvc)
 
 	bearerMW := auth.BearerMiddleware(apiTokenRepo, userRepo)
 	sessionMW := authSvc.SessionMiddleware()
@@ -137,6 +138,7 @@ func New(
 		folders.PATCH("/:id/move", csrfMW, foldersH.Move)
 		folders.DELETE("/:id", csrfMW, foldersH.Delete)
 		folders.GET("/:id/notes", foldersH.ListNotes)
+		folders.GET("/:id/zip", exportH.Folder)
 	}
 
 	// Notes.
@@ -150,6 +152,7 @@ func New(
 		notesGroup.GET("/:id", notesH.Get)
 		notesGroup.GET("/:id/links", notesH.Links)
 		notesGroup.GET("/:id/backlinks", notesH.Backlinks)
+		notesGroup.GET("/:id/zip", exportH.Note)
 		notesGroup.PATCH("/:id", csrfMW, notesH.Patch)
 		notesGroup.PATCH("/:id/move", csrfMW, notesH.Move)
 		notesGroup.DELETE("/:id", csrfMW, notesH.Delete)

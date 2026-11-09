@@ -52,6 +52,9 @@ func (r *fakeFolderRepo) UpdateDescendantPaths(ctx context.Context, oldPrefix, n
 	return nil
 }
 func (r *fakeFolderRepo) Delete(ctx context.Context, userID, folderID int64) error { return nil }
+func (r *fakeFolderRepo) ListSubtree(ctx context.Context, userID int64, diskPath string) ([]*model.Folder, error) {
+	return nil, nil
+}
 
 func i64p(v int64) *int64 { return &v }
 

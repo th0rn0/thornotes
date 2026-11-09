@@ -9,6 +9,7 @@ import (
 
 	"github.com/th0rn0/thornotes/internal/apperror"
 	"github.com/th0rn0/thornotes/internal/model"
+	"github.com/th0rn0/thornotes/internal/repository"
 )
 
 type NoteRepo struct {
@@ -137,6 +138,32 @@ func (r *NoteRepo) ListAllForWatch(ctx context.Context, userID int64) ([]*model.
 	for rows.Next() {
 		rec := &model.NoteWatchRecord{}
 		if err := rows.Scan(&rec.ID, &rec.FolderID, &rec.Slug, &rec.DiskPath, &rec.ContentHash); err != nil {
+			return nil, err
+		}
+		records = append(records, rec)
+	}
+	return records, rows.Err()
+}
+
+func (r *NoteRepo) ListSubtree(ctx context.Context, userID int64, diskPath string) ([]*model.NoteExportRecord, error) {
+	predicate, scopeArgs := repository.DescendantPathPredicate(diskPath)
+	args := append([]any{userID}, scopeArgs...)
+
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT id, folder_id, title, disk_path, updated_at FROM notes
+		 WHERE user_id = ? AND (`+predicate+`)
+		 ORDER BY disk_path`,
+		args...,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list note subtree: %w", err)
+	}
+	defer rows.Close()
+
+	var records []*model.NoteExportRecord
+	for rows.Next() {
+		rec := &model.NoteExportRecord{}
+		if err := rows.Scan(&rec.ID, &rec.FolderID, &rec.Title, &rec.DiskPath, &rec.UpdatedAt); err != nil {
 			return nil, err
 		}
 		records = append(records, rec)

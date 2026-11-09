@@ -40,6 +40,11 @@ type FolderRepository interface {
 	// Must run inside the same transaction as the OS rename.
 	UpdateDescendantPaths(ctx context.Context, oldPrefix, newPrefix string) error
 	Delete(ctx context.Context, userID, folderID int64) error
+	// ListSubtree returns diskPath's own folder row and every folder beneath it,
+	// using DescendantPathPredicate (ticket 598) so the match is bounded at a path
+	// separator and LIKE metacharacters in a name cannot widen it. One query, not
+	// a walk of the whole tree.
+	ListSubtree(ctx context.Context, userID int64, diskPath string) ([]*model.Folder, error)
 }
 
 type NoteRepository interface {
@@ -55,6 +60,12 @@ type NoteRepository interface {
 	// ListAllForWatch returns lightweight records for all notes owned by userID.
 	// Used by the disk watcher to detect content changes without loading full content.
 	ListAllForWatch(ctx context.Context, userID int64) ([]*model.NoteWatchRecord, error)
+	// ListSubtree returns metadata for every note whose disk_path lies inside the
+	// folder subtree at diskPath (the folder itself included, so notes filed
+	// directly in it match), ordered by disk_path. It uses the same
+	// DescendantPathPredicate as the folder subtree query, so both halves of the
+	// export agree on what "under this folder" means.
+	ListSubtree(ctx context.Context, userID int64, diskPath string) ([]*model.NoteExportRecord, error)
 	// ListForContext returns notes with full content for the LLM context endpoint.
 	// Pass nil folderID to include all notes across all folders.
 	// Results are ordered newest-first (updated_at DESC) for truncation priority.

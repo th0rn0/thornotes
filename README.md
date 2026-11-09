@@ -29,6 +29,7 @@ A self-hosted Markdown note-taking app with file-as-canonical storage. Every not
 - Line numbers toggle in the editor toolbar; character and line count in the status bar
 - Daily journal with multi-journal support
 - Import `.md` files or `.zip` archives (folder structure preserved)
+- Export a note or a whole folder as a `.zip` — the folder archive keeps its own name as the top-level directory, so it re-imports into another instance as that folder
 
 ## Quick start with Docker
 

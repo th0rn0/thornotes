@@ -87,6 +87,19 @@ type NoteWatchRecord struct {
 	ContentHash string
 }
 
+// NoteExportRecord is the metadata a zip export needs from the database. The
+// archive name comes from Title, the bytes are streamed from DiskPath, and the
+// entry's modified time comes from UpdatedAt. Content is deliberately absent:
+// the exporter opens each file as it writes the entry, so an export can never
+// ship bytes the disk does not have.
+type NoteExportRecord struct {
+	ID        int64
+	FolderID  *int64
+	Title     string
+	DiskPath  string
+	UpdatedAt time.Time
+}
+
 type Journal struct {
 	ID        int64     `json:"id"`
 	UserID    int64     `json:"user_id"`

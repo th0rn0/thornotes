@@ -39,6 +39,9 @@ type testClient struct {
 	cookies    []*http.Cookie
 	csrfToken  string
 	pool       *db.Pool
+	// notesDir is the FileStore root, so a test can assert the archive bytes
+	// against the real files on disk rather than against the API's view.
+	notesDir string
 }
 
 func newTestClient(t *testing.T) *testClient {
@@ -88,6 +91,7 @@ func newTestClientWithRegistration(t *testing.T, allowRegistration bool) *testCl
 		server:     srv,
 		httpClient: &http.Client{Jar: jar},
 		pool:       pool,
+		notesDir:   notesDir,
 	}
 }
 
