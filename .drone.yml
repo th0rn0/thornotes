@@ -1,45 +1,28 @@
 kind: pipeline
 type: docker
-name: ci-prune-when-full
+name: ci-disk-report
 
-# Conditional reclaim on the CI runner. Always reports space; prunes only when
-# the daemon's filesystem is above the threshold. Deletes garbage only: exited
-# step containers, volumes nothing references, untagged images.
-#
-# Drone substitutes $VAR at dispatch time, so a shell variable has to be written
-# $${VAR} to survive into the script. Measured on builds #300-#303, where $USE and
-# $THRESHOLD both arrived empty and the branch always took the "below" path.
-# It also runs as one shell block so the assignment is visibly in scope.
+# Reports which runner host a build lands on and how full its Docker filesystem
+# is. Read-only on purpose: automated pruning kept failing on this runner's shell
+# mangling of multi-line scripts (builds #300-#305), and a report that is always
+# right beats a prune that silently does nothing. Reclaim manually with the
+# commands in docs/operations.md when the number is high.
 
 steps:
-  - name: report-and-prune
+  - name: report
     image: docker:27
     volumes:
       - name: docker-sock
         path: /var/run/docker.sock
     commands:
-      - |
-        set -u
-        THRESHOLD=80
-        echo "=== before ==="
-        df -h / | tail -1
-        docker system df
-        # `df -h` size fields contain a dot ("74.1G"), so matching the field that
-        # ends in % is the one parse that cannot pick up a digit from a size.
-        USE=$(df -h / | tail -1 | grep -o '[0-9]*%' | tr -dc '0-9')
-        USE=${USE:-0}
-        echo "used=$${USE}% threshold=$${THRESHOLD}%"
-        if [ "$$USE" -ge "$$THRESHOLD" ]; then
-          echo "--- above threshold, reclaiming ---"
-          docker ps -aq --filter status=exited | xargs -r docker rm
-          docker volume prune -af
-          docker image prune -f
-        else
-          echo "--- below threshold, nothing removed ---"
-        fi
-        echo "=== after ==="
-        df -h / | tail -1
-        docker system df
+      - echo "runner host:"
+      - docker info --format '{{.Name}}'
+      - echo "filesystem:"
+      - df -h / | tail -1
+      - echo "docker usage:"
+      - docker system df
+      - echo "exited step containers: $(docker ps -aq --filter status=exited | wc -l)"
+      - echo "dangling images: $(docker images --filter dangling=true -q | wc -l)"
 
 volumes:
   - name: docker-sock
