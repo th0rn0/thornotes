@@ -271,7 +271,7 @@ body {
 .save-status.saving { color: var(--color-warning); }
 .save-status.saved { color: var(--color-success); }
 .save-status.error { color: var(--color-error); }
-.share-btn, .history-btn { font-size: 11px; border: 1px solid var(--border); padding: 5px 10px; background: var(--bg-btn); cursor: pointer; color: var(--text-btn); min-height: 30px; }
+.share-btn, .unshare-btn, .history-btn { font-size: 11px; border: 1px solid var(--border); padding: 5px 10px; background: var(--bg-btn); cursor: pointer; color: var(--text-btn); min-height: 30px; }
 .tags-input { font-size: 10px; border: none; background: transparent; color: var(--text-dim); padding: 0; width: 100%; outline: none; }
 .tags-input::placeholder { color: var(--text-dim); }
 .editor-area { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
@@ -698,6 +698,7 @@ body {
             <div class="editor-meta">
               <span class="save-status" id="save-status">Saved</span>
               <button class="share-btn">Share ↗</button>
+                <button class="unshare-btn" id="unshare-btn" hidden>Unshare</button>
               <button class="history-btn" id="history-btn">History</button>
               <button class="delete-note-btn" id="delete-note-btn">Delete</button>
             </div>
