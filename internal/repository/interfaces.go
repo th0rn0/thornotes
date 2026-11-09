@@ -123,6 +123,10 @@ type LinkRepository interface {
 	// source note's folder, for re-resolution after a title rename.
 	ListInboundForRename(ctx context.Context, userID, noteID int64) ([]model.InboundLink, error)
 	// UpdateResolution updates an edge's to_note_id, ambiguous flag and
-	// resolved_at (rename re-resolution).
+	// resolved_at (rename re-resolution). It returns ErrNotFound when no edge
+	// with this id belongs to userID — the row is gone (a concurrent reindex
+	// replaces the graph) or was never theirs — because reporting success there
+	// would claim a link had been re-resolved while its row still pointed at
+	// the old target. A same-value update is success on both dialects.
 	UpdateResolution(ctx context.Context, userID, linkID int64, toNoteID *int64, ambiguous bool) error
 }

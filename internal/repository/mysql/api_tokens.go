@@ -107,6 +107,14 @@ func (r *APITokenRepo) Delete(ctx context.Context, userID, tokenID int64) error 
 }
 
 func (r *APITokenRepo) TouchLastUsed(ctx context.Context, tokenID int64) error {
+	// Best-effort side effect, and the result is discarded on purpose (ticket
+	// 600): the token id comes from an auth path that has already validated the
+	// token, so a zero-row update means the row was revoked between validation
+	// and this write. Failing the request for that would turn a harmless
+	// timestamp miss into a 500 on a request whose authentication already
+	// succeeded; the next request re-reads the token and gets a truthful 401.
+	// The statement is also unscoped by user_id — it matches the primary key
+	// alone — so it is not one of the user-scoped writes this ticket is about.
 	_, err := r.db.ExecContext(ctx,
 		`UPDATE api_tokens SET last_used_at = UTC_TIMESTAMP() WHERE id = ?`, tokenID,
 	)
@@ -120,17 +128,22 @@ func (r *APITokenRepo) SetScope(ctx context.Context, userID, tokenID int64, scop
 	if scope != "read" && scope != "readwrite" {
 		return apperror.BadRequest("scope must be \"read\" or \"readwrite\"")
 	}
-	res, err := r.db.ExecContext(ctx,
-		`UPDATE api_tokens SET scope = ? WHERE id = ? AND user_id = ?`, scope, tokenID, userID,
+	// MySQL reports changed rows, so a PUT that submits the scope the token
+	// already has reports 0 — the same count a token that is not the caller's
+	// produces. updateScoped answers matched instead: same-value is success,
+	// not-yours (or gone) is not-found, and both not-found cases answer 404 so
+	// a foreign token id leaks nothing (ticket 600).
+	matched, err := updateScoped(ctx, r.db,
+		`UPDATE api_tokens SET scope = ? WHERE id = ? AND user_id = ?`,
+		[]any{scope, tokenID, userID},
+		`SELECT EXISTS(SELECT 1 FROM api_tokens WHERE id = ? AND user_id = ?)`,
+		[]any{tokenID, userID},
 	)
 	if err != nil {
 		return apperror.Internal("update api token scope", err)
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		// MySQL RowsAffected returns "changed rows" by default, so a same-value
-		// UPDATE reports 0 even though the row exists. Verify before calling
-		// the token missing.
-		return r.ensureTokenOwned(ctx, userID, tokenID)
+	if !matched {
+		return apperror.ErrNotFound
 	}
 	return nil
 }
@@ -139,32 +152,18 @@ func (r *APITokenRepo) SetName(ctx context.Context, userID, tokenID int64, name 
 	if name == "" {
 		return apperror.BadRequest("name must not be empty")
 	}
-	res, err := r.db.ExecContext(ctx,
-		`UPDATE api_tokens SET name = ? WHERE id = ? AND user_id = ?`, name, tokenID, userID,
+	// Same no-op-update caveat as SetScope: re-saving the current name is a
+	// zero-changed-row UPDATE on MySQL and must not read as not-found.
+	matched, err := updateScoped(ctx, r.db,
+		`UPDATE api_tokens SET name = ? WHERE id = ? AND user_id = ?`,
+		[]any{name, tokenID, userID},
+		`SELECT EXISTS(SELECT 1 FROM api_tokens WHERE id = ? AND user_id = ?)`,
+		[]any{tokenID, userID},
 	)
 	if err != nil {
 		return apperror.Internal("update api token name", err)
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		// Same no-op-update caveat as SetScope.
-		return r.ensureTokenOwned(ctx, userID, tokenID)
-	}
-	return nil
-}
-
-// ensureTokenOwned returns ErrNotFound iff no row for this (tokenID, userID)
-// pair exists. Used after an UPDATE that reported 0 rows affected to distinguish
-// "the row is missing" from "the value was unchanged so the driver reported no
-// change."
-func (r *APITokenRepo) ensureTokenOwned(ctx context.Context, userID, tokenID int64) error {
-	var exists bool
-	if err := r.db.QueryRowContext(ctx,
-		`SELECT EXISTS(SELECT 1 FROM api_tokens WHERE id = ? AND user_id = ?)`,
-		tokenID, userID,
-	).Scan(&exists); err != nil {
-		return apperror.Internal("verify api token exists", err)
-	}
-	if !exists {
+	if !matched {
 		return apperror.ErrNotFound
 	}
 	return nil
