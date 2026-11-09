@@ -24,7 +24,9 @@ steps:
         echo "=== before ==="
         df -h / | tail -1
         docker system df
-        USE=$(df -P / | tail -1 | sed 's/  */ /g' | cut -d' ' -f5 | tr -dc '0-9')
+        # `df -h` size fields contain a dot ("74.1G"), so matching the field that
+        # ends in % is the one parse that cannot pick up a digit from a size.
+        USE=$(df -h / | tail -1 | grep -o '[0-9]*%' | tr -dc '0-9')
         USE=${USE:-0}
         echo "used=$${USE}% threshold=$${THRESHOLD}%"
         if [ "$$USE" -ge "$$THRESHOLD" ]; then
