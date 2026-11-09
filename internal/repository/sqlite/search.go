@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/th0rn0/thornotes/internal/model"
+	"github.com/th0rn0/thornotes/internal/searchtext"
 )
 
 type SearchRepo struct {
@@ -21,12 +22,22 @@ func NewSearchRepo(readDB, writeDB *sql.DB) *SearchRepo {
 
 // SyncNote brings a single note's FTS entry up to date.
 func (r *SearchRepo) SyncNote(ctx context.Context, noteID int64) error {
-	// Merge-insert into FTS. FTS5 external content: we must delete then insert.
-	_, err := r.writeDB.ExecContext(ctx,
-		`INSERT INTO notes_fts(notes_fts, rowid, title, content)
-		 VALUES('delete', ?, '', '')`, noteID)
-	// Ignore error — note may not exist in FTS yet.
-	_ = err
+	// Remove the note's existing index entry, if it has one. The 'delete'
+	// command is the only way to remove a row from an external-content FTS5
+	// table, and it fails when the row was never indexed — and that failure
+	// leaves the index statistics unusable: rank and bm25() then return NULL for
+	// every row, so relevance ordering silently stops working for the whole
+	// database. Gate it on the docsize shadow table, which holds exactly one row
+	// per indexed document (it exists because notes_fts is created with the
+	// default columnsize=1).
+	_, err := r.writeDB.ExecContext(ctx, `
+		INSERT INTO notes_fts(notes_fts, rowid, title, content)
+		SELECT 'delete', id, title, content FROM notes
+		WHERE id = ? AND EXISTS (SELECT 1 FROM notes_fts_docsize WHERE id = ?)`,
+		noteID, noteID)
+	if err != nil {
+		return fmt.Errorf("sync fts note %d (delete): %w", noteID, err)
+	}
 
 	_, err = r.writeDB.ExecContext(ctx, `
 		INSERT INTO notes_fts(rowid, title, content)
@@ -40,8 +51,13 @@ func (r *SearchRepo) SyncNote(ctx context.Context, noteID int64) error {
 	return err
 }
 
-// Search runs FTS5 and returns matching notes for userID.
+// Search runs an FTS5 query and returns matching notes for userID.
 // Notes with fts_synced_at IS NULL (modified since last sync) are synced first.
+//
+// The semantics are the search contract documented in internal/searchtext: every
+// text term must match, every requested tag must be carried by the note, the
+// snippet is computed in Go, and rows are ordered by relevance, then title,
+// then id.
 func (r *SearchRepo) Search(ctx context.Context, userID int64, query string, tags []string) ([]*model.SearchResult, error) {
 	// Sync stale notes first.
 	stale, err := r.readDB.QueryContext(ctx,
@@ -66,44 +82,38 @@ func (r *SearchRepo) Search(ctx context.Context, userID int64, query string, tag
 		}
 	}
 
-	// Sanitize FTS query — escape special FTS5 characters.
-	safeQuery := sanitizeFTSQuery(query)
-	if safeQuery == "" {
+	// Text terms are AND. searchtext.Terms is the one splitter, so this query
+	// and the MySQL one search for exactly the same words.
+	terms := searchtext.Terms(query)
+	match := searchtext.FTSAnd(terms)
+	if match == "" {
 		return nil, nil
 	}
 
-	// Build tag filter clause.
-	var whereClauses []string
-	args := []any{safeQuery, userID}
-	whereClauses = append(whereClauses, "fts.rowid = n.id")
-	whereClauses = append(whereClauses, "n.user_id = ?")
-
+	// Tags are AND. One correlated EXISTS per tag: each subquery unnests the
+	// note's own tags array, so every tag gets a row of its own to match.
+	// Filtering several tags on one unnested row (the pre-452 shape) can only
+	// ever be satisfied by a note whose tags array holds a single value.
+	where := []string{"fts.rowid = n.id", "n.user_id = ?"}
+	args := []any{match, userID}
 	for _, tag := range tags {
-		whereClauses = append(whereClauses, "json_each.value = ?")
+		where = append(where, `EXISTS (SELECT 1 FROM json_each(n.tags) WHERE json_each.value = ?)`)
 		args = append(args, tag)
 	}
 
-	tagJoin := ""
-	if len(tags) > 0 {
-		tagJoin = ", json_each(n.tags)"
-	}
-
-	where := strings.Join(whereClauses, " AND ")
-
+	// The snippet is built in Go by searchtext.Snippet from the note's content,
+	// not by FTS5's snippet() — MySQL has no equivalent and production runs
+	// MySQL, so both engines take the same path.
 	q := fmt.Sprintf(`
-		SELECT n.id, n.title, n.slug, snippet(notes_fts, 1, '<mark>', '</mark>', '…', 20), n.tags
+		SELECT n.id, n.title, n.slug, n.content, n.tags
 		FROM notes_fts fts
-		JOIN notes n %s
+		JOIN notes n ON fts.rowid = n.id
 		WHERE notes_fts MATCH ?
 		AND %s
-		ORDER BY rank
-		LIMIT 50`, tagJoin, where)
+		ORDER BY rank, n.title, n.id
+		LIMIT 50`, strings.Join(where, " AND "))
 
-	// Re-order args: query goes first for the MATCH clause.
-	ftsArgs := []any{safeQuery}
-	ftsArgs = append(ftsArgs, args[1:]...)
-
-	rows, err := r.readDB.QueryContext(ctx, q, ftsArgs...)
+	rows, err := r.readDB.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("search query: %w", err)
 	}
@@ -112,32 +122,18 @@ func (r *SearchRepo) Search(ctx context.Context, userID int64, query string, tag
 	var results []*model.SearchResult
 	for rows.Next() {
 		res := &model.SearchResult{}
-		var tagsJSON string
-		if err := rows.Scan(&res.NoteID, &res.Title, &res.Slug, &res.Snippet, &tagsJSON); err != nil {
+		var (
+			tagsJSON string
+			content  string
+		)
+		if err := rows.Scan(&res.NoteID, &res.Title, &res.Slug, &content, &tagsJSON); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal([]byte(tagsJSON), &res.Tags); err != nil {
 			res.Tags = nil // malformed stored JSON — treat as no tags
 		}
+		res.Snippet = searchtext.Snippet(content, terms)
 		results = append(results, res)
 	}
 	return results, rows.Err()
-}
-
-// sanitizeFTSQuery escapes FTS5 special characters to prevent injection.
-// FTS5 special chars: " * ^ ( ) :
-func sanitizeFTSQuery(q string) string {
-	q = strings.TrimSpace(q)
-	if q == "" {
-		return ""
-	}
-	// Wrap each token in double quotes so special chars are treated as literals.
-	tokens := strings.Fields(q)
-	escaped := make([]string, 0, len(tokens))
-	for _, t := range tokens {
-		// Strip any embedded double-quotes first, then wrap.
-		t = strings.ReplaceAll(t, `"`, `""`)
-		escaped = append(escaped, `"`+t+`"`)
-	}
-	return strings.Join(escaped, " OR ")
 }

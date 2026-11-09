@@ -966,11 +966,23 @@ func TestSearchRepo_Search_WithTags(t *testing.T) {
 	_, err := noteRepo.Create(context.Background(), note)
 	require.NoError(t, err)
 
-	// Search with a tag filter — exercises the tag-join clause.
+	// Search with a tag filter — the note carries "go".
 	results, err := searchRepo.Search(context.Background(), user.ID, "findme", []string{"go"})
 	require.NoError(t, err)
-	// Results may be empty if FTS not synced yet, but should not error.
-	_ = results
+	require.Len(t, results, 1)
+	assert.Equal(t, "Tagged Searchable", results[0].Title)
+
+	// Two tags the note carries are AND, not unsatisfiable: the regression that
+	// ticket 452 is about.
+	results, err = searchRepo.Search(context.Background(), user.ID, "findme", []string{"go", "testing"})
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, "Tagged Searchable", results[0].Title)
+
+	// One tag the note does not carry excludes it.
+	results, err = searchRepo.Search(context.Background(), user.ID, "findme", []string{"go", "rust"})
+	require.NoError(t, err)
+	assert.Empty(t, results)
 }
 
 func TestSearchRepo_Search_MalformedTagsJSON(t *testing.T) {
@@ -992,27 +1004,8 @@ func TestSearchRepo_Search_MalformedTagsJSON(t *testing.T) {
 	_ = results
 }
 
-func TestSanitizeFTSQuery(t *testing.T) {
-	tests := []struct {
-		input    string
-		expected string
-	}{
-		{"hello", `"hello"`},
-		{"hello world", `"hello" OR "world"`},
-		{"", ""},
-		{"   ", ""},
-		{`quote"test`, `"quote""test"`},
-		{"foo bar baz", `"foo" OR "bar" OR "baz"`},
-		{`special * chars ^`, `"special" OR "*" OR "chars" OR "^"`},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.input, func(t *testing.T) {
-			result := sanitizeFTSQuery(tc.input)
-			assert.Equal(t, tc.expected, result)
-		})
-	}
-}
+// The FTS5 expression builder moved to internal/searchtext (FTSAnd) with the
+// rest of the search contract; its unit tests live there.
 
 // ─── JournalRepo tests ────────────────────────────────────────────────────────
 
