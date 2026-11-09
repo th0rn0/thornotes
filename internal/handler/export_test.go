@@ -466,3 +466,81 @@ func TestHandler_ExportFolderZip_RoundTrip(t *testing.T) {
 	assert.NotContains(t, gotFolders, "work/Empty",
 		"pinning current import behaviour: directory entries are ignored, so empty folders are lost")
 }
+
+// ── HEAD preflight ───────────────────────────────────────────────────────────
+//
+// The UI checks with HEAD before navigating, so a stale row shows a
+// notification instead of replacing the page with a JSON 404 body. Gin does not
+// answer HEAD for a GET route, so these routes are registered explicitly; if
+// that registration is ever dropped, every existing note starts reporting as
+// missing while the GET keeps working. This test is what notices.
+
+func TestHandler_Export_HeadIsACheapPreflight(t *testing.T) {
+	c := newTestClient(t)
+	c.registerAndLogin(t)
+	folderID := zipExportCreateFolder(t, c, nil, "Head Folder")
+	note := zipExportCreateNote(t, c, &folderID, "Head Note", "content for head")
+
+	for _, route := range []struct {
+		name string
+		path string
+	}{
+		{"note", "/api/v1/notes/" + i64str(note.ID) + "/zip"},
+		{"folder", "/api/v1/folders/" + i64str(folderID) + "/zip"},
+	} {
+		resp := c.do(t, http.MethodHead, route.path, nil)
+		defer resp.Body.Close()
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+
+		assert.Equal(t, http.StatusOK, resp.StatusCode, "%s: HEAD must succeed for an existing row", route.name)
+		assert.Equal(t, "application/zip", resp.Header.Get("Content-Type"), route.name)
+		assert.Contains(t, resp.Header.Get("Content-Disposition"), "attachment;",
+			"%s: the preflight carries the filename the download will use", route.name)
+		assert.Equal(t, "no-store", resp.Header.Get("Cache-Control"), route.name)
+		assert.Empty(t, body, "%s: a preflight must not ship the archive", route.name)
+	}
+
+	// The GET still streams, so HEAD being cheap did not turn into HEAD being
+	// the only thing that works.
+	resp := c.do(t, http.MethodGet, "/api/v1/notes/"+i64str(note.ID)+"/zip", nil)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	raw, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	_, err = zip.NewReader(bytes.NewReader(raw), int64(len(raw)))
+	require.NoError(t, err, "GET must still produce a readable archive")
+}
+
+// The preflight answers the same 404 shape as the download, or the UI cannot
+// tell "gone" from "server error" and will navigate anyway.
+func TestHandler_Export_HeadNotFoundMatchesGet(t *testing.T) {
+	f := newIsolationFixture(t)
+	f.asAlice(t)
+	noteID := f.noteID
+	folderID := f.folderID
+	f.client.login(t, "bob", isolationBobPassword)
+
+	for _, route := range []struct {
+		name string
+		path string
+	}{
+		{"note", "/api/v1/notes/" + i64str(noteID) + "/zip"},
+		{"folder", "/api/v1/folders/" + i64str(folderID) + "/zip"},
+	} {
+		getResp := f.client.do(t, http.MethodGet, route.path, nil)
+		getBody, _ := io.ReadAll(getResp.Body)
+		getResp.Body.Close()
+
+		headResp := f.client.do(t, http.MethodHead, route.path, nil)
+		headResp.Body.Close()
+
+		assert.Equal(t, http.StatusNotFound, getResp.StatusCode, route.name)
+		assert.Equal(t, http.StatusNotFound, headResp.StatusCode,
+			"%s: HEAD must not answer differently from GET for a foreign id", route.name)
+		assert.Equal(t, getResp.Header.Get("Content-Type"), headResp.Header.Get("Content-Type"),
+			"%s: the error shape must match too", route.name)
+		assert.NotContains(t, string(getBody), "attachment",
+			"%s: a 404 must not look like a download", route.name)
+	}
+}

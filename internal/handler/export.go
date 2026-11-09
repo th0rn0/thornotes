@@ -59,6 +59,53 @@ func (h *ExportHandler) Folder(c *gin.Context) {
 	h.serve(c, plan)
 }
 
+// HeadNote answers the browser's preflight for the note archive.
+//
+// The UI checks with HEAD before navigating, because a navigation to a 404
+// replaces the page with a JSON error body. That preflight has to be cheap:
+// it resolves ownership and produces the same headers the GET would, and it
+// never builds or streams an archive. Registering HEAD explicitly is required
+// — Gin's GET does not answer HEAD, so without this the route falls through to
+// NoRoute and every existing note would look missing.
+func (h *ExportHandler) HeadNote(c *gin.Context) {
+	user := ginUser(c)
+	noteID, err := ginParamInt64(c, "id")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "note id must be a positive integer"})
+		return
+	}
+	plan, err := h.svc.PlanNoteExport(c.Request.Context(), user.ID, noteID)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	h.headersOnly(c, plan)
+}
+
+// HeadFolder is the preflight twin of Folder.
+func (h *ExportHandler) HeadFolder(c *gin.Context) {
+	user := ginUser(c)
+	folderID, err := ginParamInt64(c, "id")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "folder id must be a positive integer"})
+		return
+	}
+	plan, err := h.svc.PlanFolderExport(c.Request.Context(), user.ID, folderID)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	h.headersOnly(c, plan)
+}
+
+// headersOnly emits exactly the headers serve() would, and no body.
+func (h *ExportHandler) headersOnly(c *gin.Context, plan *notes.ExportPlan) {
+	c.Header("Content-Type", "application/zip")
+	c.Header("Content-Disposition", `attachment; filename="`+plan.Filename+`"`)
+	c.Header("Cache-Control", "no-store")
+	c.Status(http.StatusOK)
+}
+
 // serve writes the archive straight to the response.
 //
 // Everything that can fail before the first byte — ownership, the subtree
