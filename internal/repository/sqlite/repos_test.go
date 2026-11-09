@@ -1819,3 +1819,54 @@ func TestAPITokenRepo_SetName_WrongOwner_ReturnsNotFound(t *testing.T) {
 	err = repo.SetName(ctx, user2.ID, tok.ID, "Hijacked")
 	require.ErrorIs(t, err, apperror.ErrNotFound)
 }
+
+// ListSubtree backs the zip export: the folder's own row plus everything beneath
+// it, using the ticket-598 boundary and escaping, so a prefix-sharing sibling and
+// a LIKE metacharacter in a name cannot widen the archive's scope.
+func TestFolderAndNoteRepo_ListSubtree(t *testing.T) {
+	pool := openTestDB(t)
+	user := createUser(t, pool)
+	folders := NewFolderRepo(pool.ReadDB, pool.WriteDB)
+	notes := NewNoteRepo(pool.ReadDB, pool.WriteDB)
+	ctx := context.Background()
+
+	root, err := folders.Create(ctx, user.ID, nil, "100%_done", "test-uuid-1/100%_done")
+	require.NoError(t, err)
+	child, err := folders.Create(ctx, user.ID, &root.ID, "Sub", "test-uuid-1/100%_done/Sub")
+	require.NoError(t, err)
+	sibling, err := folders.Create(ctx, user.ID, nil, "1000Xdone-notes", "test-uuid-1/1000Xdone-notes")
+	require.NoError(t, err)
+
+	rootNote := createNoteAt(t, pool, user.ID, &root.ID, "Root note", "root-note", "test-uuid-1/100%_done/root-note.md")
+	childNote := createNoteAt(t, pool, user.ID, &child.ID, "Child note", "child-note", "test-uuid-1/100%_done/Sub/child-note.md")
+	siblingNote := createNoteAt(t, pool, user.ID, &sibling.ID, "Sibling note", "sibling-note", "test-uuid-1/1000Xdone-notes/sibling-note.md")
+	require.NotNil(t, rootNote)
+	require.NotNil(t, childNote)
+	require.NotNil(t, siblingNote)
+
+	folderRows, err := folders.ListSubtree(ctx, user.ID, root.DiskPath)
+	require.NoError(t, err)
+	var folderIDs []int64
+	for _, f := range folderRows {
+		folderIDs = append(folderIDs, f.ID)
+	}
+	assert.Equal(t, []int64{root.ID, child.ID}, folderIDs,
+		"the subtree is the folder itself and its descendants — not the prefix-sharing sibling")
+
+	noteRows, err := notes.ListSubtree(ctx, user.ID, root.DiskPath)
+	require.NoError(t, err)
+	var paths []string
+	for _, rec := range noteRows {
+		paths = append(paths, rec.DiskPath)
+		assert.NotZero(t, rec.ID)
+		assert.NotEmpty(t, rec.Title)
+		assert.False(t, rec.UpdatedAt.IsZero(), "the export needs updated_at for the entry mtime")
+	}
+	// Order is not asserted: ORDER BY disk_path follows the database's collation
+	// (MySQL's default is case-insensitive, SQLite's is byte-wise), and the
+	// exporter sorts before assigning names so the archive cannot depend on it.
+	assert.ElementsMatch(t, []string{
+		"test-uuid-1/100%_done/Sub/child-note.md",
+		"test-uuid-1/100%_done/root-note.md",
+	}, paths, "only the subtree")
+}

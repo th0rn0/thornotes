@@ -883,6 +883,7 @@ body {
 <!-- NOTE context menu -->
 <div id="note-ctx-menu" class="note-ctx-menu">
   <button data-ctx-action="open">Open</button>
+  <button data-ctx-action="download">Download as zip</button>
   <button data-ctx-action="rename">Rename</button>
   <hr class="ctx-sep">
   <button data-ctx-action="delete" class="ctx-danger">Delete</button>
@@ -890,6 +891,7 @@ body {
 
 <!-- FOLDER context menu -->
 <div id="folder-ctx-menu" class="folder-ctx-menu">
+  <button data-folder-ctx-action="download">Download as zip</button>
   <button data-folder-ctx-action="rename">Rename</button>
   <hr class="ctx-sep">
   <button data-folder-ctx-action="delete" class="ctx-danger">Delete</button>
@@ -990,6 +992,7 @@ body {
 <script src="/static/js/vendor/purify.min.js?v={{.AssetVersion}}"></script>
 <script src="/static/js/table-utils.js?v={{.AssetVersion}}"></script>
 <script src="/static/js/graph-utils.js?v={{.AssetVersion}}"></script>
+<script src="/static/js/zip-download.js?v={{.AssetVersion}}"></script>
 <script src="/static/js/app.js?v={{.AssetVersion}}"></script>
 </body>
 </html>

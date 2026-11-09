@@ -331,6 +331,47 @@ func (fs *FileStore) Read(relativePath string) (string, error) {
 	return string(b), nil
 }
 
+// Stat reports the file information for relativePath without opening or reading
+// it. The zip export uses it to decide up front which entries are writable and
+// which have lost their file, so the skip report can be placed in its sorted
+// position before any archive bytes go out.
+func (fs *FileStore) Stat(relativePath string) (os.FileInfo, error) {
+	rel, err := fs.resolveRel(relativePath, false)
+	if err != nil {
+		return nil, err
+	}
+	info, err := fs.root.Stat(rel)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, apperror.ErrNotFound
+		}
+		return nil, fmt.Errorf("stat file: %w", err)
+	}
+	return info, nil
+}
+
+// Open opens relativePath for reading and returns the handle. It exists so a
+// caller that streams — the zip export — can copy a note to the response
+// without holding it in memory first. The caller must close the file.
+func (fs *FileStore) Open(relativePath string) (*os.File, error) {
+	rel, err := fs.resolveRel(relativePath, false)
+	if err != nil {
+		return nil, err
+	}
+	f, err := fs.root.Open(rel)
+	if err != nil {
+		switch {
+		case errors.Is(err, os.ErrNotExist):
+			return nil, apperror.ErrNotFound
+		case errors.Is(err, apperror.ErrPathTraversal), isPathEscape(err):
+			log.Warn().Str("path", relativePath).Msg("notes: refusing a path that resolves outside the notes root")
+			return nil, apperror.ErrPathTraversal
+		}
+		return nil, fmt.Errorf("open file: %w", err)
+	}
+	return f, nil
+}
+
 // Delete removes relativePath from disk.
 //
 // Unlike the other operations this ALLOWS a symlink at the leaf: unlink(2)

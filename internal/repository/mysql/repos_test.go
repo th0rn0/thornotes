@@ -1528,3 +1528,51 @@ func TestMySQL_APITokenRepo_SetPermissions_RejectsCrossUserFolder(t *testing.T) 
 	require.ErrorAs(t, err, &appErr)
 	assert.Equal(t, 400, appErr.Code)
 }
+
+// TestMySQL_FolderAndNoteRepo_ListSubtree is the same scope assertion as the
+// SQLite test, on the dialect where LIKE escaping, collation and the
+// %/_ metacharacters behave differently.
+func TestMySQL_FolderAndNoteRepo_ListSubtree(t *testing.T) {
+	pool := openTestMySQL(t)
+	user := createMySQLUser(t, pool)
+	folders := NewFolderRepo(pool.WriteDB)
+	notes := NewNoteRepo(pool.WriteDB)
+	ctx := context.Background()
+
+	root, err := folders.Create(ctx, user.ID, nil, "100%_done", "test-uuid-1/100%_done")
+	require.NoError(t, err)
+	child, err := folders.Create(ctx, user.ID, &root.ID, "Sub", "test-uuid-1/100%_done/Sub")
+	require.NoError(t, err)
+	sibling, err := folders.Create(ctx, user.ID, nil, "1000Xdone-notes", "test-uuid-1/1000Xdone-notes")
+	require.NoError(t, err)
+
+	createMySQLNoteAt(t, pool, user.ID, &root.ID, "Root note", "root-note", "test-uuid-1/100%_done/root-note.md")
+	createMySQLNoteAt(t, pool, user.ID, &child.ID, "Child note", "child-note", "test-uuid-1/100%_done/Sub/child-note.md")
+	createMySQLNoteAt(t, pool, user.ID, &sibling.ID, "Sibling note", "sibling-note", "test-uuid-1/1000Xdone-notes/sibling-note.md")
+
+	folderRows, err := folders.ListSubtree(ctx, user.ID, root.DiskPath)
+	require.NoError(t, err)
+	var folderIDs []int64
+	for _, f := range folderRows {
+		folderIDs = append(folderIDs, f.ID)
+	}
+	assert.Equal(t, []int64{root.ID, child.ID}, folderIDs,
+		"the subtree is the folder itself and its descendants — not the prefix-sharing sibling")
+
+	noteRows, err := notes.ListSubtree(ctx, user.ID, root.DiskPath)
+	require.NoError(t, err)
+	var paths []string
+	for _, rec := range noteRows {
+		paths = append(paths, rec.DiskPath)
+		assert.NotZero(t, rec.ID)
+		assert.NotEmpty(t, rec.Title)
+		assert.False(t, rec.UpdatedAt.IsZero(), "the export needs updated_at for the entry mtime")
+	}
+	// Order is not asserted: ORDER BY disk_path follows the database's collation
+	// (MySQL's default is case-insensitive, SQLite's is byte-wise), and the
+	// exporter sorts before assigning names so the archive cannot depend on it.
+	assert.ElementsMatch(t, []string{
+		"test-uuid-1/100%_done/Sub/child-note.md",
+		"test-uuid-1/100%_done/root-note.md",
+	}, paths, "only the subtree")
+}

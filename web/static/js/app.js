@@ -2801,11 +2801,59 @@ document.getElementById('tree').addEventListener('contextmenu', function(e) {
   menu.style.top = Math.min(e.clientY, window.innerHeight - mh) + 'px';
 });
 
+// ── Zip download (ticket 607) ────────────────────────────────────────────
+//
+// Triggering the download with a navigation (hidden <a download> click)
+// keeps the session cookie in play and lets the browser handle the file.
+// But a blind navigation to a 404 replaces the page with a JSON body, so
+// we preflight with HEAD first. The HEAD is cheap (no body transfer) and
+// the Content-Disposition header tells us the filename to save as.
+//
+// We also check the rendered tree before the network round-trip, because
+// the tree can be stale from another session and a tree-miss is the common
+// case — no point hitting the network for a row we know isn't ours.
+async function downloadZip(kind, id, title) {
+  if (!rowExistsInTree(kind, id, folders, rootNotes, notesByFolder)) {
+    showNotification('That row no longer exists — refresh and try again', true);
+    return;
+  }
+  const url = buildZipUrl(kind, id);
+  const fallbackName = buildZipFilename(kind, title);
+  try {
+    const head = await fetch(url, { method: 'HEAD' });
+    if (!head.ok) {
+      const msg = head.status === 404
+        ? 'That row no longer exists — refresh and try again'
+        : `Download failed (status ${head.status})`;
+      showNotification(msg, true);
+      return;
+    }
+    const filename = parseContentDispositionFilename(
+      head.headers.get('content-disposition'),
+      fallbackName
+    );
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.rel = 'noopener';
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    // Clean up after the navigation has been queued.
+    setTimeout(() => a.remove(), 0);
+  } catch (err) {
+    showNotification(err.message || 'Download failed', true);
+  }
+}
+
 document.getElementById('note-ctx-menu').addEventListener('click', async function(e) {
   const btn = e.target.closest('[data-ctx-action]');
   if (!btn) return;
   hideNoteCtxMenu();
   if (btn.dataset.ctxAction === 'open') openNote(ctxNoteId);
+  if (btn.dataset.ctxAction === 'download') {
+    await downloadZip('note', ctxNoteId, ctxNoteTitle);
+  }
   if (btn.dataset.ctxAction === 'rename') {
     const newTitle = prompt(`Rename note "${ctxNoteTitle}":`, ctxNoteTitle);
     if (!newTitle || newTitle.trim() === ctxNoteTitle) return;
@@ -2871,6 +2919,9 @@ document.getElementById('folder-ctx-menu').addEventListener('click', async funct
   const btn = e.target.closest('[data-folder-ctx-action]');
   if (!btn) return;
   hideFolderCtxMenu();
+  if (btn.dataset.folderCtxAction === 'download') {
+    await downloadZip('folder', ctxFolderId, ctxFolderName);
+  }
   if (btn.dataset.folderCtxAction === 'rename') {
     const newName = prompt(`Rename folder "${ctxFolderName}":`, ctxFolderName);
     if (!newName || newName.trim() === ctxFolderName) return;

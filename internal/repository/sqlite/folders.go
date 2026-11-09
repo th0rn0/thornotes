@@ -178,6 +178,39 @@ func (r *FolderRepo) Delete(ctx context.Context, userID, folderID int64) error {
 	return nil
 }
 
+// ListSubtree returns diskPath's folder row plus every folder underneath it.
+// The subtree is expressed by repository.DescendantPathPredicate — the same
+// predicate the rename cascade uses — so this cannot drift from it: the match
+// stops at a path separator (a sibling called "Notes2" is not under "Notes")
+// and LIKE metacharacters in a folder name are escaped. Scoped to userID as
+// well, because disk_path is unique across users but a caller must never see
+// another account's rows even if a prefix somehow overlapped.
+func (r *FolderRepo) ListSubtree(ctx context.Context, userID int64, diskPath string) ([]*model.Folder, error) {
+	predicate, scopeArgs := repository.DescendantPathPredicate(diskPath)
+	args := append([]any{userID}, scopeArgs...)
+
+	rows, err := r.readDB.QueryContext(ctx,
+		`SELECT id, user_id, parent_id, name, disk_path, created_at FROM folders
+		 WHERE user_id = ? AND (`+predicate+`)
+		 ORDER BY disk_path`,
+		args...,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list folder subtree: %w", err)
+	}
+	defer rows.Close()
+
+	var folders []*model.Folder
+	for rows.Next() {
+		f := &model.Folder{}
+		if err := rows.Scan(&f.ID, &f.UserID, &f.ParentID, &f.Name, &f.DiskPath, &f.CreatedAt); err != nil {
+			return nil, err
+		}
+		folders = append(folders, f)
+	}
+	return folders, rows.Err()
+}
+
 // isUniqueConstraint checks whether a SQLite error is a UNIQUE constraint violation.
 func isUniqueConstraint(err error) bool {
 	return err != nil && (strings.Contains(err.Error(), "UNIQUE constraint failed") ||

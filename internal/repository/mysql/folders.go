@@ -200,3 +200,33 @@ func (r *FolderRepo) Delete(ctx context.Context, userID, folderID int64) error {
 	}
 	return nil
 }
+
+// ListSubtree returns diskPath's folder row plus every folder underneath it.
+// repository.DescendantPathPredicate supplies the boundary and the escaping, so
+// this query and the rename cascade cannot disagree about what the subtree is:
+// "Notes2" is not under "Notes", and a '%' or '_' in a name is a literal.
+func (r *FolderRepo) ListSubtree(ctx context.Context, userID int64, diskPath string) ([]*model.Folder, error) {
+	predicate, scopeArgs := repository.DescendantPathPredicate(diskPath)
+	args := append([]any{userID}, scopeArgs...)
+
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT id, user_id, parent_id, name, disk_path, created_at FROM folders
+		 WHERE user_id = ? AND (`+predicate+`)
+		 ORDER BY disk_path`,
+		args...,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list folder subtree: %w", err)
+	}
+	defer rows.Close()
+
+	var folders []*model.Folder
+	for rows.Next() {
+		f := &model.Folder{}
+		if err := rows.Scan(&f.ID, &f.UserID, &f.ParentID, &f.Name, &f.DiskPath, &f.CreatedAt); err != nil {
+			return nil, err
+		}
+		folders = append(folders, f)
+	}
+	return folders, rows.Err()
+}
