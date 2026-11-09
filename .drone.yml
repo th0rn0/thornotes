@@ -6,9 +6,10 @@ name: ci-prune-when-full
 # the daemon's filesystem is above the threshold. Deletes garbage only: exited
 # step containers, volumes nothing references, untagged images.
 #
-# Everything runs as one shell block: Drone gives each list entry its own shell
-# in some runner versions, so a variable set on one line is not visible on the
-# next. Measured the hard way on builds #300-#302, where $USE kept arriving empty.
+# Drone substitutes $VAR at dispatch time, so a shell variable has to be written
+# $${VAR} to survive into the script. Measured on builds #300-#303, where $USE and
+# $THRESHOLD both arrived empty and the branch always took the "below" path.
+# It also runs as one shell block so the assignment is visibly in scope.
 
 steps:
   - name: report-and-prune
@@ -25,8 +26,8 @@ steps:
         docker system df
         USE=$(df -P / | tail -1 | sed 's/  */ /g' | cut -d' ' -f5 | tr -dc '0-9')
         USE=${USE:-0}
-        echo "used=${USE}% threshold=${THRESHOLD}%"
-        if [ "$USE" -ge "$THRESHOLD" ]; then
+        echo "used=$${USE}% threshold=$${THRESHOLD}%"
+        if [ "$$USE" -ge "$$THRESHOLD" ]; then
           echo "--- above threshold, reclaiming ---"
           docker ps -aq --filter status=exited | xargs -r docker rm
           docker volume prune -af
