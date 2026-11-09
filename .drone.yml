@@ -2,9 +2,13 @@ kind: pipeline
 type: docker
 name: ci-prune-when-full
 
-# Conditional reclaim on the CI runner. Reports space always; prunes only when
+# Conditional reclaim on the CI runner. Always reports space; prunes only when
 # the daemon's filesystem is above the threshold. Deletes garbage only: exited
 # step containers, volumes nothing references, untagged images.
+#
+# Everything runs as one shell block: Drone gives each list entry its own shell
+# in some runner versions, so a variable set on one line is not visible on the
+# next. Measured the hard way on builds #300-#302, where $USE kept arriving empty.
 
 steps:
   - name: report-and-prune
@@ -13,23 +17,26 @@ steps:
       - name: docker-sock
         path: /var/run/docker.sock
     commands:
-      - echo "=== before ==="
-      - df -h / | tail -1
-      - docker system df
-      # BusyBox df has no --output; parse POSIX output instead.
-      - USE=$(df -P / | tail -1 | sed 's/  */ /g' | cut -d' ' -f5 | tr -dc '0-9')
-      - echo "used=${USE}% threshold=80%"
-      - if [ "$USE" -ge 80 ]; then
-          echo "--- above threshold, reclaiming ---";
-          docker ps -aq --filter status=exited | xargs -r docker rm;
-          docker volume prune -af;
-          docker image prune -f;
-          echo "=== after ==="; df -h / | tail -1; docker system df;
+      - |
+        set -u
+        THRESHOLD=80
+        echo "=== before ==="
+        df -h / | tail -1
+        docker system df
+        USE=$(df -P / | tail -1 | sed 's/  */ /g' | cut -d' ' -f5 | tr -dc '0-9')
+        USE=${USE:-0}
+        echo "used=${USE}% threshold=${THRESHOLD}%"
+        if [ "$USE" -ge "$THRESHOLD" ]; then
+          echo "--- above threshold, reclaiming ---"
+          docker ps -aq --filter status=exited | xargs -r docker rm
+          docker volume prune -af
+          docker image prune -f
         else
-          echo "--- below threshold, nothing removed ---";
+          echo "--- below threshold, nothing removed ---"
         fi
-      - echo "=== end ==="
-      - df -h / | tail -1
+        echo "=== after ==="
+        df -h / | tail -1
+        docker system df
 
 volumes:
   - name: docker-sock
