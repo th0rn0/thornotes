@@ -182,8 +182,15 @@ func (r *NoteRepo) Update(ctx context.Context, n *model.Note) error {
 	// column and so reports 0 rows affected. The row still matched: success. Only
 	// a row that is not the caller's — or does not exist — is not-found, and both
 	// answer 404 so a foreign id leaks nothing.
+	// fts_synced_at is cleared for the same reason UpdateContent clears it: the
+	// column means "this note's index entry is stale". MySQL does not need the
+	// flag — InnoDB maintains its FULLTEXT index on UPDATE — but a write path
+	// that leaves it set after changing indexed text is a trap for the next
+	// reader, and the two backends must agree on what the column means
+	// (ticket 451).
 	matched, err := updateScoped(ctx, r.db, `
-		UPDATE notes SET title = ?, slug = ?, title_key = ?, disk_path = ?, tags = ?, updated_at = UTC_TIMESTAMP()
+		UPDATE notes SET title = ?, slug = ?, title_key = ?, disk_path = ?, tags = ?,
+		       fts_synced_at = NULL, updated_at = UTC_TIMESTAMP()
 		WHERE id = ? AND user_id = ?`,
 		[]any{n.Title, n.Slug, n.TitleKey, n.DiskPath, string(tagsJSON), n.ID, n.UserID},
 		`SELECT EXISTS(SELECT 1 FROM notes WHERE id = ? AND user_id = ?)`,

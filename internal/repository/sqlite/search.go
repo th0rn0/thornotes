@@ -21,26 +21,22 @@ func NewSearchRepo(readDB, writeDB *sql.DB) *SearchRepo {
 }
 
 // SyncNote brings a single note's FTS entry up to date.
+//
+// notes_fts is a contentless-delete FTS5 table (migration 009), so a row can be
+// unindexed from its rowid alone. That is the whole reason for the table's
+// shape: an external-content table's 'delete' command removes the tokens of the
+// values it is handed, and this path only ever has the note's *current* values —
+// the values of the text that is being replaced are not available to it. Handing
+// it the current values added the new tokens and removed whichever of them had
+// been indexed before, leaving the tokens of the old text in the index with
+// nothing to remove them (ticket 451).
+//
+// INSERT OR REPLACE is the documented update path for a contentless-delete table
+// and replaces the row's whole entry in one statement, so a failed sync cannot
+// leave the note half-unindexed.
 func (r *SearchRepo) SyncNote(ctx context.Context, noteID int64) error {
-	// Remove the note's existing index entry, if it has one. The 'delete'
-	// command is the only way to remove a row from an external-content FTS5
-	// table, and it fails when the row was never indexed — and that failure
-	// leaves the index statistics unusable: rank and bm25() then return NULL for
-	// every row, so relevance ordering silently stops working for the whole
-	// database. Gate it on the docsize shadow table, which holds exactly one row
-	// per indexed document (it exists because notes_fts is created with the
-	// default columnsize=1).
 	_, err := r.writeDB.ExecContext(ctx, `
-		INSERT INTO notes_fts(notes_fts, rowid, title, content)
-		SELECT 'delete', id, title, content FROM notes
-		WHERE id = ? AND EXISTS (SELECT 1 FROM notes_fts_docsize WHERE id = ?)`,
-		noteID, noteID)
-	if err != nil {
-		return fmt.Errorf("sync fts note %d (delete): %w", noteID, err)
-	}
-
-	_, err = r.writeDB.ExecContext(ctx, `
-		INSERT INTO notes_fts(rowid, title, content)
+		INSERT OR REPLACE INTO notes_fts(rowid, title, content)
 		SELECT id, title, content FROM notes WHERE id = ?`, noteID)
 	if err != nil {
 		return fmt.Errorf("sync fts note %d: %w", noteID, err)
