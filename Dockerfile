@@ -72,6 +72,15 @@ ENV THORNOTES_ADDR=:8080
 ENV THORNOTES_DB=/data/thornotes.db
 ENV THORNOTES_NOTES_ROOT=/data/notes
 
+# SQLite needs somewhere to spill temp files, and this image is `scratch`: there is
+# no /tmp, and when TMPDIR is unset SQLite's fallback chain ends at the current
+# directory -- which is / and unwritable by uid 65532. The result is not a clear
+# "no such directory" but SQLITE_IOERR_DELETE_NOENT (6410), which reads like a
+# corrupt database. Migration 009 is the first migration that needs temp space, so
+# the image built fine, migrated fine on a host with /tmp, and then crash-looped
+# with "disk I/O error" in the smoke container.
+ENV TMPDIR=/data
+
 EXPOSE 8080
 
 # Run as a non-root user. Numeric UID works without /etc/passwd in scratch.
