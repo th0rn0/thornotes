@@ -41,6 +41,19 @@
 //     at most 50 rows. The two engines score differently, so only the
 //     tie-breakers can be identical; both repositories order by title with a
 //     binary comparison (MySQL spells it COLLATE utf8mb4_bin) and then by id.
+//
+//  5. Term length is the application's rule, not the engine's. A full-text index
+//     can decline to hold a token at all — InnoDB's innodb_ft_min_token_size
+//     drops tokens shorter than three characters, and a MATCH for one of them is
+//     a valid query that matches nothing — so a term the index cannot answer is
+//     matched by a scan of the caller's own notes instead, on both backends, with
+//     the same floor (repository.MinIndexedTerm) and the same escaped LIKE
+//     (repository.ShortTermPredicate). That makes the two engines return the same
+//     rows for every term length. It does not make them identical: stemming is
+//     the tokenizer's, so SQLite's porter stemmer finds "meetings" for "meeting"
+//     and MySQL does not. Closing that needs terms derived in Go and stored in a
+//     table of their own — a migration, tracked separately — and until then a
+//     query that depends on stemming still divides the two backends.
 package searchtext
 
 import (

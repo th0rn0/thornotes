@@ -3,10 +3,12 @@ package repository_test
 // Search conformance: one table of fixtures and queries, run unchanged against
 // SQLite (FTS5) and against a real MariaDB/MySQL (InnoDB FULLTEXT).
 //
-// This file is the acceptance test for ticket 452 and for the search contract
-// documented in internal/searchtext. It deliberately does not import that
-// package: the expected snippets below are literals, so the table states what a
-// user must see rather than mirroring the implementation that produces it.
+// This file is the acceptance test for tickets 452 (tags AND, terms AND) and 619
+// (a term shorter than the full-text index's floor is still findable), and for
+// the search contract documented in internal/searchtext. It deliberately does not
+// import that package: the expected snippets below are literals, so the table
+// states what a user must see rather than mirroring the implementation that
+// produces it.
 //
 // The MySQL leg runs whenever THORNOTES_TEST_MYSQL_DSN is set (as in CI), and
 // skips otherwise. Set THORNOTES_REQUIRE_MYSQL=1 to turn that skip into a
@@ -173,6 +175,28 @@ func seedFixtures(t *testing.T, b *backend) (int64, map[string]int64) {
 		{Title: "Percent Old", Slug: "percent-old", Tags: []string{"100Xdone"},
 			Content: "Percent release notes from the old build."},
 
+		// ── short terms: below the full-text index's floor ───────────────────
+		// "go" cannot be answered by the MySQL FULLTEXT index at all
+		// (innodb_ft_min_token_size is 3), "kvm" is exactly at that floor and
+		// "wifi" is the control above it. "go" appears in a title here and in
+		// content there, because the short-term scan has to cover both columns.
+		{Title: "Go Bag", Slug: "go-bag", Tags: []string{},
+			Content: "Packed for emergencies: a torch, rations and a first-aid kit."},
+		{Title: "Short Lexicon", Slug: "short-lexicon", Tags: []string{"home"},
+			Content: "Tiny words: go, kvm and wifi, with one extra token at the end."},
+
+		// ── LIKE metacharacters in a search term ────────────────────────────
+		// The bait notes hold what an unescaped pattern would reach: "500" for
+		// '%50%%', "axb" for '%a_b%'.
+		{Title: "Discount Ledger", Slug: "discount-ledger", Tags: []string{},
+			Content: "Discount 50% on the annual plan."},
+		{Title: "Count Bait", Slug: "count-bait", Tags: []string{},
+			Content: "Reference 500 units shipped."},
+		{Title: "Underscore Token", Slug: "underscore-token", Tags: []string{},
+			Content: "The identifier a_b is in this sentence."},
+		{Title: "Underscore Bait", Slug: "underscore-bait", Tags: []string{},
+			Content: "The identifier axb is in this sentence."},
+
 		// ── snippet fixtures ─────────────────────────────────────────────────
 		{Title: "Snippet Start", Slug: "snippet-start", Tags: []string{}, Content: snippetStartContent},
 		{Title: "Snippet Middle", Slug: "snippet-middle", Tags: []string{}, Content: snippetMiddleContent},
@@ -307,6 +331,69 @@ func contractCases() []contractCase {
 			query: "percent",
 			tags:  []string{"100Xdone"},
 			want:  []string{"percent-old"},
+		},
+
+		// ── short terms: the full-text index cannot answer for them ──────────
+		// On MySQL a token of one or two characters is not in the index, so
+		// these queries used to return nothing at all while SQLite returned the
+		// note — the silent cross-engine disagreement this ticket closes. They
+		// are matched by a scan of the caller's notes on both engines.
+		{
+			name:  "short term: two characters, found in a title and in a content",
+			query: "go",
+			want:  []string{"go-bag", "short-lexicon"},
+		},
+		{
+			name:  "short term: three characters is the index's floor, still found",
+			query: "kvm",
+			want:  []string{"short-lexicon"},
+		},
+		{
+			name:  "four characters is the control above the floor",
+			query: "wifi",
+			want:  []string{"short-lexicon"},
+		},
+		{
+			name:  "short term: it does not exist",
+			query: "zz",
+			want:  nil,
+		},
+		{
+			name:  "short term is AND with a tag the note carries",
+			query: "go",
+			tags:  []string{"home"},
+			want:  []string{"short-lexicon"},
+		},
+		{
+			name:  "short term is AND with a tag the note does not carry",
+			query: "go",
+			tags:  []string{"work"},
+			want:  nil,
+		},
+		{
+			name:  "short term and a long term are AND",
+			query: "tiny go",
+			want:  []string{"short-lexicon"},
+		},
+		{
+			// The scan compares case-insensitively on both engines, like the
+			// index does, so the case a term is typed in never decides a match.
+			name:  "short term matches whatever case it is typed in",
+			query: "GO",
+			want:  []string{"go-bag", "short-lexicon"},
+		},
+		{
+			// '%' in a search term is a character. Unescaped, the pattern
+			// '%50%%' would also reach "Reference 500 units shipped".
+			name:  "percent in a search term is not a wildcard",
+			query: "50%",
+			want:  []string{"discount-ledger"},
+		},
+		{
+			// ... and '_' is a character too, not "any one character".
+			name:  "underscore in a search term is not a wildcard",
+			query: "a_b",
+			want:  []string{"underscore-token"},
 		},
 
 		// ── snippets ─────────────────────────────────────────────────────────

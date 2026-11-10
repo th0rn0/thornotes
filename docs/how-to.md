@@ -257,6 +257,8 @@ Click the **Search** icon or use the search box at the top of the sidebar. Searc
 
 Every word you type must appear in the note, and every tag you filter on must be on the note — two words are an AND, not an OR, and two tags mean "tagged with both". Tag matching ignores case, so `#Home` and `#home` find the same notes; `%` and `_` in a tag are ordinary characters, not wildcards. A note may still store `Home` and `home` as two separate tags — search treats them alike, the tag list does not merge them.
 
+Words of any length are found: `go` and `ip` return the notes that contain them, on every backend. A term shorter than the database's full-text index can hold is matched by a scan of your own notes instead of by the index, so it is slower than a longer term — one scan per short term, over your notes only — and it matches as a substring (`go` also finds `ago`), where a longer term matches as a word. One difference between backends remains: SQLite stems words, so `meeting` finds a note saying "meetings" there, and MySQL does not, so it does not. That is not fixed here and is tracked separately.
+
 The snippet is an excerpt of the note centred on the first match, with `<mark>…</mark>` around each occurrence and `…` where text was trimmed, and it is the same on every database backend. The UI HTML-escapes the snippet before rendering, so the markers appear as literal text; that escaping is deliberate: the snippet comes from author-controlled note content, and rendering it unescaped would hand a note author an XSS primitive.
 
 ---
