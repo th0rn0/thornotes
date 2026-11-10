@@ -177,8 +177,13 @@ func (r *NoteRepo) Update(ctx context.Context, n *model.Note) error {
 		return fmt.Errorf("marshal tags: %w", err)
 	}
 
+	// The title is indexed, so a rename has to mark the note stale for the same
+	// reason a content edit does: until the sync path runs, the index still
+	// holds the old title's tokens and a search for a word the note no longer
+	// carries returns it (ticket 451).
 	res, err := r.writeDB.ExecContext(ctx, `
-		UPDATE notes SET title = ?, slug = ?, title_key = ?, disk_path = ?, tags = ?, updated_at = datetime('now')
+		UPDATE notes SET title = ?, slug = ?, title_key = ?, disk_path = ?, tags = ?,
+		       fts_synced_at = NULL, updated_at = datetime('now')
 		WHERE id = ? AND user_id = ?`,
 		n.Title, n.Slug, n.TitleKey, n.DiskPath, string(tagsJSON), n.ID, n.UserID,
 	)
@@ -259,7 +264,20 @@ func (r *NoteRepo) Move(ctx context.Context, userID, noteID int64, newFolderID *
 }
 
 func (r *NoteRepo) Delete(ctx context.Context, userID, noteID int64) error {
-	res, err := r.writeDB.ExecContext(ctx,
+	// The note's index entry goes with the row, in one transaction. Search joins
+	// `notes`, so an entry left behind by a deleted note is invisible to a
+	// query — but it stays in the index for ever, and it still contributes to
+	// the collection statistics `rank` is computed from. A contentless-delete
+	// FTS5 table (migration 009) can drop the entry from the rowid alone, which
+	// is why this is possible at all: an external-content table would need the
+	// note's values, and the note is being deleted (ticket 451).
+	tx, err := r.writeDB.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("delete note: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	res, err := tx.ExecContext(ctx,
 		`DELETE FROM notes WHERE id = ? AND user_id = ?`, noteID, userID)
 	if err != nil {
 		return fmt.Errorf("delete note: %w", err)
@@ -267,6 +285,15 @@ func (r *NoteRepo) Delete(ctx context.Context, userID, noteID int64) error {
 	rows, _ := res.RowsAffected()
 	if rows == 0 {
 		return apperror.ErrNotFound
+	}
+
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM notes_fts WHERE rowid = ?`, noteID); err != nil {
+		return fmt.Errorf("delete note %d from fts: %w", noteID, err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("delete note: commit: %w", err)
 	}
 	return nil
 }

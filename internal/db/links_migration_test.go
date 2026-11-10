@@ -34,13 +34,18 @@ func TestMigration008_NoteLinks_UpDownRoundTrip(t *testing.T) {
 	require.True(t, tableExists(t, migDB, "note_links"), "note_links should exist after up")
 	require.True(t, columnExists(t, migDB, "title_key"), "title_key should exist after up")
 
-	// Down one version (008 -> 007).
-	require.NoError(t, m.Steps(-1))
+	// Down to 007 — whichever migrations sit above it. This test is about 008's
+	// down half, so "one step" stopped meaning "008 -> 007" as soon as 009
+	// existed, and a fixed -1 would have tested the newest migration instead.
+	applied, _, err := m.Version()
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, int(applied), 8, "008 must be applied for its down half to be exercised")
+	require.NoError(t, m.Steps(7-int(applied)))
 	require.False(t, tableExists(t, migDB, "note_links"), "note_links should be dropped after down")
 	require.False(t, columnExists(t, migDB, "title_key"), "title_key should be dropped after down")
 
-	// Up again (007 -> 008).
-	require.NoError(t, m.Steps(1))
+	// Up again, back to the newest migration.
+	require.NoError(t, m.Steps(int(applied)-7))
 	require.True(t, tableExists(t, migDB, "note_links"), "note_links should be recreated")
 	require.True(t, columnExists(t, migDB, "title_key"), "title_key should be recreated")
 }
