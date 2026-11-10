@@ -36,6 +36,18 @@ steps:
     commands:
       - golangci-lint run --timeout 5m ./...
 
+  # Ticket 604: the publish gate's own test table (stub /healthz; no docker,
+  # no production access) runs on every build, so a gate that silently stops
+  # gating fails the build instead of passing quietly. Includes the negative
+  # control: the table must FAIL against a copy of the gate with the
+  # comparison removed. Logic lives in scripts/ on purpose — Drone mangles
+  # inline multi-line shell.
+  - name: schema-gate-test
+    image: alpine:3.20
+    commands:
+      - apk add -q --no-cache curl python3
+      - sh scripts/schema-publish-gate.test.sh
+
   - name: discord-lint-success
     image: curlimages/curl:8.7.1
     failure: ignore
@@ -263,6 +275,27 @@ steps:
       event:
         - push
         - tag
+
+  # Ticket 604: watchtower deploys th0rn0/thornotes:latest with no human in
+  # the loop, so the schema gate has to live HERE — in the pipeline, before
+  # :latest is tagged. It fails this build (and therefore the publish) when
+  # the live database at notes.th0rn0.co.uk is ahead of the candidate image's
+  # MySQL ceiling, or when /healthz cannot be read at all: unknown is a
+  # refusal, never a pass. Drone steps only run while the pipeline is passing,
+  # so a refusal here skips build-push below and :latest is never tagged.
+  # Deliberately NOT wired into build-push-release (tag events): a release
+  # build must not depend on production being up. The --max literal MUST
+  # equal the THORNOTES_SCHEMA_MAX_MYSQL build arg in build-push below —
+  # TestDrone_PublishGateCeilingMatchesMigrations fails the build on drift.
+  - name: schema-publish-gate
+    image: curlimages/curl:8.7.1
+    commands:
+      - sh scripts/schema-publish-gate.sh --url https://notes.th0rn0.co.uk/healthz --engine mysql --max 7 --timeout 10
+    when:
+      branch:
+        - main
+      event:
+        - push
 
   - name: build-push
     image: plugins/docker

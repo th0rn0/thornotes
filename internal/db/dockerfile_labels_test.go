@@ -3,6 +3,7 @@ package db
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -85,4 +86,38 @@ func TestDockerfile_SchemaLabelsMatchMigrations(t *testing.T) {
 			".drone.yml %s build arg disagrees with the migration set", key)
 	}
 	assert.NotZero(t, checked, ".drone.yml must pass the schema labels as docker build args")
+}
+
+// The publish gate (.drone.yml step schema-publish-gate) refuses to tag
+// :latest while the live production database is ahead of the candidate image.
+// The ceiling it compares against is a literal in the step's command line; if
+// it drifts from the THORNOTES_SCHEMA_MAX_MYSQL build arg actually baked into
+// the image, the gate either blocks safe publishes or — the dangerous
+// direction — publishes an image the live database crashes. Tie the literal
+// to the migration set, the same way the Dockerfile labels above are tied.
+func TestDrone_PublishGateCeilingMatchesMigrations(t *testing.T) {
+	mysqlSrc, err := iofs.New(mysqlMigrationsFS, "mysql_migrations")
+	require.NoError(t, err)
+	mysqlMax, err := maxSupportedVersion(mysqlSrc)
+	require.NoError(t, err)
+
+	drone := readRepoFile(t, ".drone.yml")
+	maxRe := regexp.MustCompile(`--max[= ]([0-9]+)\b`)
+	gates := 0
+	ceiling := -1
+	for _, line := range drone {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "#") || !strings.Contains(trimmed, "scripts/schema-publish-gate.sh") {
+			continue
+		}
+		m := maxRe.FindStringSubmatch(trimmed)
+		require.NotNil(t, m, "schema-publish-gate step must pass an explicit --max: %q", trimmed)
+		n, convErr := strconv.Atoi(m[1])
+		require.NoError(t, convErr)
+		ceiling = n
+		gates++
+	}
+	require.Equal(t, 1, gates, ".drone.yml must invoke scripts/schema-publish-gate.sh exactly once, with --max")
+	assert.Equal(t, mysqlMax, ceiling,
+		".drone.yml publish-gate --max must equal the newest MySQL migration (%d); bump the gate step together with THORNOTES_SCHEMA_MAX_MYSQL", mysqlMax)
 }
