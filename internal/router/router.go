@@ -30,6 +30,7 @@ func New(
 	enableGitHistory bool,
 	dbHealth handler.DBHealthChecker,
 	sseShutdown context.Context,
+	buildVersion string,
 ) http.Handler {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
@@ -82,7 +83,10 @@ func New(
 	// The notes-root check reports whether the reconciler trusts the volume; the
 	// schema block reports the applied migration version against this build's
 	// floor, which is present whenever the pool implements SchemaReporter.
-	healthOpts := []handler.HealthOption{handler.WithNotesRootChecker(notesSvc)}
+	healthOpts := []handler.HealthOption{
+		handler.WithNotesRootChecker(notesSvc),
+		handler.WithBuildVersion(buildVersion),
+	}
 	if schemaReporter, ok := dbHealth.(handler.SchemaReporter); ok {
 		healthOpts = append(healthOpts, handler.WithSchemaReporter(schemaReporter))
 	}

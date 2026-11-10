@@ -103,6 +103,16 @@ mariadb --database=thornotes --execute='select version, dirty from schema_migrat
 
 The `version` is the migration version recorded in the database. `dirty=1` means the migration process marked the schema dirty when interrupted; it does not certify which statements completed.
 
+## Which build is this?
+
+```bash
+curl -s https://notes.example.com/healthz | jq -r .build.version
+```
+
+The value is the commit the binary was built from, injected at build time (`-X main.Version`); CI passes `${DRONE_COMMIT_SHA}`. A binary built without the flag reports `dev`, and one built with an empty value reports `unknown` — neither is ever an empty string, because an empty field reads like a missing key rather than a missing stamp.
+
+The endpoint is unauthenticated deliberately. Knowing the commit of a notes server is not a secret, and requiring a login to answer it means only someone with host access can tell whether a deploy landed. Use it instead of the front-end asset digest (`app.js?v=…`): that hashes the assets, not the commit, so several releases that touch no JavaScript serve byte-identical digests.
+
 ## Schema too new
 
 The database has been migrated by a newer build than the image you just started supports. Startup refuses before applying migrations. For a running instance, inspect `GET /healthz`: compare `schema.version` (database version) with `schema.max_supported` (the running binary's migration ceiling). This endpoint is unavailable when startup itself is refused, so inspect the image before deployment as well: its OCI label `co.thornotes.schema.max` reports the SQLite migration ceiling and `co.thornotes.schema.max.mysql` reports the MySQL ceiling. Compare the appropriate label with the database's recorded version.
