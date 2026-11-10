@@ -1,33 +1,626 @@
 kind: pipeline
 type: docker
-name: image-temp-proof
+name: ci
 
-# Temporary: build the image from this branch's tree and run it the way the
-# smoke step runs it (scratch image, --tmpfs /data, no /tmp), which is the
-# exact condition that crash-looped on main. Removed before the PR is ready.
+trigger:
+  event:
+    - push
+    - pull_request
+    - tag
+
+services:
+  - name: mariadb
+    image: mariadb:11
+    environment:
+      MARIADB_ROOT_PASSWORD: rootpassword
+      MARIADB_DATABASE: thornotes_test
+      MARIADB_USER: thornotes
+      MARIADB_PASSWORD: thornotes
 
 steps:
-  - name: prove
+
+# ── Lint ─────────────────────────────────────────────────────────────────────
+
+  - name: discord-lint-start
+    image: curlimages/curl:8.7.1
+    failure: ignore
+    environment:
+      DISCORD_WEBHOOK_URL:
+        from_secret: discord_webhook_url
+    commands:
+      - |
+        curl -s -X POST "$DISCORD_WEBHOOK_URL" -H "Content-Type: application/json" -d "{\"embeds\":[{\"title\":\"$DRONE_REPO - $DRONE_SOURCE_BRANCH - Lint Started!\",\"url\":\"$DRONE_BUILD_LINK\"}]}"
+
+  - name: lint
+    image: golangci/golangci-lint:latest
+    commands:
+      - golangci-lint run --timeout 5m ./...
+
+  - name: discord-lint-success
+    image: curlimages/curl:8.7.1
+    failure: ignore
+    environment:
+      DISCORD_WEBHOOK_URL:
+        from_secret: discord_webhook_url
+    commands:
+      - |
+        curl -s -X POST "$DISCORD_WEBHOOK_URL" -H "Content-Type: application/json" -d "{\"embeds\":[{\"title\":\"$DRONE_REPO - $DRONE_SOURCE_BRANCH - Lint Success!\",\"url\":\"$DRONE_BUILD_LINK\"}]}"
+    when:
+      status:
+        - success
+
+  - name: discord-lint-failure
+    image: curlimages/curl:8.7.1
+    failure: ignore
+    environment:
+      DISCORD_WEBHOOK_URL:
+        from_secret: discord_webhook_url
+    commands:
+      - |
+        curl -s -X POST "$DISCORD_WEBHOOK_URL" -H "Content-Type: application/json" -d "{\"embeds\":[{\"title\":\"$DRONE_REPO - $DRONE_SOURCE_BRANCH - Lint Failure!\",\"url\":\"$DRONE_BUILD_LINK\"}]}"
+    when:
+      status:
+        - failure
+
+# ── JS Tests ──────────────────────────────────────────────────────────────────
+
+  - name: discord-test-js-start
+    image: curlimages/curl:8.7.1
+    failure: ignore
+    environment:
+      DISCORD_WEBHOOK_URL:
+        from_secret: discord_webhook_url
+    commands:
+      - |
+        curl -s -X POST "$DISCORD_WEBHOOK_URL" -H "Content-Type: application/json" -d "{\"embeds\":[{\"title\":\"$DRONE_REPO - $DRONE_SOURCE_BRANCH - JS Test Started!\",\"url\":\"$DRONE_BUILD_LINK\"}]}"
+
+  - name: test-js
+    image: node:lts
+    commands:
+      - node --test web/static/js/table-utils.test.js
+      - node --test web/static/js/editor-scroll-reset.test.js
+      - node --test web/static/js/default-note-view.test.js
+      - node --test web/static/js/session-expiry.test.js
+      - node --test web/static/js/csrf-retry.test.js
+      - node --test web/static/js/links-panel.test.js
+      - node --test web/static/js/sw-version.test.js
+      - node --test web/static/js/graph-utils.test.js
+      - node --test web/static/js/share-clear.test.js
+      - npm install --prefix web/cm6-bundle
+      - node --test web/cm6-bundle/index.test.mjs
+
+  - name: discord-test-js-success
+    image: curlimages/curl:8.7.1
+    failure: ignore
+    environment:
+      DISCORD_WEBHOOK_URL:
+        from_secret: discord_webhook_url
+    commands:
+      - |
+        curl -s -X POST "$DISCORD_WEBHOOK_URL" -H "Content-Type: application/json" -d "{\"embeds\":[{\"title\":\"$DRONE_REPO - $DRONE_SOURCE_BRANCH - JS Test Success!\",\"url\":\"$DRONE_BUILD_LINK\"}]}"
+    when:
+      status:
+        - success
+
+  - name: discord-test-js-failure
+    image: curlimages/curl:8.7.1
+    failure: ignore
+    environment:
+      DISCORD_WEBHOOK_URL:
+        from_secret: discord_webhook_url
+    commands:
+      - |
+        curl -s -X POST "$DISCORD_WEBHOOK_URL" -H "Content-Type: application/json" -d "{\"embeds\":[{\"title\":\"$DRONE_REPO - $DRONE_SOURCE_BRANCH - JS Test Failure!\",\"url\":\"$DRONE_BUILD_LINK\"}]}"
+    when:
+      status:
+        - failure
+
+# ── Go Tests ──────────────────────────────────────────────────────────────────
+
+  - name: discord-test-start
+    image: curlimages/curl:8.7.1
+    failure: ignore
+    environment:
+      DISCORD_WEBHOOK_URL:
+        from_secret: discord_webhook_url
+    commands:
+      - |
+        curl -s -X POST "$DISCORD_WEBHOOK_URL" -H "Content-Type: application/json" -d "{\"embeds\":[{\"title\":\"$DRONE_REPO - $DRONE_SOURCE_BRANCH - Test Started!\",\"url\":\"$DRONE_BUILD_LINK\"}]}"
+
+  - name: test
+    # Pinned to 1.26.3: go.mod requires >= 1.26.3 (security patches for
+    # html/template, x/net HTTP/2). The floating golang:1.26 tag can stay
+    # cached at 1.26.2 on Drone runners with GOTOOLCHAIN=local, which
+    # refuses to auto-fetch a newer toolchain.
+    image: golang:1.26.3
+    environment:
+      THORNOTES_TEST_MYSQL_DSN: "thornotes:thornotes@tcp(mariadb:3306)/thornotes_test?parseTime=true"
+      # Fail instead of skipping when the DSN is missing, so a renamed or
+      # dropped MySQL variable can never silently disable the MySQL leg again.
+      THORNOTES_REQUIRE_MYSQL: "1"
+    commands:
+      # Retry policy — retry the DOWNLOAD, never the tests. A module fetch
+      # from proxy.golang.org can fail mid-stream (HTTP/2 "stream error", as
+      # on build #226); `go mod download` is idempotent and every artefact is
+      # hash-verified against go.sum, so the retry cannot mask a corrupted or
+      # wrong module — it either produces the right bytes or fails again.
+      # `all` (not the default) matters: the graph includes modules nothing
+      # imports, exactly the class that broke #230's lint (mongo-driver is
+      # // indirect and imported nowhere). A blanket `go test ... || go test`
+      # would be wrong — it hides genuine test failures.
+      - go mod download all || go mod download all
+      - go test -race -coverprofile=coverage.out -covermode=atomic ./...
+      - go tool cover -func=coverage.out | tail -1
+
+  - name: discord-test-success
+    image: curlimages/curl:8.7.1
+    failure: ignore
+    environment:
+      DISCORD_WEBHOOK_URL:
+        from_secret: discord_webhook_url
+    commands:
+      - |
+        curl -s -X POST "$DISCORD_WEBHOOK_URL" -H "Content-Type: application/json" -d "{\"embeds\":[{\"title\":\"$DRONE_REPO - $DRONE_SOURCE_BRANCH - Test Success!\",\"url\":\"$DRONE_BUILD_LINK\"}]}"
+    when:
+      status:
+        - success
+
+  - name: discord-test-failure
+    image: curlimages/curl:8.7.1
+    failure: ignore
+    environment:
+      DISCORD_WEBHOOK_URL:
+        from_secret: discord_webhook_url
+    commands:
+      - |
+        curl -s -X POST "$DISCORD_WEBHOOK_URL" -H "Content-Type: application/json" -d "{\"embeds\":[{\"title\":\"$DRONE_REPO - $DRONE_SOURCE_BRANCH - Test Failure!\",\"url\":\"$DRONE_BUILD_LINK\"}]}"
+    when:
+      status:
+        - failure
+
+# ── Android APK ──────────────────────────────────────────────────────────────
+# Runs on every push/PR. Release APK is built only on v* tags.
+
+  - name: discord-android-start
+    image: curlimages/curl:8.7.1
+    failure: ignore
+    environment:
+      DISCORD_WEBHOOK_URL:
+        from_secret: discord_webhook_url
+    commands:
+      - |
+        curl -s -X POST "$DISCORD_WEBHOOK_URL" -H "Content-Type: application/json" -d "{\"embeds\":[{\"title\":\"$DRONE_REPO - $DRONE_SOURCE_BRANCH - Android Build Started!\",\"url\":\"$DRONE_BUILD_LINK\"}]}"
+    when:
+      branch:
+        - disabled
+
+  - name: build-android
+    image: mingc/android-build-box:latest
+    volumes:
+      - name: gradle-home
+        path: /root/.gradle
+    environment:
+      GRADLE_OPTS: "-Dorg.gradle.daemon=false -Xmx1024m -Dfile.encoding=UTF-8"
+    commands:
+      - java -version
+      - cd android
+      - ./gradlew --no-daemon --version
+      - |
+        if [ -n "$DRONE_TAG" ]; then
+          ./gradlew --no-daemon test assembleDebug assembleRelease
+        else
+          ./gradlew --no-daemon test assembleDebug
+        fi
+    when:
+      branch:
+        - disabled
+
+  - name: discord-android-success
+    image: curlimages/curl:8.7.1
+    failure: ignore
+    environment:
+      DISCORD_WEBHOOK_URL:
+        from_secret: discord_webhook_url
+    commands:
+      - |
+        curl -s -X POST "$DISCORD_WEBHOOK_URL" -H "Content-Type: application/json" -d "{\"embeds\":[{\"title\":\"$DRONE_REPO - $DRONE_SOURCE_BRANCH - Android Build Success!\",\"url\":\"$DRONE_BUILD_LINK\"}]}"
+    when:
+      branch:
+        - disabled
+      status:
+        - success
+
+  - name: discord-android-failure
+    image: curlimages/curl:8.7.1
+    failure: ignore
+    environment:
+      DISCORD_WEBHOOK_URL:
+        from_secret: discord_webhook_url
+    commands:
+      - |
+        curl -s -X POST "$DISCORD_WEBHOOK_URL" -H "Content-Type: application/json" -d "{\"embeds\":[{\"title\":\"$DRONE_REPO - $DRONE_SOURCE_BRANCH - Android Build Failure!\",\"url\":\"$DRONE_BUILD_LINK\"}]}"
+    when:
+      branch:
+        - disabled
+      status:
+        - failure
+
+# ── Docker Build & Push ───────────────────────────────────────────────────────
+# Only runs on push to main or v* tags.
+
+  - name: discord-build-start
+    image: curlimages/curl:8.7.1
+    failure: ignore
+    environment:
+      DISCORD_WEBHOOK_URL:
+        from_secret: discord_webhook_url
+    commands:
+      - |
+        curl -s -X POST "$DISCORD_WEBHOOK_URL" -H "Content-Type: application/json" -d "{\"embeds\":[{\"title\":\"$DRONE_REPO - $DRONE_SOURCE_BRANCH - Build Started!\",\"url\":\"$DRONE_BUILD_LINK\"}]}"
+    when:
+      branch:
+        - main
+      event:
+        - push
+        - tag
+
+  - name: build-push
+    image: plugins/docker
+    settings:
+      repo: th0rn0/thornotes
+      username:
+        from_secret: dockerhub_username
+      password:
+        from_secret: dockerhub_token
+      tags:
+        - latest
+      # co.thornotes.schema.max on the image is the highest migration the build
+      # embeds, so an operator can tell from `docker inspect` whether an image is
+      # older than a database before deploying it. The values are the SQLite and
+      # MySQL floors and are checked against the migration sources by
+      # TestDockerfile_SchemaLabelsMatchMigrations.
+      build_args:
+        - THORNOTES_SCHEMA_MAX=9
+        - THORNOTES_SCHEMA_MAX_MYSQL=7
+        - THORNOTES_VERSION=${DRONE_COMMIT_SHA}
+    when:
+      branch:
+        - main
+      event:
+        - push
+
+  - name: build-push-release
+    image: plugins/docker
+    settings:
+      repo: th0rn0/thornotes
+      username:
+        from_secret: dockerhub_username
+      password:
+        from_secret: dockerhub_token
+      tags:
+        - latest
+        - ${DRONE_TAG}
+      build_args:
+        - THORNOTES_SCHEMA_MAX=9
+        - THORNOTES_SCHEMA_MAX_MYSQL=7
+        - THORNOTES_VERSION=${DRONE_TAG}
+    when:
+      event:
+        - tag
+
+  - name: discord-build-success
+    image: curlimages/curl:8.7.1
+    failure: ignore
+    environment:
+      DISCORD_WEBHOOK_URL:
+        from_secret: discord_webhook_url
+    commands:
+      - |
+        curl -s -X POST "$DISCORD_WEBHOOK_URL" -H "Content-Type: application/json" -d "{\"embeds\":[{\"title\":\"$DRONE_REPO - $DRONE_SOURCE_BRANCH - Build Success!\",\"url\":\"$DRONE_BUILD_LINK\"}]}"
+    when:
+      branch:
+        - main
+      event:
+        - push
+        - tag
+      status:
+        - success
+
+  - name: discord-build-failure
+    image: curlimages/curl:8.7.1
+    failure: ignore
+    environment:
+      DISCORD_WEBHOOK_URL:
+        from_secret: discord_webhook_url
+    commands:
+      - |
+        curl -s -X POST "$DISCORD_WEBHOOK_URL" -H "Content-Type: application/json" -d "{\"embeds\":[{\"title\":\"$DRONE_REPO - $DRONE_SOURCE_BRANCH - Build Failure!\",\"url\":\"$DRONE_BUILD_LINK\"}]}"
+    when:
+      branch:
+        - main
+      event:
+        - push
+        - tag
+      status:
+        - failure
+
+# ── Smoke Test ────────────────────────────────────────────────────────────────
+
+  - name: discord-smoke-start
+    image: curlimages/curl:8.7.1
+    failure: ignore
+    environment:
+      DISCORD_WEBHOOK_URL:
+        from_secret: discord_webhook_url
+    commands:
+      - |
+        curl -s -X POST "$DISCORD_WEBHOOK_URL" -H "Content-Type: application/json" -d "{\"embeds\":[{\"title\":\"$DRONE_REPO - $DRONE_SOURCE_BRANCH - Smoke Test Started!\",\"url\":\"$DRONE_BUILD_LINK\"}]}"
+    when:
+      branch:
+        - main
+      event:
+        - push
+        - tag
+
+  - name: smoke-test
     image: docker:27
     volumes:
       - name: docker-sock
         path: /var/run/docker.sock
     commands:
-      - docker build -t thornotes-tmpproof:local .
+      - docker pull th0rn0/thornotes:latest
       - |
-        docker rm -f tmpproof >/dev/null 2>&1 || true
-        docker run -d --name tmpproof --tmpfs /data thornotes-tmpproof:local >/dev/null
-        sleep 8
-        echo "state: $(docker inspect -f '{{.State.Status}} exit={{.State.ExitCode}}' tmpproof)"
-        docker logs tmpproof 2>&1 | tail -8
-        docker stop tmpproof >/dev/null 2>&1 || true
-        docker rm tmpproof >/dev/null 2>&1 || true
+        STEP_NET=$(docker inspect "$(cat /etc/hostname)" \
+          -f '{{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{end}}' \
+          2>/dev/null | awk '{print $1}')
+        echo "Step network: ${STEP_NET:-bridge}"
+        docker rm -f thornotes-smoke 2>/dev/null || true
+        docker run -d --name thornotes-smoke \
+          ${STEP_NET:+--network "$STEP_NET"} \
+          --tmpfs /data \
+          th0rn0/thornotes:latest
+        IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' thornotes-smoke)
+        echo "Container IP: $IP"
+        for i in $(seq 1 30); do
+          wget -qO- --timeout=3 "http://$IP:8080/" > /dev/null 2>&1 && echo "Server is up (attempt $i)" && docker stop thornotes-smoke && docker rm thornotes-smoke && exit 0
+          echo "Waiting... ($i/30)"
+          sleep 2
+        done
+        echo "Server did not respond"
+        docker logs thornotes-smoke
+        docker stop thornotes-smoke
+        docker rm thornotes-smoke
+        exit 1
+    when:
+      branch:
+        - main
+      event:
+        - push
+        - tag
+
+  - name: discord-smoke-success
+    image: curlimages/curl:8.7.1
+    failure: ignore
+    environment:
+      DISCORD_WEBHOOK_URL:
+        from_secret: discord_webhook_url
+    commands:
+      - |
+        curl -s -X POST "$DISCORD_WEBHOOK_URL" -H "Content-Type: application/json" -d "{\"embeds\":[{\"title\":\"$DRONE_REPO - $DRONE_SOURCE_BRANCH - Smoke Test Success!\",\"url\":\"$DRONE_BUILD_LINK\"}]}"
+    when:
+      branch:
+        - main
+      event:
+        - push
+        - tag
+      status:
+        - success
+
+  - name: discord-smoke-failure
+    image: curlimages/curl:8.7.1
+    failure: ignore
+    environment:
+      DISCORD_WEBHOOK_URL:
+        from_secret: discord_webhook_url
+    commands:
+      - |
+        curl -s -X POST "$DISCORD_WEBHOOK_URL" -H "Content-Type: application/json" -d "{\"embeds\":[{\"title\":\"$DRONE_REPO - $DRONE_SOURCE_BRANCH - Smoke Test Failure!\",\"url\":\"$DRONE_BUILD_LINK\"}]}"
+    when:
+      branch:
+        - main
+      event:
+        - push
+        - tag
+      status:
+        - failure
+
+# ── Linux Server Binary ───────────────────────────────────────────────────────
+# Builds a static linux/amd64 binary. Only runs on v* tags.
+
+  - name: build-linux-binary
+    # Pinned to 1.26.3 for the same reason as the test step above.
+    image: golang:1.26.3-bookworm
+    commands:
+      - CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o thornotes-linux-amd64 ./cmd/thornotes
+    when:
+      event:
+        - tag
+
+# ── GitHub Release ────────────────────────────────────────────────────────────
+# Only runs on v* tags.
+
+  - name: release
+    image: alpine:latest
+    environment:
+      GITHUB_TOKEN:
+        from_secret: github_token
+    commands:
+      - apk add -q curl jq
+      - 'VERSION=${DRONE_TAG#v} && awk "/^## \[$VERSION\]/{found=1; next} found && /^## \[/{exit} found{print}" CHANGELOG.md > /tmp/body.txt && printf "\n\n## Downloads\n\n| File | Description |\n|------|-------------|\n| \`thornotes-linux-amd64\` | Static server binary for Linux (amd64). No dependencies — just download, chmod +x, and run. |\n\nSee the [How-To Guide](https://github.com/$DRONE_REPO/blob/main/docs/how-to.md) for installation and usage instructions.\n" >> /tmp/body.txt && PAYLOAD="{\"tag_name\":\"$DRONE_TAG\",\"name\":\"$DRONE_TAG\",\"body\":$(jq -Rs . /tmp/body.txt)}" && HTTP=$(curl -s -o /tmp/rel.json -w "%{http_code}" -X POST -H "Authorization: Bearer $GITHUB_TOKEN" -H "Content-Type: application/json" "https://api.github.com/repos/$DRONE_REPO/releases" -d "$PAYLOAD") && echo "create HTTP $HTTP" && if [ "$HTTP" = "422" ]; then RID=$(curl -s -H "Authorization: Bearer $GITHUB_TOKEN" "https://api.github.com/repos/$DRONE_REPO/releases/tags/$DRONE_TAG" | jq -r .id) && curl -s --fail -X PATCH -H "Authorization: Bearer $GITHUB_TOKEN" -H "Content-Type: application/json" "https://api.github.com/repos/$DRONE_REPO/releases/$RID" -d "$PAYLOAD" > /dev/null && echo "updated existing release"; elif [ "$HTTP" != "201" ]; then cat /tmp/rel.json; exit 1; fi'
+    when:
+      event:
+        - tag
+
+  - name: release-linux
+    image: alpine:latest
+    environment:
+      GITHUB_TOKEN:
+        from_secret: github_token
+    commands:
+      - apk add -q curl jq
+      - 'UPLOAD_URL=$(curl -s --fail -H "Authorization: Bearer $GITHUB_TOKEN" "https://api.github.com/repos/$DRONE_REPO/releases/tags/$DRONE_TAG" | jq -r ".upload_url" | sed "s/{?name,label}//") && if [ -z "$UPLOAD_URL" ] || [ "$UPLOAD_URL" = "null" ]; then echo "ERROR: no upload_url from GitHub API"; exit 1; fi && curl -s --fail -X POST -H "Authorization: Bearer $GITHUB_TOKEN" -H "Content-Type: application/octet-stream" --data-binary @thornotes-linux-amd64 "$UPLOAD_URL?name=thornotes-linux-amd64"'
+    when:
+      event:
+        - tag
+
+  - name: discord-released
+    image: curlimages/curl:8.7.1
+    failure: ignore
+    environment:
+      DISCORD_WEBHOOK_URL:
+        from_secret: discord_webhook_url
+    commands:
+      - |
+        curl -s -X POST "$DISCORD_WEBHOOK_URL" -H "Content-Type: application/json" -d "{\"embeds\":[{\"title\":\"$DRONE_REPO - $DRONE_TAG Released!\",\"url\":\"https://github.com/$DRONE_REPO/releases/tag/$DRONE_TAG\"}]}"
+    when:
+      event:
+        - tag
+      status:
+        - success
+
+# ── Android Release ──────────────────────────────────────────────────────────
+# Attaches the unsigned release APK to the GitHub release. Only runs on v* tags.
+
+  - name: release-android
+    image: alpine:latest
+    environment:
+      GITHUB_TOKEN:
+        from_secret: github_token
+    commands:
+      - apk add -q curl jq
+      - VERSION=$(cat VERSION | xargs)
+      - APK=android/app/build/outputs/apk/release/app-release-unsigned.apk
+      - |
+        [ -f "$APK" ] || { echo "ERROR: APK not found at $APK"; exit 1; }
+      - |
+        UPLOAD_URL=$(curl -s --fail \
+          -H "Authorization: Bearer $GITHUB_TOKEN" \
+          "https://api.github.com/repos/$DRONE_REPO/releases/tags/v${VERSION}" \
+          | jq -r '.upload_url' | sed 's/{?name,label}//')
+        [ -n "$UPLOAD_URL" ] && [ "$UPLOAD_URL" != "null" ] || { echo "ERROR: no upload_url from GitHub API"; exit 1; }
+        curl -s --fail -X POST \
+          -H "Authorization: Bearer $GITHUB_TOKEN" \
+          -H "Content-Type: application/vnd.android.package-archive" \
+          --data-binary @"$APK" \
+          "${UPLOAD_URL}?name=thornotes-v${VERSION}-android-unsigned.apk"
+    when:
+      event:
+        - tag
+      branch:
+        - disabled
+
+  - name: discord-android-released
+    image: curlimages/curl:8.7.1
+    failure: ignore
+    environment:
+      DISCORD_WEBHOOK_URL:
+        from_secret: discord_webhook_url
+    commands:
+      - |
+        VERSION=$(cat VERSION | xargs)
+        curl -s -X POST "$DISCORD_WEBHOOK_URL" -H "Content-Type: application/json" -d "{\"embeds\":[{\"title\":\"$DRONE_REPO - v${VERSION} - Android APK attached!\",\"url\":\"https://github.com/$DRONE_REPO/releases/tag/v${VERSION}\"}]}"
+    when:
+      event:
+        - tag
+      status:
+        - success
+
+# ── Volumes ───────────────────────────────────────────────────────────────────
 
 volumes:
   - name: docker-sock
     host:
       path: /var/run/docker.sock
+  - name: gradle-home
+    host:
+      path: /var/cache/drone/gradle-home
 
+---
+
+# ── Watchtower safety-net (ticket 602) — CRON-TRIGGERED, NOT WIRED YET ────────
+# Watchtower pulls th0rn0/thornotes:latest with nobody running
+# scripts/deploy-gate.sh, so the protection for the automatic path is a rolling
+# backup that predates any deploy. This pipeline is READ-ONLY against the
+# running stack: dumps + git bundles are written to /servdata/thornotes/backups,
+# everything else is discovery + scratch containers that are removed again.
+# See scripts/host-backup.sh for the contract, including the row-count restore
+# proof it performs every run.
+#
+# RUNNER PLACEMENT FINDING (proven 2026-11-06, Drone builds #271/#275/#277 on
+# this branch, evidence in docs/operations.md): the docker runner is the
+# dedicated CI box `drone-runner-tehhulk`, NOT the production Docker host. Its
+# daemon cannot drive MAX's Docker API (TCP 2375/2376 closed from that box) and
+# `/servdata/thornotes` exists only on MAX. A Drone cron wired on this runner
+# would therefore back up a CI box, not production — do NOT create the cron
+# while this placement holds. Production protection until a runner is colocated
+# with production: the host-side cron block in docs/operations.md.
+#
+# The main CI pipeline above does not run for cron events (its trigger lists
+# push/pull_request/tag only), and this pipeline only runs for cron events on
+# the ops/safety-net branch — the two never interact.
+# Mount rules (the 2026-11-06 `/out` bug): inside the step, container `docker
+# run` calls resolve their `-v` sources against the HOST daemon, not against
+# the step's filesystem. So the backup directory must exist as a host path and
+# is bound into the step at the SAME named path (`/servdata/thornotes/backups`
+# -> `/servdata/thornotes/backups`): the artefacts the step can `ls` are then
+# exactly the artefacts the helper containers write. Never bind it at `/out`
+# inside the step — that deviates from the path the helpers use and lands
+# writes somewhere the step cannot see.
+kind: pipeline
+type: docker
+name: safety-net
 trigger:
+  event:
+    - cron
   branch:
-    - fix/smoke-tmpdir
+    - ops/safety-net
+
+steps:
+  - name: backup-and-verify
+    image: docker:27
+    volumes:
+      - name: docker-sock
+        path: /var/run/docker.sock
+      - name: backups
+        path: /servdata/thornotes/backups
+    environment:
+      KEEP_HOURLY: "168"
+    commands:
+      - sh scripts/host-backup.sh backup
+      - sh scripts/host-backup.sh verify
+      - ls -l /servdata/thornotes/backups
+
+  - name: discord-safety-failure
+    image: curlimages/curl:8.7.1
+    failure: ignore
+    environment:
+      DISCORD_WEBHOOK_URL:
+        from_secret: discord_webhook_url
+    commands:
+      - |
+        echo "webhook available: $(test -n "$DISCORD_WEBHOOK_URL" && echo yes || echo no)"
+        if [ -n "$DISCORD_WEBHOOK_URL" ]; then
+          curl -sS -X POST "$DISCORD_WEBHOOK_URL" -H "Content-Type: application/json" -d "{\"embeds\":[{\"title\":\"[safety-net] BACKUP FAILED on MAX - $DRONE_REPO\",\"url\":\"$DRONE_BUILD_LINK\",\"description\":\"The hourly safety-net backup or its restore-proof failed. Restore/manual paths: docs/operations.md; scratch evidence in this build log.\"}]}"
+        fi
+    when:
+      status:
+        - failure
+
+volumes:
+  - name: docker-sock
+    host:
+      path: /var/run/docker.sock
+  - name: backups
+    host:
+      path: /servdata/thornotes/backups
+
