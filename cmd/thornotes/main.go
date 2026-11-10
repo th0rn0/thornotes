@@ -179,7 +179,7 @@ func main() {
 		log.Error().Err(err).Msg("sub static fs")
 		os.Exit(1)
 	}
-	h := router.New(authSvc, notesSvc, apiTokenRepo, userRepo, rateLimiter, tmpl, http.FS(staticSub), notifyHub, cfg.SecureCookies, cfg.EnableGitHistory, pool, sseShutdown)
+	h := router.New(authSvc, notesSvc, apiTokenRepo, userRepo, rateLimiter, tmpl, http.FS(staticSub), notifyHub, cfg.SecureCookies, cfg.EnableGitHistory, pool, sseShutdown, Version)
 
 	srv := &http.Server{
 		Addr:         cfg.Addr,

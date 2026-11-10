@@ -81,7 +81,7 @@ func newTestClientWithRegistration(t *testing.T, allowRegistration bool) *testCl
 	staticSub, err := iofs.Sub(thornotes.StaticFS, "web/static")
 	require.NoError(t, err)
 
-	h := router.New(authSvc, notesSvc, apiTokenRepo, userRepo, rateLimiter, tmpl, http.FS(staticSub), hub.New(), false, false, &stubDBHealth{}, context.Background())
+	h := router.New(authSvc, notesSvc, apiTokenRepo, userRepo, rateLimiter, tmpl, http.FS(staticSub), hub.New(), false, false, &stubDBHealth{}, context.Background(), "test")
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
 
@@ -1650,7 +1650,7 @@ func newTestClientGit(t *testing.T) *testClient {
 	staticSub, err := iofs.Sub(thornotes.StaticFS, "web/static")
 	require.NoError(t, err)
 
-	h := router.New(authSvc, notesSvc, apiTokenRepo, userRepo, rateLimiter, tmpl, http.FS(staticSub), hub.New(), false, true, &stubDBHealth{}, context.Background())
+	h := router.New(authSvc, notesSvc, apiTokenRepo, userRepo, rateLimiter, tmpl, http.FS(staticSub), hub.New(), false, true, &stubDBHealth{}, context.Background(), "test")
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
 

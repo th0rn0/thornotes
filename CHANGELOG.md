@@ -4,6 +4,8 @@ All notable changes to thornotes are documented here.
 
 ## Unreleased
 
+- **`/healthz` reports which build is running.** The response gains a `build.version` field carrying the commit the binary was built from — CI already stamped it as `main.Version`, but nothing over HTTP exposed it, so answering "did the deploy land?" meant comparing front-end asset digests. That digest hashes the assets, not the commit: three consecutive releases that touch no JavaScript serve byte-identical digests and cannot be told apart. An unstamped build reports `dev`, an empty stamp reports `unknown`, and the field never affects the status code.
+
 ### Added
 - **Download a note or a folder as a zip.** `GET /api/v1/notes/:id/zip` returns a one-entry archive; `GET /api/v1/folders/:id/zip` returns the folder's subtree rooted at a directory named after the folder, so the archive re-imports as that folder instead of as a bag of files. Entries are sorted by archive path and each note entry's modified time is its `updated_at`, so exporting the same tree twice produces the same entries in the same order. Entry names are sanitised to `[A-Za-z0-9 ._-]` (a title containing `/` stays one entry) with `-2`/`-3` suffixes on collision. Notes stream from disk one file at a time — no temp file, no whole-vault buffer. A note or folder that is not the caller's and one that does not exist both answer `404` with the same body. If a note row has outlived its file, the entry is omitted and `_export-report.txt` in the archive lists it, so a short archive is never silent.
 

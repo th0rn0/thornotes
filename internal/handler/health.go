@@ -30,9 +30,10 @@ type SchemaReporter interface {
 }
 
 type HealthHandler struct {
-	db     DBHealthChecker
-	notes  NotesRootHealthChecker
-	schema SchemaReporter
+	db      DBHealthChecker
+	notes   NotesRootHealthChecker
+	schema  SchemaReporter
+	version string
 }
 
 // HealthOption configures optional readiness checks.
@@ -43,6 +44,18 @@ type HealthOption func(*HealthHandler)
 // working unchanged.
 func WithNotesRootChecker(c NotesRootHealthChecker) HealthOption {
 	return func(h *HealthHandler) { h.notes = c }
+}
+
+// WithBuildVersion adds the build block to /healthz: the version string injected
+// at build time (CI passes the commit SHA, a local build leaves "dev").
+//
+// It exists because nothing unauthenticated could previously say which commit a
+// running instance was serving. The front-end asset digest is a hash of the
+// assets, so three consecutive merges that touch no JS serve byte-identical
+// digests — it cannot distinguish them, and reading it as proof of a deployment
+// is how a verification turns into a guess.
+func WithBuildVersion(version string) HealthOption {
+	return func(h *HealthHandler) { h.version = version }
 }
 
 // WithSchemaReporter adds the schema block to /healthz. Without it the endpoint
@@ -96,6 +109,13 @@ func (h *HealthHandler) Check(c *gin.Context) {
 	// The schema block lets an operator compare a running instance against an
 	// image before deploying it. It never affects the status code: a database
 	// ahead of the binary exits at startup, so it cannot be reported here.
+	// The build block is never empty: an unstamped build reports "unknown" rather
+	// than an empty string, so a caller cannot mistake "dev" for a real version.
+	build := h.version
+	if build == "" {
+		build = "unknown"
+	}
+	resp["build"] = gin.H{"version": build}
 	if h.schema != nil {
 		version, maxSupported := h.schema.SchemaStatus()
 		resp["schema"] = gin.H{
