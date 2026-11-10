@@ -10,7 +10,14 @@ import (
 
 // gettingStartedContent is the default welcome note created for new users.
 // Update this when new markdown-file features are added.
-const gettingStartedContent = `# Welcome to thornotes
+//
+// The first line states the note's title, and it must: the app writes a rename
+// into the file's "# H1" and reconcile treats a heading the app did not write
+// as the title the file states (ticket N7). A seed whose heading said anything
+// other than "Getting Started" would retitle its own welcome note on the first
+// pass after a fresh install — visibly, with a from/to log line — which is not
+// how a new vault should greet anyone.
+const gettingStartedContent = `# Getting Started
 
 thornotes is a self-hosted markdown note-taking app. Every note is a real ` + "`" + `.md` + "`" + ` file on disk — your notes are always yours.
 

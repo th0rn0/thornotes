@@ -93,7 +93,11 @@ func TestP0_H05_PatchNote_ContentAndTags_PersistsBoth(t *testing.T) {
 	defer getResp4.Body.Close()
 	var afterMetaOnly map[string]any
 	require.NoError(t, json.NewDecoder(getResp4.Body).Decode(&afterMetaOnly))
-	assert.Equal(t, "# Second Save\n\nContent-only autosave.", afterMetaOnly["content"])
+	// The rename rewrote the body's "# H1" as well as the title (ticket N7):
+	// the two are one fact, and writing only the row is what let a rename be
+	// undone by the next reconcile pass. Everything else about the body — the
+	// prose the content-only save wrote — is untouched.
+	assert.Equal(t, "# Renamed Combined Note\n\nContent-only autosave.", afterMetaOnly["content"])
 	assert.Equal(t, "Renamed Combined Note", afterMetaOnly["title"])
 	assert.Equal(t, []any{"meta-only"}, afterMetaOnly["tags"])
 }
@@ -133,6 +137,50 @@ func TestP0_H05_PatchNote_ContentTitleAndTags_PersistsAllAndReturnsHashSlugTitle
 	assert.Equal(t, "Brand New Title", updated["title"])
 	assert.Equal(t, "brand-new-title", updated["slug"])
 	assert.Equal(t, []any{"t1", "t2"}, updated["tags"])
+}
+
+func TestP0_H05_PatchNote_ContentTitleAndHeading_StaysConsistent(t *testing.T) {
+	c := newTestClient(t)
+	c.registerAndLogin(t)
+
+	id := createNoteHelper(t, c, "Initial Title")
+
+	// Give the note a body that states its title, as a real note does.
+	getResp1 := c.do(t, http.MethodGet, "/api/v1/notes/"+i64str(id), nil)
+	var initial map[string]any
+	require.NoError(t, json.NewDecoder(getResp1.Body).Decode(&initial))
+	getResp1.Body.Close()
+	setBody := c.do(t, http.MethodPatch, "/api/v1/notes/"+i64str(id), map[string]any{
+		"content":      "# Initial Title\n\nfirst draft",
+		"content_hash": initial["content_hash"].(string),
+	})
+	var setBodyData map[string]any
+	require.NoError(t, json.NewDecoder(setBody.Body).Decode(&setBodyData))
+	setBody.Body.Close()
+	require.Equal(t, http.StatusOK, setBody.StatusCode)
+
+	// One PATCH carrying both: the client's content still states the old
+	// heading, and it is the title that changed. Neither half may undo the
+	// other — the row, the file's heading and the body all end up agreeing.
+	patchResp := c.do(t, http.MethodPatch, "/api/v1/notes/"+i64str(id), map[string]any{
+		"content":      "# Initial Title\n\nsecond draft",
+		"content_hash": setBodyData["content_hash"].(string),
+		"title":        "Brand New Title",
+		"tags":         []string{"combined"},
+	})
+	defer patchResp.Body.Close()
+	require.Equal(t, http.StatusOK, patchResp.StatusCode,
+		"a rename that also carries content must not answer 409: the metadata half commits a new body")
+
+	getResp2 := c.do(t, http.MethodGet, "/api/v1/notes/"+i64str(id), nil)
+	defer getResp2.Body.Close()
+	var updated map[string]any
+	require.NoError(t, json.NewDecoder(getResp2.Body).Decode(&updated))
+	assert.Equal(t, "Brand New Title", updated["title"])
+	assert.Equal(t, "brand-new-title", updated["slug"])
+	assert.Equal(t, "# Brand New Title\n\nsecond draft", updated["content"],
+		"the saved body states the new title, so no reconcile pass can revert the rename")
+	assert.Equal(t, []any{"combined"}, updated["tags"])
 }
 
 func TestP0_H05_PatchNote_StaleContentHash_DoesNotMutateTagsOrTitle(t *testing.T) {

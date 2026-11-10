@@ -186,6 +186,10 @@ func TestUpdateNoteContent_ConcurrentSavesConverge(t *testing.T) {
 //
 // We simulate the DB failure by closing the DB pool just before the metadata
 // update lands. The file rename must be undone.
+//
+// A rename also rewrites the file's "# H1" (ticket N7), so a failed commit has
+// two disk effects to undo, not one: the note below states a heading, and both
+// its path and its bytes must be back to what they were.
 func TestUpdateNoteMetadata_RollsBackRenameOnDBFailure(t *testing.T) {
 	st := newTestStackFull(t)
 	ctx := context.Background()
@@ -193,6 +197,11 @@ func TestUpdateNoteMetadata_RollsBackRenameOnDBFailure(t *testing.T) {
 	n, err := st.svc.CreateNote(ctx, st.userID, st.user.UUID, nil, "Original Title", nil)
 	require.NoError(t, err)
 	oldDiskPath := filepath.Join(st.notesDir, n.DiskPath)
+
+	// A note whose body states the title: the rename rewrites this heading.
+	const originalContent = "# Original Title\n\nbody that must survive"
+	_, err = st.svc.UpdateNoteContent(ctx, st.userID, n.ID, originalContent, n.ContentHash)
+	require.NoError(t, err)
 
 	// Force the DB Update to fail.
 	st.pool.WriteDB.Close()
@@ -203,4 +212,11 @@ func TestUpdateNoteMetadata_RollsBackRenameOnDBFailure(t *testing.T) {
 	// The file must NOT have moved — it should still be at the original disk_path.
 	_, statErr := os.Stat(oldDiskPath)
 	assert.NoError(t, statErr, "file must be rolled back to original disk_path after DB failure")
+
+	// And the heading rewrite must be undone with it: the row still says
+	// "Original Title", so a file stating "New Title" would be the divergence
+	// this ticket exists to remove.
+	restored, readErr := os.ReadFile(oldDiskPath)
+	require.NoError(t, readErr)
+	assert.Equal(t, originalContent, string(restored), "heading rewrite must be rolled back with the rename")
 }

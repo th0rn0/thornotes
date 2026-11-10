@@ -28,7 +28,7 @@ func (s *Service) createNoteWithSlug(ctx context.Context, userID int64, userUUID
 	// Shared tree lock: creating a file is a path write, so it must not
 	// interleave with a subtree rename that is rewriting the same directory.
 	defer s.lockTreeShared(userID)()
-	if len(title) == 0 || len(title) > 500 {
+	if len(title) == 0 || len(title) > maxTitleLen {
 		return nil, apperror.BadRequest("title must be 1–500 characters")
 	}
 	if slug == "" {
@@ -187,10 +187,25 @@ func (s *Service) UpdateNoteContent(ctx context.Context, userID, noteID int64, c
 }
 
 // UpdateNoteMetadata updates the title and/or tags of a note.
+//
+// A title is one fact written down in two places: the row's title (the sidebar
+// label, the [[wikilink]] target, the indexed column) and the file's "# H1"
+// (what the file states, which reconcile treats as authoritative for a heading
+// it did not write — ticket N7). A rename therefore writes both: the heading is
+// rewritten with RetitleHeading and committed in the same statement as the
+// title, under the note lock. Writing only the row is what made a rename
+// survive until the next reconcile pass and then be undone by it.
+//
 // When the title changes the slug is recomputed; if the slug differs the note
 // file is renamed on disk and disk_path is updated in the DB. If the DB update
-// fails after the disk rename, the rename is rolled back so disk and DB stay
-// in sync.
+// fails after the disk rename (or the heading rewrite), both are rolled back so
+// disk and DB stay in sync. A body that states no heading is left alone: no
+// heading means no opinion, and the row's title is the only place that fact is
+// written.
+//
+// The heading is rewritten from the file, not from the row, so an edit an
+// external editor made since the last reconcile pass is carried through the
+// rename instead of being overwritten by the row's older copy.
 func (s *Service) UpdateNoteMetadata(ctx context.Context, userID int64, userUUID string, noteID int64, title string, tags []string) error {
 	defer s.lockTreeShared(userID)()
 	mu := s.lockNote(noteID)
@@ -202,9 +217,17 @@ func (s *Service) UpdateNoteMetadata(ctx context.Context, userID int64, userUUID
 		return err
 	}
 	oldTitle := note.Title
-	renamed := false
+	oldContent := note.Content
 	oldDiskPath := note.DiskPath
+	renamed := false
+	rewriteBody := false
 	if title != "" && title != note.Title {
+		// The create path rejects this length, and the heading may not state
+		// more than headingTitle will read back, so a title that could not
+		// survive the round trip is refused rather than truncated.
+		if len(title) > maxTitleLen {
+			return apperror.BadRequest("title must be 1–500 characters")
+		}
 		newSlug := slugify(title)
 		if newSlug != note.Slug {
 			if existing, err := s.notes.GetByFolderAndSlug(ctx, userID, note.FolderID, newSlug); err == nil && existing.ID != note.ID {
@@ -233,16 +256,59 @@ func (s *Service) UpdateNoteMetadata(ctx context.Context, userID int64, userUUID
 		}
 		note.Title = title
 		note.TitleKey = wikilinks.NormalizeKey(title)
+		// The heading is the same fact as the row's title, so it moves with it.
+		// The base for the rewrite is the file, not the row: an external editor
+		// may have changed the body since the last reconcile pass, and writing
+		// the row's copy back would throw that edit away — the disk is the side
+		// that wins in this app, and a rename is no place to break the rule.
+		if onDisk, readErr := s.fs.Read(note.DiskPath); readErr != nil {
+			// A file we cannot read is a file we cannot rewrite without
+			// clobbering bytes we never saw. The rename goes ahead as it did
+			// before, and reconcile owns the note whose file it cannot read.
+			log.Warn().Err(readErr).Int64("note_id", noteID).Msg("rename: note file unreadable — heading left untouched")
+		} else if rewritten := RetitleHeading(onDisk, title); rewritten != onDisk {
+			oldContent = onDisk
+			note.Content = rewritten
+			note.ContentHash = HashContent(rewritten)
+			rewriteBody = true
+		} else if onDisk != note.Content {
+			// The heading did not move, but the row's body is behind the file.
+			// Commit the file's copy instead of writing the row's back over it.
+			note.Content = onDisk
+			note.ContentHash = HashContent(onDisk)
+		}
 	}
 	if tags != nil {
 		note.Tags = tags
 	}
-	if err := s.notes.Update(ctx, note); err != nil {
+
+	// rollback undoes the disk half of a metadata update that could not be
+	// committed. It runs in the reverse order of the writes above: the file goes
+	// back to its old name first, then to the bytes it had there.
+	rollback := func() {
 		if renamed {
 			if rbErr := s.fs.RenameFileExclusive(note.DiskPath, oldDiskPath); rbErr != nil {
-				log.Warn().Err(rbErr).Str("from", note.DiskPath).Str("to", oldDiskPath).Msg("rollback note rename after failed db update")
+				log.Warn().Err(rbErr).Str("from", note.DiskPath).Str("to", oldDiskPath).Msg("rollback note rename after failed metadata update")
 			}
 		}
+		if rewriteBody {
+			if wErr := s.fs.Write(oldDiskPath, oldContent); wErr != nil {
+				log.Warn().Err(wErr).Str("path", oldDiskPath).Msg("rollback note heading after failed metadata update")
+			}
+		}
+	}
+
+	if rewriteBody {
+		if err := s.fs.Write(note.DiskPath, note.Content); err != nil {
+			rollback()
+			return apperror.Internal("write note heading", err)
+		}
+	}
+
+	// One statement: the row's title, slug, path and body move together, so no
+	// reader can observe a row whose title and heading disagree.
+	if err := s.notes.UpdateMetadataAndContent(ctx, note); err != nil {
+		rollback()
 		return err
 	}
 

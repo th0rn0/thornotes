@@ -16,19 +16,28 @@ package notes_test
 //   - a converged title costs nothing on the next pass — the content_hash fast
 //     path is untouched and no title is rewritten when it already matches.
 //
+// The write path is the other half of the same rule, and the tests below cover
+// it too: a rename in the app writes the title into the file's "# H1" as well
+// as the row, so the convergence above only ever fires for a heading edited
+// outside the app. Without that, every rename would be undone by the next pass
+// — the heading would still state the old title, and the pass would adopt it.
+//
 // The MySQL leg runs whenever THORNOTES_TEST_MYSQL_DSN is set (as in CI) and
 // skips otherwise; THORNOTES_REQUIRE_MYSQL=1 turns that skip into a failure.
 
 import (
 	"context"
 	"database/sql"
+	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/th0rn0/thornotes/internal/apperror"
 	"github.com/th0rn0/thornotes/internal/db"
 	"github.com/th0rn0/thornotes/internal/dbtest"
 	"github.com/th0rn0/thornotes/internal/model"
@@ -252,6 +261,159 @@ func titleRepairCases() []titleRepairCase {
 			assert.Equal(t, n.Slug, got.Slug)
 			assert.Equal(t, n.DiskPath, got.DiskPath)
 			require.FileExists(t, filepath.Join(st.notesDir, n.DiskPath))
+		}},
+
+		{"a rename through the metadata path is not undone by the next pass", func(t *testing.T, st *titleStack) {
+			ctx := context.Background()
+			n, err := st.svc.CreateNote(ctx, st.userID, st.user.UUID, nil, "Original Title", nil)
+			require.NoError(t, err)
+			_, err = st.svc.UpdateNoteContent(ctx, st.userID, n.ID, "# Original Title\n\nbody text", n.ContentHash)
+			require.NoError(t, err)
+
+			// Exactly what the UI does when a person retypes the title: PATCH
+			// the note with a title and tags, and no content.
+			require.NoError(t, st.svc.UpdateNoteMetadata(ctx, st.userID, st.user.UUID, n.ID, "Renamed By User", []string{}))
+
+			renamed, err := st.svc.GetNote(ctx, st.userID, n.ID)
+			require.NoError(t, err)
+			require.Equal(t, "Renamed By User", renamed.Title)
+			require.Equal(t, "renamed-by-user", renamed.Slug)
+			assert.Equal(t, "# Renamed By User\n\nbody text", readNoteFile(t, st, renamed.DiskPath),
+				"a rename is written to the file's heading, not only to the row")
+
+			// The pass that used to revert it: the heading now states the new
+			// title, so there is nothing for it to repair.
+			changed, err := st.svc.Reconcile(ctx, st.user)
+			require.NoError(t, err)
+			assert.Zero(t, changed, "a UI rename must leave the reconcile pass nothing to repair")
+
+			after, err := st.svc.GetNote(ctx, st.userID, n.ID)
+			require.NoError(t, err)
+			assert.Equal(t, "Renamed By User", after.Title, "the person's rename must survive the pass")
+			assert.Equal(t, wikilinks.NormalizeKey("Renamed By User"), after.TitleKey)
+			assert.Equal(t, "renamed-by-user", after.Slug)
+			assert.Equal(t, renamed.ContentHash, after.ContentHash, "the heading rewrite is committed with the title")
+			assert.Equal(t, "# Renamed By User\n\nbody text", after.Content)
+		}},
+
+		{"a rename overwrites a heading that had drifted from the title", func(t *testing.T, st *titleStack) {
+			ctx := context.Background()
+			n, err := st.svc.CreateNote(ctx, st.userID, st.user.UUID, nil, "Sidebar Title", nil)
+			require.NoError(t, err)
+			// The state an editor save leaves behind: the body states a heading
+			// the row's title does not match yet.
+			_, err = st.svc.UpdateNoteContent(ctx, st.userID, n.ID, "# Something Else\n\nbody text", n.ContentHash)
+			require.NoError(t, err)
+
+			require.NoError(t, st.svc.UpdateNoteMetadata(ctx, st.userID, st.user.UUID, n.ID, "Person Chose This", nil))
+
+			// A rename states the title in both places, so the drift is gone
+			// rather than waiting for a pass to pick a winner.
+			moved, err := st.svc.GetNote(ctx, st.userID, n.ID)
+			require.NoError(t, err)
+			assert.Equal(t, "person-chose-this", moved.Slug)
+			assert.Equal(t, "# Person Chose This\n\nbody text", readNoteFile(t, st, moved.DiskPath))
+
+			changed, err := st.svc.Reconcile(ctx, st.user)
+			require.NoError(t, err)
+			assert.Zero(t, changed)
+
+			after, err := st.svc.GetNote(ctx, st.userID, n.ID)
+			require.NoError(t, err)
+			assert.Equal(t, "Person Chose This", after.Title)
+		}},
+
+		{"a rename does not discard an edit the row has not seen yet", func(t *testing.T, st *titleStack) {
+			ctx := context.Background()
+			n, err := st.svc.CreateNote(ctx, st.userID, st.user.UUID, nil, "Original Title", nil)
+			require.NoError(t, err)
+			_, err = st.svc.UpdateNoteContent(ctx, st.userID, n.ID, "# Original Title\n\nfirst draft", n.ContentHash)
+			require.NoError(t, err)
+
+			// An external editor saves between two watch ticks: the file moves,
+			// the row does not. A rename in that window must rewrite the
+			// heading of what is on disk, not resurrect the row's copy over it.
+			writeNoteFile(t, st, n.DiskPath, "# Original Title\n\nsecond draft from vim")
+			require.NoError(t, st.svc.UpdateNoteMetadata(ctx, st.userID, st.user.UUID, n.ID, "Renamed By User", nil))
+
+			got, err := st.svc.GetNote(ctx, st.userID, n.ID)
+			require.NoError(t, err)
+			assert.Equal(t, "# Renamed By User\n\nsecond draft from vim", readNoteFile(t, st, got.DiskPath),
+				"the external edit survives the rename")
+			assert.Equal(t, "# Renamed By User\n\nsecond draft from vim", got.Content,
+				"and the row catches up with the file it just rewrote")
+
+			changed, err := st.svc.Reconcile(ctx, st.user)
+			require.NoError(t, err)
+			assert.Zero(t, changed)
+		}},
+
+		{"a rename of a note with no heading writes no heading", func(t *testing.T, st *titleStack) {
+			ctx := context.Background()
+			n, err := st.svc.CreateNote(ctx, st.userID, st.user.UUID, nil, "Original Title", nil)
+			require.NoError(t, err)
+
+			require.NoError(t, st.svc.UpdateNoteMetadata(ctx, st.userID, st.user.UUID, n.ID, "Renamed By User", nil))
+
+			got, err := st.svc.GetNote(ctx, st.userID, n.ID)
+			require.NoError(t, err)
+			assert.Equal(t, "Renamed By User", got.Title)
+			assert.Equal(t, "", got.Content, "a note that states no heading is not given one by a rename")
+			assert.Equal(t, "", readNoteFile(t, st, got.DiskPath))
+
+			changed, err := st.svc.Reconcile(ctx, st.user)
+			require.NoError(t, err)
+			assert.Zero(t, changed)
+		}},
+
+		{"a rejected rename leaves the heading alone", func(t *testing.T, st *titleStack) {
+			ctx := context.Background()
+			alpha, err := st.svc.CreateNote(ctx, st.userID, st.user.UUID, nil, "Alpha", nil)
+			require.NoError(t, err)
+			_, err = st.svc.UpdateNoteContent(ctx, st.userID, alpha.ID, "# Alpha\n\nalpha body", alpha.ContentHash)
+			require.NoError(t, err)
+			beta, err := st.svc.CreateNote(ctx, st.userID, st.user.UUID, nil, "Beta", nil)
+			require.NoError(t, err)
+			_, err = st.svc.UpdateNoteContent(ctx, st.userID, beta.ID, "# Beta\n\nbeta body", beta.ContentHash)
+			require.NoError(t, err)
+
+			// Beta's new slug collides with alpha's, so the rename is refused.
+			err = st.svc.UpdateNoteMetadata(ctx, st.userID, st.user.UUID, beta.ID, "Alpha", nil)
+			require.Error(t, err)
+			require.True(t, apperror.IsConflict(err), "expected 409 conflict, got %v", err)
+
+			got, err := st.svc.GetNote(ctx, st.userID, beta.ID)
+			require.NoError(t, err)
+			assert.Equal(t, "Beta", got.Title)
+			assert.Equal(t, "# Beta\n\nbeta body", readNoteFile(t, st, beta.DiskPath),
+				"a refused rename must not leave the new title in the file's heading")
+			assert.Equal(t, "# Alpha\n\nalpha body", readNoteFile(t, st, alpha.DiskPath))
+
+			changed, err := st.svc.Reconcile(ctx, st.user)
+			require.NoError(t, err)
+			assert.Zero(t, changed, "both files still state their own titles")
+		}},
+
+		{"a title that cannot fit in a heading is refused rather than truncated", func(t *testing.T, st *titleStack) {
+			ctx := context.Background()
+			n, err := st.svc.CreateNote(ctx, st.userID, st.user.UUID, nil, "Original Title", nil)
+			require.NoError(t, err)
+			_, err = st.svc.UpdateNoteContent(ctx, st.userID, n.ID, "# Original Title\n\nbody", n.ContentHash)
+			require.NoError(t, err)
+
+			// headingTitle caps a heading at 500 characters, so a longer title
+			// could never survive the round trip through the file.
+			long := strings.Repeat("x", 501)
+			err = st.svc.UpdateNoteMetadata(ctx, st.userID, st.user.UUID, n.ID, long, nil)
+			require.Error(t, err)
+			var appErr *apperror.AppError
+			require.ErrorAs(t, err, &appErr)
+			assert.Equal(t, http.StatusBadRequest, appErr.Code, "expected 400, got %v", err)
+
+			got, err := st.svc.GetNote(ctx, st.userID, n.ID)
+			require.NoError(t, err)
+			assert.Equal(t, "Original Title", got.Title)
+			assert.Equal(t, "# Original Title\n\nbody", readNoteFile(t, st, got.DiskPath))
 		}},
 
 		{"search finds the note by the title the file states", func(t *testing.T, st *titleStack) {

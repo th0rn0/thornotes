@@ -396,6 +396,12 @@ func (s *Service) reconcileUserFromDisk(ctx context.Context, user *model.User) (
 	// converged, so an external edit of the "# H1" left the row describing a
 	// heading the file no longer had, and the link graph pointing at it (N7).
 	//
+	// This is the repair for a heading that changed *outside* the app. A rename
+	// in the app is not repaired here, it is written in both places at once:
+	// UpdateNoteMetadata rewrites the file's H1 (RetitleHeading) and the row's
+	// title in the same commit, so the two cannot disagree by any UI action and
+	// a person's rename is never undone by this pass.
+	//
 	// The repair is deliberately DB-only. The filename is the disk's business:
 	// slug is the file's stem by definition (the journal flow picks names like
 	// "06 - Tuesday" that no title would derive), so nothing here renames a
@@ -631,30 +637,6 @@ func (s *Service) walkUserTree(userUUID string) (diskTree, error) {
 		return tree, walkErr
 	}
 	return tree, nil
-}
-
-// headingTitle returns the first markdown H1 ("# Heading") line in content.
-//
-// ok is false when the content states no heading at all, which is not the same
-// as stating an empty one: a caller that treats "no heading" as "the title is
-// the filename" would overwrite the human title of every note that has no body
-// yet.
-func headingTitle(content string) (string, bool) {
-	for _, line := range strings.SplitN(content, "\n", 16) {
-		trimmed := strings.TrimSpace(line)
-		if !strings.HasPrefix(trimmed, "# ") {
-			continue
-		}
-		title := strings.TrimSpace(strings.TrimPrefix(trimmed, "#"))
-		if title == "" {
-			continue
-		}
-		if len(title) > 500 {
-			title = title[:500]
-		}
-		return title, true
-	}
-	return "", false
 }
 
 // deriveTitle returns the first markdown H1 ("# Heading") line in content,

@@ -71,6 +71,12 @@ type NoteRepository interface {
 	// Results are ordered newest-first (updated_at DESC) for truncation priority.
 	ListForContext(ctx context.Context, userID int64, folderID *int64) ([]*model.Note, error)
 	Update(ctx context.Context, n *model.Note) error
+	// UpdateMetadataAndContent writes the note's metadata AND its body in one
+	// statement. UpdateNoteMetadata needs that: a title change rewrites the
+	// file's "# H1", so the row's title, slug, path and body all move together,
+	// and two statements would leave a window in which the row's title and its
+	// content disagree — the divergence ticket 467 is about.
+	UpdateMetadataAndContent(ctx context.Context, n *model.Note) error
 	UpdateContent(ctx context.Context, userID, noteID int64, content, contentHash, expectedHash string) error
 	// SetTitle repairs a note's title and its normalized title key without
 	// touching slug, disk_path, content or tags. It exists for the reconciler,

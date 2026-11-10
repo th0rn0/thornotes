@@ -20,6 +20,12 @@ import (
 // IDs may collide but the contention is bounded and harmless.
 const noteLockStripes = 64
 
+// maxTitleLen bounds a note's title. A title is a label, an indexed column and
+// a [[wikilink]] target, and it is also written into the file's "# H1", so the
+// create and rename paths must agree on what fits: a title the heading reader
+// would truncate could never survive the round trip through the file.
+const maxTitleLen = 500
+
 // Default reconcile deletion guard. The circuit breaker is a second net behind
 // the mount precondition: a partial wipe (half a tree unmounted, a bad rsync)
 // shows up as a burst of deletions rather than an empty root, and the pass must

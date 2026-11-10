@@ -208,6 +208,39 @@ func (r *NoteRepo) Update(ctx context.Context, n *model.Note) error {
 	return nil
 }
 
+// UpdateMetadataAndContent writes the note's metadata and its body in one
+// statement. UpdateNoteMetadata needs that: a title change rewrites the file's
+// "# H1" (so the body moves too), and the row must not be observable in a state
+// where the title and the heading it was derived from disagree.
+func (r *NoteRepo) UpdateMetadataAndContent(ctx context.Context, n *model.Note) error {
+	tagsJSON, err := json.Marshal(n.Tags)
+	if err != nil {
+		return fmt.Errorf("marshal tags: %w", err)
+	}
+
+	// Same-value saves are success: the row matched, it just did not change
+	// (see Update, which documents the same tie-breaker).
+	matched, err := updateScoped(ctx, r.db, `
+		UPDATE notes SET title = ?, slug = ?, title_key = ?, disk_path = ?, tags = ?,
+		       content = ?, content_hash = ?, fts_synced_at = NULL, updated_at = UTC_TIMESTAMP()
+		WHERE id = ? AND user_id = ?`,
+		[]any{n.Title, n.Slug, n.TitleKey, n.DiskPath, string(tagsJSON),
+			n.Content, n.ContentHash, n.ID, n.UserID},
+		`SELECT EXISTS(SELECT 1 FROM notes WHERE id = ? AND user_id = ?)`,
+		[]any{n.ID, n.UserID},
+	)
+	if err != nil {
+		if isUniqueConstraint(err) {
+			return apperror.Conflict(fmt.Sprintf("note %q already exists in this folder", n.Title))
+		}
+		return fmt.Errorf("update note: %w", err)
+	}
+	if !matched {
+		return apperror.ErrNotFound
+	}
+	return nil
+}
+
 func (r *NoteRepo) UpdateContent(ctx context.Context, userID, noteID int64, content, contentHash, expectedHash string) error {
 	// The CAS predicate includes content_hash, so it must be the existence check
 	// too: a row that matched on (id, user_id, content_hash) but changed no
