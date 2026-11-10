@@ -49,10 +49,12 @@ func (r *SearchRepo) Search(ctx context.Context, userID int64, query string, tag
 	// tags array with JSON_TABLE, so every tag gets a row of its own to match.
 	// Filtering several tags on one unnested row (the pre-452 shape) can only
 	// ever be satisfied by a note whose tags array holds a single value.
-	// The comparison is forced to utf8mb4_bin because the column's default
-	// collation is case-insensitive and a tag is an exact value in the contract.
+	// Collation is pinned explicitly rather than inherited. Tags match
+	// case-insensitively (`#Home` == `#home`, Thorno's call 2026-11-09), and
+	// naming general_ci keeps that true whatever the server's default is --
+	// utf8mb4_bin here would silently make matching exact again.
 	for _, tag := range tags {
-		where = append(where, `EXISTS (SELECT 1 FROM JSON_TABLE(n.tags, '$[*]' COLUMNS (tag_val VARCHAR(255) PATH '$')) AS jt WHERE jt.tag_val COLLATE utf8mb4_bin = ?)`)
+		where = append(where, `EXISTS (SELECT 1 FROM JSON_TABLE(n.tags, '$[*]' COLUMNS (tag_val VARCHAR(255) PATH '$')) AS jt WHERE jt.tag_val COLLATE utf8mb4_general_ci = ?)`)
 		args = append(args, tag)
 	}
 

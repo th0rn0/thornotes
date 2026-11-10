@@ -255,7 +255,7 @@ Tags let you cross-reference notes across folders. A note in `work/projects/` ca
 
 Click the **Search** icon or use the search box at the top of the sidebar. Search runs across note titles and full content. Results show the matching snippet and the folder path for context.
 
-Every word you type must appear in the note, and every tag you filter on must be on the note — two words are an AND, not an OR, and two tags mean "tagged with both". Tag matching is exact and case-sensitive: `#Home` and `#home` are different tags, and `%`/`_` in a tag are ordinary characters.
+Every word you type must appear in the note, and every tag you filter on must be on the note — two words are an AND, not an OR, and two tags mean "tagged with both". Tag matching ignores case, so `#Home` and `#home` find the same notes; `%` and `_` in a tag are ordinary characters, not wildcards. A note may still store `Home` and `home` as two separate tags — search treats them alike, the tag list does not merge them.
 
 The snippet is an excerpt of the note centred on the first match, with `<mark>…</mark>` around each occurrence and `…` where text was trimmed, and it is the same on every database backend. The UI HTML-escapes the snippet before rendering, so the markers appear as literal text; that escaping is deliberate: the snippet comes from author-controlled note content, and rendering it unescaped would hand a note author an XSS primitive.
 

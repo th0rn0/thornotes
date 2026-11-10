@@ -90,14 +90,18 @@ func (r *SearchRepo) Search(ctx context.Context, userID int64, query string, tag
 		return nil, nil
 	}
 
-	// Tags are AND. One correlated EXISTS per tag: each subquery unnests the
-	// note's own tags array, so every tag gets a row of its own to match.
+	// Tags are AND, and tag matching is case-insensitive: `#Home` and `#home`
+	// are the same tag for query purposes (Thorno's call, 2026-11-09). NOCASE is
+	// ASCII-only in SQLite, which is why the comparison is spelled out here
+	// rather than left to the default BINARY collation.
+	// One correlated EXISTS per tag: each subquery unnests the note's own tags
+	// array, so every tag gets a row of its own to match.
 	// Filtering several tags on one unnested row (the pre-452 shape) can only
 	// ever be satisfied by a note whose tags array holds a single value.
 	where := []string{"fts.rowid = n.id", "n.user_id = ?"}
 	args := []any{match, userID}
 	for _, tag := range tags {
-		where = append(where, `EXISTS (SELECT 1 FROM json_each(n.tags) WHERE json_each.value = ?)`)
+		where = append(where, `EXISTS (SELECT 1 FROM json_each(n.tags) WHERE json_each.value COLLATE NOCASE = ?)`)
 		args = append(args, tag)
 	}
 
