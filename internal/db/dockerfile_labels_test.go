@@ -103,21 +103,24 @@ func TestDrone_PublishGateCeilingMatchesMigrations(t *testing.T) {
 
 	drone := readRepoFile(t, ".drone.yml")
 	maxRe := regexp.MustCompile(`--max[= ]([0-9]+)\b`)
-	gates := 0
-	ceiling := -1
+	gates, probes := 0, 0
 	for _, line := range drone {
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmed, "#") || !strings.Contains(trimmed, "scripts/schema-publish-gate.sh") {
 			continue
 		}
 		m := maxRe.FindStringSubmatch(trimmed)
-		require.NotNil(t, m, "schema-publish-gate step must pass an explicit --max: %q", trimmed)
+		require.NotNil(t, m, "every schema-publish-gate.sh invocation must pass an explicit --max: %q", trimmed)
 		n, convErr := strconv.Atoi(m[1])
 		require.NoError(t, convErr)
-		ceiling = n
-		gates++
+		assert.Equal(t, mysqlMax, n,
+			".drone.yml publish-gate --max must equal the newest MySQL migration (%d); bump the invocation together with THORNOTES_SCHEMA_MAX_MYSQL", mysqlMax)
+		if strings.Contains(trimmed, "|| echo") {
+			probes++ // the informational reachability probe; its outcome is swallowed
+		} else {
+			gates++ // the step that actually gates the :latest push
+		}
 	}
-	require.Equal(t, 1, gates, ".drone.yml must invoke scripts/schema-publish-gate.sh exactly once, with --max")
-	assert.Equal(t, mysqlMax, ceiling,
-		".drone.yml publish-gate --max must equal the newest MySQL migration (%d); bump the gate step together with THORNOTES_SCHEMA_MAX_MYSQL", mysqlMax)
+	require.Equal(t, 1, gates, ".drone.yml must gate the publish with exactly one scripts/schema-publish-gate.sh step (an invocation without || echo)")
+	require.LessOrEqual(t, probes, 1, "at most one informational reachability probe is expected")
 }

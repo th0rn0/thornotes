@@ -47,6 +47,11 @@ steps:
     commands:
       - apk add -q --no-cache curl python3
       - sh scripts/schema-publish-gate.test.sh
+      # Reachability proof (ticket 604): run the real gate against production
+      # from inside a pipeline container — but never let it gate a PR build.
+      # The `|| echo` swallows every outcome; only the schema-publish-gate
+      # step below (main pushes) actually gates.
+      - 'sh scripts/schema-publish-gate.sh --url https://notes.th0rn0.co.uk/healthz --engine mysql --max 7 --timeout 10 || echo "schema-gate-test probe (non-gating) — production unreachable from the runner, or refusing for another reason; informational only, PR builds do not depend on production"'
 
   - name: discord-lint-success
     image: curlimages/curl:8.7.1
