@@ -163,6 +163,10 @@ func seedFixtures(t *testing.T, b *backend) (int64, map[string]int64) {
 		{Title: "Garage Stuff", Slug: "garage-stuff", Tags: []string{},
 			Content: "The body of the body copy here is a sample."},
 
+		// ── a tag stored with different case than the query ──────────────────
+		{Title: "Case Tagged", Slug: "case-tagged", Tags: []string{"Home"},
+			Content: "Nothing in this prose mentions the searched term at all; it carries a tag and says tagged."},
+
 		// ── tag values that look like LIKE patterns ──────────────────────────
 		{Title: "Percent Release", Slug: "percent-release", Tags: []string{"100%_done"},
 			Content: "Percent release checklist for the next build."},
@@ -274,10 +278,23 @@ func contractCases() []contractCase {
 			want:  nil,
 		},
 		{
-			name:  "tag case variation is an exact-value miss",
+			// Thorno's call, 2026-11-09: #Home is #home. Case never decides a match.
+			name:  "tag case variation is the same tag (query upper, stored lower)",
 			query: "body",
 			tags:  []string{"Home"},
-			want:  nil,
+			want:  homeBody,
+		},
+		{
+			name:  "tag case variation is the same tag (query lower, stored upper)",
+			query: "tagged",
+			tags:  []string{"home"},
+			want:  []string{"case-tagged"},
+		},
+		{
+			name:  "tag case variation is the same tag (both upper)",
+			query: "tagged",
+			tags:  []string{"HOME"},
+			want:  []string{"case-tagged"},
 		},
 		{
 			name:  "percent and underscore are values, not patterns",
