@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/th0rn0/thornotes/internal/model"
+	"github.com/th0rn0/thornotes/internal/repository"
 	"github.com/th0rn0/thornotes/internal/searchtext"
 )
 
@@ -54,6 +55,13 @@ func (r *SearchRepo) SyncNote(ctx context.Context, noteID int64) error {
 // text term must match, every requested tag must be carried by the note, the
 // snippet is computed in Go, and rows are ordered by relevance, then title,
 // then id.
+//
+// A term below repository.MinIndexedTerm does not go through the index even here,
+// where FTS5 would happily hold it: the rule is the application's and identical on
+// both backends, so the same query cannot return one set of notes on SQLite and
+// another on MySQL (ticket 619). Those terms are matched by the same user-scoped
+// LIKE scan MySQL uses — see repository.ShortTermPredicate — and the result is
+// that a short term matches a substring, as it does on the production backend.
 func (r *SearchRepo) Search(ctx context.Context, userID int64, query string, tags []string) ([]*model.SearchResult, error) {
 	// Sync stale notes first.
 	stale, err := r.readDB.QueryContext(ctx,
@@ -81,8 +89,20 @@ func (r *SearchRepo) Search(ctx context.Context, userID int64, query string, tag
 	// Text terms are AND. searchtext.Terms is the one splitter, so this query
 	// and the MySQL one search for exactly the same words.
 	terms := searchtext.Terms(query)
-	match := searchtext.FTSAnd(terms)
-	if match == "" {
+	if len(terms) == 0 {
+		return nil, nil
+	}
+
+	// The split is engine-independent: a term below repository.MinIndexedTerm is
+	// scanned here exactly as it is on MySQL, so the two engines agree on which
+	// notes a query returns and in which order.
+	indexed, scanned := repository.SplitSearchTerms(terms)
+	match := searchtext.FTSAnd(indexed)
+	if len(indexed) > 0 && match == "" {
+		// Defensive, for the same reason as the MySQL side: a term that could
+		// not be expressed must not be dropped, or the query widens to every
+		// note of this user. Unreachable while FTSAnd renders every non-empty
+		// term, kept so a future split cannot fail open.
 		return nil, nil
 	}
 
@@ -94,11 +114,33 @@ func (r *SearchRepo) Search(ctx context.Context, userID int64, query string, tag
 	// array, so every tag gets a row of its own to match.
 	// Filtering several tags on one unnested row (the pre-452 shape) can only
 	// ever be satisfied by a note whose tags array holds a single value.
-	where := []string{"fts.rowid = n.id", "n.user_id = ?"}
-	args := []any{match, userID}
+	where := []string{"n.user_id = ?"}
+	args := []any{userID}
+
+	// Short terms: one LIKE scan predicate each, over the same user-scoped row
+	// set. Two comparisons per row of this user's notes, no index to narrow them
+	// further — the deliberate cost of the term being findable at all.
+	for _, term := range scanned {
+		predicate, predicateArgs := repository.ShortTermPredicate(term)
+		where = append(where, predicate)
+		args = append(args, predicateArgs...)
+	}
+
 	for _, tag := range tags {
 		where = append(where, `EXISTS (SELECT 1 FROM json_each(n.tags) WHERE json_each.value COLLATE NOCASE = ?)`)
 		args = append(args, tag)
+	}
+
+	// A query of nothing but short terms never touches notes_fts: there is
+	// nothing in it that FTS5 could add, and both engines then order the same
+	// rows by title and id alone.
+	from := "notes n"
+	order := "n.title, n.id"
+	if match != "" {
+		from = "notes_fts fts JOIN notes n ON fts.rowid = n.id"
+		order = "rank, n.title, n.id"
+		where = append([]string{"notes_fts MATCH ?"}, where...)
+		args = append([]any{match}, args...)
 	}
 
 	// The snippet is built in Go by searchtext.Snippet from the note's content,
@@ -106,12 +148,10 @@ func (r *SearchRepo) Search(ctx context.Context, userID int64, query string, tag
 	// MySQL, so both engines take the same path.
 	q := fmt.Sprintf(`
 		SELECT n.id, n.title, n.slug, n.content, n.tags
-		FROM notes_fts fts
-		JOIN notes n ON fts.rowid = n.id
-		WHERE notes_fts MATCH ?
-		AND %s
-		ORDER BY rank, n.title, n.id
-		LIMIT 50`, strings.Join(where, " AND "))
+		FROM %s
+		WHERE %s
+		ORDER BY %s
+		LIMIT 50`, from, strings.Join(where, " AND "), order)
 
 	rows, err := r.readDB.QueryContext(ctx, q, args...)
 	if err != nil {
