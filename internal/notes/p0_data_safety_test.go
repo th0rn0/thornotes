@@ -117,9 +117,15 @@ func TestP0_C01_ImportCollisions_PreserveExistingNotesAndFolderTrees(t *testing.
 	ctx := context.Background()
 
 	// 1. Seed a root note and a folder with a note + subfolder note.
+	//
+	// Each body states an H1 equal to the note's title. That is not decoration:
+	// reconcile treats a stated heading as the note's title (ticket N7), so a
+	// fixture whose heading disagreed with its title would have title drift for
+	// the pass below to repair, and this test is about files and rows surviving
+	// an import collision, not about titles.
 	rootNote, err := st.svc.CreateNote(ctx, st.userID, st.user.UUID, nil, "readme", []string{"root-tag"})
 	require.NoError(t, err)
-	rootContent := "# Original Readme\n\nDo not clobber."
+	rootContent := "# readme\n\nDo not clobber."
 	rootHash, err := st.svc.UpdateNoteContent(ctx, st.userID, rootNote.ID, rootContent, rootNote.ContentHash)
 	require.NoError(t, err)
 	rootShare, err := st.svc.SetShareToken(ctx, st.userID, rootNote.ID, false)
@@ -132,7 +138,7 @@ func TestP0_C01_ImportCollisions_PreserveExistingNotesAndFolderTrees(t *testing.
 
 	workNote, err := st.svc.CreateNote(ctx, st.userID, st.user.UUID, &workFolder.ID, "todo", []string{"work-tag"})
 	require.NoError(t, err)
-	workContent := "# Original Work Todo\n\nMust survive zip import collision."
+	workContent := "# todo\n\nMust survive zip import collision."
 	workHash, err := st.svc.UpdateNoteContent(ctx, st.userID, workNote.ID, workContent, workNote.ContentHash)
 	require.NoError(t, err)
 	workShare, err := st.svc.SetShareToken(ctx, st.userID, workNote.ID, false)
@@ -140,7 +146,7 @@ func TestP0_C01_ImportCollisions_PreserveExistingNotesAndFolderTrees(t *testing.
 
 	subNote, err := st.svc.CreateNote(ctx, st.userID, st.user.UUID, &subFolder.ID, "deep", []string{"sub-tag"})
 	require.NoError(t, err)
-	subContent := "# Deep Note\n\nInside Work/Sub."
+	subContent := "# deep\n\nInside Work/Sub."
 	subHash, err := st.svc.UpdateNoteContent(ctx, st.userID, subNote.ID, subContent, subNote.ContentHash)
 	require.NoError(t, err)
 
@@ -150,9 +156,12 @@ func TestP0_C01_ImportCollisions_PreserveExistingNotesAndFolderTrees(t *testing.
 	assert.True(t, apperror.IsConflict(err))
 
 	// 3. ImportZip colliding with existing folder "Work" and note "Work/todo.md", plus adding a new note "Work/new-note.md".
+	//    The imported body's heading matches the name import gives the note, so
+	//    the only thing this pass can find is what the collision handling below
+	//    asserts it finds: nothing.
 	zipData := makeZip(t, map[string]string{
 		"Work/todo.md":     "# Clobbered by ImportZip",
-		"Work/new-note.md": "# Newly Imported Note",
+		"Work/new-note.md": "# new-note\n\nNewly imported body.",
 		"readme.md":        "# Clobbered Root by ImportZip",
 	})
 	res, err := st.svc.ImportZip(ctx, st.userID, st.user.UUID, zipData)
@@ -509,9 +518,13 @@ func TestP0_C01_MoveNote_DestinationCollision_PreservesSourceAndTarget(t *testin
 	require.NoError(t, err)
 
 	// Target note inside Destination folder.
+	//
+	// Both bodies state an H1 equal to their title for the same reason as the
+	// import-collision fixture: a stated heading is the note's title (ticket
+	// N7), and this test is about the collision, not about title drift.
 	target, err := st.svc.CreateNote(ctx, st.userID, st.user.UUID, &destFolder.ID, "Same Title", []string{"dest-tag"})
 	require.NoError(t, err)
-	targetContent := "# Target in Destination\n\nMust not be overwritten by MoveNote."
+	targetContent := "# Same Title\n\nMust not be overwritten by MoveNote."
 	targetHash, err := st.svc.UpdateNoteContent(ctx, st.userID, target.ID, targetContent, target.ContentHash)
 	require.NoError(t, err)
 	targetShare, err := st.svc.SetShareToken(ctx, st.userID, target.ID, false)
@@ -521,7 +534,7 @@ func TestP0_C01_MoveNote_DestinationCollision_PreservesSourceAndTarget(t *testin
 	// Source note at root with the same slug ("same-title").
 	source, err := st.svc.CreateNote(ctx, st.userID, st.user.UUID, nil, "Same Title", []string{"root-tag"})
 	require.NoError(t, err)
-	sourceContent := "# Source at Root\n\nMust stay at root when move conflicts."
+	sourceContent := "# Same Title\n\nMust stay at root when move conflicts."
 	sourceHash, err := st.svc.UpdateNoteContent(ctx, st.userID, source.ID, sourceContent, source.ContentHash)
 	require.NoError(t, err)
 	sourceShare, err := st.svc.SetShareToken(ctx, st.userID, source.ID, false)

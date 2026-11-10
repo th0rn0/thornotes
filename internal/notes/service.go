@@ -161,6 +161,7 @@ func (s *Service) Reconcile(ctx context.Context, user *model.User) (int, error) 
 			Int("notes_created", result.NotesCreated).
 			Int("notes_deleted", result.NotesDeleted).
 			Int("notes_updated", result.NotesUpdated).
+			Int("notes_retitled", result.NotesRetitled).
 			Int("notes_repaired", result.NotesPathRepaired).
 			Int("folders_created", result.FoldersCreated).
 			Int("folders_deleted", result.FoldersDeleted).

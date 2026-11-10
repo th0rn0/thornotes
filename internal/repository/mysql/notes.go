@@ -128,7 +128,7 @@ func scanNoteListItems(rows *sql.Rows) ([]*model.NoteListItem, error) {
 
 func (r *NoteRepo) ListAllForWatch(ctx context.Context, userID int64) ([]*model.NoteWatchRecord, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, folder_id, slug, disk_path, content_hash FROM notes WHERE user_id = ?`, userID)
+		`SELECT id, folder_id, title, slug, disk_path, content_hash FROM notes WHERE user_id = ?`, userID)
 	if err != nil {
 		return nil, fmt.Errorf("list notes for watch: %w", err)
 	}
@@ -137,7 +137,7 @@ func (r *NoteRepo) ListAllForWatch(ctx context.Context, userID int64) ([]*model.
 	var records []*model.NoteWatchRecord
 	for rows.Next() {
 		rec := &model.NoteWatchRecord{}
-		if err := rows.Scan(&rec.ID, &rec.FolderID, &rec.Slug, &rec.DiskPath, &rec.ContentHash); err != nil {
+		if err := rows.Scan(&rec.ID, &rec.FolderID, &rec.Title, &rec.Slug, &rec.DiskPath, &rec.ContentHash); err != nil {
 			return nil, err
 		}
 		records = append(records, rec)
@@ -238,6 +238,32 @@ func (r *NoteRepo) UpdateContent(ctx context.Context, userID, noteID int64, cont
 		return err
 	}
 	return apperror.ErrConflict
+}
+
+// SetTitle repairs a note's title and its normalized title key, leaving slug,
+// disk_path, content and tags alone. The reconciler calls it when the file's
+// "# H1" no longer matches the row (ticket N7); it holds no tag list to write
+// back and must not invent one, and the filename is the disk's business.
+//
+// fts_synced_at is cleared for the same reason Update and UpdateContent clear
+// it: title is indexed, and a write path that leaves the flag set after
+// changing indexed text is a trap for the next reader. Both backends agree that
+// the column means "this note's index entry is stale".
+func (r *NoteRepo) SetTitle(ctx context.Context, userID, noteID int64, title, titleKey string) error {
+	matched, err := updateScoped(ctx, r.db,
+		`UPDATE notes SET title = ?, title_key = ?, fts_synced_at = NULL, updated_at = UTC_TIMESTAMP()
+		 WHERE id = ? AND user_id = ?`,
+		[]any{title, titleKey, noteID, userID},
+		`SELECT EXISTS(SELECT 1 FROM notes WHERE id = ? AND user_id = ?)`,
+		[]any{noteID, userID},
+	)
+	if err != nil {
+		return fmt.Errorf("set title: %w", err)
+	}
+	if !matched {
+		return apperror.ErrNotFound
+	}
+	return nil
 }
 
 func (r *NoteRepo) SetTitleKey(ctx context.Context, userID, noteID int64, titleKey string) error {

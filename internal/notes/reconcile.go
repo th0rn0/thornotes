@@ -64,6 +64,12 @@ type reconcileResult struct {
 	NotesDeleted      int
 	NotesUpdated      int
 	NotesPathRepaired int
+	// NotesRetitled counts notes whose DB title was converged onto the "# H1"
+	// their file states. It is a change like any other: the sidebar label, the
+	// [[wikilink]] target and the indexed title all move, so it counts towards
+	// total() and wakes the watcher's SSE notification rather than happening
+	// invisibly.
+	NotesRetitled     int
 	FoldersCreated    int
 	FoldersDeleted    int
 	FoldersRepaired   int
@@ -72,7 +78,7 @@ type reconcileResult struct {
 
 // total returns the total number of disk-vs-DB drift events repaired.
 func (r reconcileResult) total() int {
-	return r.NotesCreated + r.NotesDeleted + r.NotesUpdated + r.NotesPathRepaired +
+	return r.NotesCreated + r.NotesDeleted + r.NotesUpdated + r.NotesPathRepaired + r.NotesRetitled +
 		r.FoldersCreated + r.FoldersDeleted + r.FoldersRepaired
 }
 
@@ -88,6 +94,10 @@ func (r reconcileResult) total() int {
 //     (e.g. parent folder was renamed and the descendant cascade failed),
 //     then DELETE if no repair is possible.
 //   - Matched pairs → hash compare; the disk wins on mismatch.
+//   - Matched pairs whose file states an "# H1" → the row's title is converged
+//     onto that heading (see step 9b). The file's name is not touched: slug is
+//     the filename stem by definition, and the disk is the side that never gets
+//     rewritten by an index pass.
 //
 // It returns the count of changes applied, plus any fatal error (transient
 // per-row errors are logged and skipped).
@@ -351,7 +361,7 @@ func (s *Service) reconcileUserFromDisk(ctx context.Context, user *model.User) (
 			continue
 		}
 		dbNotesByPath[diskPath] = &model.NoteWatchRecord{
-			ID: created.ID, FolderID: folderID, Slug: slug, DiskPath: diskPath, ContentHash: hash,
+			ID: created.ID, FolderID: folderID, Title: title, Slug: slug, DiskPath: diskPath, ContentHash: hash,
 		}
 		result.NotesCreated++
 	}
@@ -376,6 +386,54 @@ func (s *Service) reconcileUserFromDisk(ctx context.Context, user *model.User) (
 		mu.Unlock()
 		rec.ContentHash = hash
 		result.NotesUpdated++
+	}
+
+	// 9b. Converge the row's title onto the heading the file states.
+	//
+	// The DB holds the title — it is the sidebar label, the [[wikilink]] target
+	// and an indexed column — but the file states it, and the product's promise
+	// is that editing a note with anything works. Before this step only content
+	// converged, so an external edit of the "# H1" left the row describing a
+	// heading the file no longer had, and the link graph pointing at it (N7).
+	//
+	// The repair is deliberately DB-only. The filename is the disk's business:
+	// slug is the file's stem by definition (the journal flow picks names like
+	// "06 - Tuesday" that no title would derive), so nothing here renames a
+	// file, creates one, or deletes one. That also means a rename cannot collide
+	// with an existing file, and a case-only title correction is just a title
+	// write — there is no "collides with itself" case to get wrong.
+	//
+	// Only a heading the file actually states may override the row. A note
+	// created with a human title and no body yet states no heading, and reading
+	// that as "the title is the filename" would rename every such note on the
+	// next pass; so no heading means no opinion, and the row keeps its title.
+	// Titles are compared case-sensitively, so a case-only correction applies.
+	//
+	// Steady state costs one string compare per note in a pass that already read
+	// every file for the hash compare, and writes nothing: title equality is the
+	// fast path, exactly as content-hash equality is above.
+	for diskPath, content := range diskNotes {
+		rec, ok := dbNotesByPath[diskPath]
+		if !ok {
+			continue
+		}
+		title, ok := headingTitle(content)
+		if !ok || title == rec.Title {
+			continue
+		}
+		mu := s.lockNote(rec.ID)
+		mu.Lock()
+		err := s.notes.SetTitle(ctx, user.ID, rec.ID, title, wikilinks.NormalizeKey(title))
+		mu.Unlock()
+		if err != nil {
+			log.Warn().Err(err).Int64("note_id", rec.ID).Str("disk_path", diskPath).
+				Str("from", rec.Title).Str("to", title).Msg("reconcile: converge note title")
+			continue
+		}
+		log.Info().Int64("note_id", rec.ID).Str("disk_path", diskPath).
+			Str("from", rec.Title).Str("to", title).Msg("reconcile: note title converged from disk heading")
+		rec.Title = title
+		result.NotesRetitled++
 	}
 
 	// 10. Rebuild the link graph for the user. Backfills title keys (migration
@@ -575,10 +633,13 @@ func (s *Service) walkUserTree(userUUID string) (diskTree, error) {
 	return tree, nil
 }
 
-// deriveTitle returns the first markdown H1 ("# Heading") line in content,
-// or fallback if none exists. The slug is taken from the filename, so the
-// title is the human-readable label the UI shows in the tree.
-func deriveTitle(content, fallback string) string {
+// headingTitle returns the first markdown H1 ("# Heading") line in content.
+//
+// ok is false when the content states no heading at all, which is not the same
+// as stating an empty one: a caller that treats "no heading" as "the title is
+// the filename" would overwrite the human title of every note that has no body
+// yet.
+func headingTitle(content string) (string, bool) {
 	for _, line := range strings.SplitN(content, "\n", 16) {
 		trimmed := strings.TrimSpace(line)
 		if !strings.HasPrefix(trimmed, "# ") {
@@ -591,6 +652,16 @@ func deriveTitle(content, fallback string) string {
 		if len(title) > 500 {
 			title = title[:500]
 		}
+		return title, true
+	}
+	return "", false
+}
+
+// deriveTitle returns the first markdown H1 ("# Heading") line in content,
+// or fallback if none exists. The slug is taken from the filename, so the
+// title is the human-readable label the UI shows in the tree.
+func deriveTitle(content, fallback string) string {
+	if title, ok := headingTitle(content); ok {
 		return title
 	}
 	return fallback

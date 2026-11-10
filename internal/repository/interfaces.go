@@ -72,6 +72,11 @@ type NoteRepository interface {
 	ListForContext(ctx context.Context, userID int64, folderID *int64) ([]*model.Note, error)
 	Update(ctx context.Context, n *model.Note) error
 	UpdateContent(ctx context.Context, userID, noteID int64, content, contentHash, expectedHash string) error
+	// SetTitle repairs a note's title and its normalized title key without
+	// touching slug, disk_path, content or tags. It exists for the reconciler,
+	// which learns a note's title from the file's "# H1" and has no full row to
+	// hand Update (Update would rewrite tags it never loaded).
+	SetTitle(ctx context.Context, userID, noteID int64, title, titleKey string) error
 	// SetTitleKey updates a note's normalized title key (link-resolution index,
 	// backfilled on reconcile).
 	SetTitleKey(ctx context.Context, userID, noteID int64, titleKey string) error
