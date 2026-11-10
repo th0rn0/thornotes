@@ -20,6 +20,11 @@ type Hub struct {
 	mu      sync.RWMutex
 	clients map[int64][]*subscriber // userID → subscribers, oldest last-write first in slice order
 	done    chan struct{}           // closed by the reaper's stop func
+	// now is the clock every eviction decision reads. Production leaves it at
+	// time.Now; tests replace it so reap assertions do not depend on how
+	// promptly the scheduler wakes a sleeping goroutine. A nil value is treated
+	// as time.Now so a zero-value Hub still works.
+	now func() time.Time
 }
 
 // subscriber is one SSE stream's entry in the hub. lastWrite records the last
@@ -35,7 +40,28 @@ func New() *Hub {
 	return &Hub{
 		clients: make(map[int64][]*subscriber),
 		done:    make(chan struct{}),
+		now:     time.Now,
 	}
+}
+
+// NewWithClock builds a Hub whose eviction decisions read the supplied clock
+// instead of time.Now. It exists so tests can move time forward and assert on
+// reaping without sleeping: a wall-clock test of "idle longer than N" fails on
+// a loaded machine because the sleep that should end just inside the window
+// overshoots it (ticket 617, reproduced at 144 failures in 150 runs with the
+// runner oversubscribed).
+func NewWithClock(now func() time.Time) *Hub {
+	h := New()
+	h.now = now
+	return h
+}
+
+// clock is the Hub's source of time, tolerating a zero-value Hub.
+func (h *Hub) clock() time.Time {
+	if h.now == nil {
+		return time.Now()
+	}
+	return h.now()
 }
 
 // Subscribe registers a new subscriber for userID and returns the event channel
@@ -46,7 +72,7 @@ func (h *Hub) Subscribe(userID int64) (chan string, func()) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	s := &subscriber{ch: make(chan string, 4), lastWrite: time.Now()}
+	s := &subscriber{ch: make(chan string, 4), lastWrite: h.clock()}
 	if len(h.clients[userID]) >= MaxStreamsPerUser {
 		h.evictStalestLocked(userID)
 	}
@@ -112,7 +138,7 @@ func (h *Hub) Touch(ch chan string) {
 	for _, list := range h.clients {
 		for _, s := range list {
 			if s.ch == ch {
-				s.lastWrite = time.Now()
+				s.lastWrite = h.clock()
 				return
 			}
 		}
@@ -127,7 +153,7 @@ func (h *Hub) Touch(ch chan string) {
 func (h *Hub) ReapStale(idle time.Duration) int {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	now := time.Now()
+	now := h.clock()
 	reaped := 0
 	for userID, list := range h.clients {
 		kept := list[:0]

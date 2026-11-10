@@ -1,6 +1,7 @@
 package hub_test
 
 import (
+	"sync"
 	"testing"
 	"time"
 
@@ -156,8 +157,35 @@ func TestHub_MaxStreamsPerUser_EvictsStalest(t *testing.T) {
 	}
 }
 
+// fakeClock is a manual clock for tests that assert on elapsed time. Reaping is
+// a comparison between two instants, so the test should move the instant rather
+// than wait for a real one: an assertion that a 20ms sleep ends inside a 50ms
+// window is a claim about the scheduler, and on a loaded runner that claim is
+// false (ticket 617).
+type fakeClock struct {
+	mu  sync.Mutex
+	now time.Time
+}
+
+func newFakeClock() *fakeClock {
+	return &fakeClock{now: time.Unix(1_700_000_000, 0)}
+}
+
+func (c *fakeClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.now
+}
+
+func (c *fakeClock) Advance(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.now = c.now.Add(d)
+}
+
 func TestHub_ReapStale(t *testing.T) {
-	h := hub.New()
+	clock := newFakeClock()
+	h := hub.NewWithClock(clock.Now)
 
 	ch, unsub := h.Subscribe(1)
 
@@ -167,14 +195,14 @@ func TestHub_ReapStale(t *testing.T) {
 	assert.Equal(t, 1, h.CountFor(1))
 
 	// One idle beyond the threshold is dropped and its channel closed.
-	time.Sleep(60 * time.Millisecond)
+	clock.Advance(60 * time.Millisecond)
 	assert.Equal(t, 1, h.ReapStale(50*time.Millisecond))
 	assert.Equal(t, 0, h.Count())
 	select {
 	case _, ok := <-ch:
 		require.False(t, ok, "reaped channel should be closed")
-	case <-time.After(time.Second):
-		t.Fatal("reaped channel not closed within 1s")
+	default:
+		t.Fatal("reaped channel should be closed")
 	}
 
 	// The handler's deferred unsub after a reap is a no-op, not a panic.
@@ -186,19 +214,23 @@ func TestHub_ReapStale(t *testing.T) {
 }
 
 func TestHub_TouchKeepsSubscriberAlive(t *testing.T) {
-	h := hub.New()
+	clock := newFakeClock()
+	h := hub.NewWithClock(clock.Now)
 	ch, unsub := h.Subscribe(1)
 	defer unsub()
 
-	deadline := time.Now().Add(150 * time.Millisecond)
-	for time.Now().Before(deadline) {
-		h.Touch(ch)
-		time.Sleep(20 * time.Millisecond)
-	}
-
-	// Total idle time exceeds the threshold, but writes kept it fresh.
+	// Total age well past the threshold, but writes kept it fresh: a write
+	// inside the window resets the idle measure, so the sweep must not reap.
+	clock.Advance(40 * time.Millisecond)
+	h.Touch(ch)
+	clock.Advance(40 * time.Millisecond) // idle 40ms, inside the 50ms window
 	assert.Equal(t, 0, h.ReapStale(50*time.Millisecond))
 	assert.Equal(t, 1, h.Count())
+
+	// Without another write the same stream crosses the window and is reaped.
+	clock.Advance(60 * time.Millisecond) // idle 100ms
+	assert.Equal(t, 1, h.ReapStale(50*time.Millisecond))
+	assert.Equal(t, 0, h.Count())
 }
 
 func TestHub_CountAcrossUsers(t *testing.T) {
