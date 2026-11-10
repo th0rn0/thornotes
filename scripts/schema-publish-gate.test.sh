@@ -119,6 +119,13 @@ run_cases() {
     printf '%s' '{"schema":{"version":7},"status":"ok"}'                         > "$tmpdir/no-max.json"
     printf '%s' '{"schema":{"max_supported":7,"version":"seven"},"status":"ok"}' > "$tmpdir/nonnumeric.json"
     printf '%s' '<html><body>proxy error page</body></html>'                     > "$tmpdir/noschema.html"
+      # The real body, in shape: the build stamp comes BEFORE the schema object and its
+      # "version" is a quoted commit SHA. A gate that takes the first "version" it sees
+      # reads the SHA, fails to parse an integer and refuses every publish -- which is what
+      # the first version of this gate did, because every other fixture here puts "schema"
+      # first and carries no build block. The table was green; production would have
+      # refused the happy path.
+      printf '%s' '{"build":{"version":"0671e62234f192590d3f565cc5bd3dd91bdf9947"},"checks":{"db_read":"ok","db_write":"ok","notes_root":"ok"},"schema":{"max_supported":7,"version":7},"status":"ok"}' > "$tmpdir/prod-shaped.json"
 
     port=$((base + 1))
     start_stub "$port" "$tmpdir/behind.json"
@@ -146,21 +153,28 @@ run_cases() {
         "unreachable or returned nothing" \
         $gate --url "http://$HOST:$((base + 9))/healthz" --engine mysql --max "$CANDIDATE_MAX"
 
-    port=$((base + 4))
+      port=$((base + 4))
+      start_stub "$port" "$tmpdir/prod-shaped.json"
+      case_run "real /healthz shape (build stamp before schema)" 0 \
+          "PROCEED -- candidate MySQL ceiling $CANDIDATE_MAX vs live database version 7" \
+          $gate --url "http://$HOST:$port/healthz" --engine mysql --max "$CANDIDATE_MAX"
+      stop_stub
+
+      port=$((base + 5))
     start_stub "$port" "$tmpdir/noschema.html"
     case_run "healthz without schema block" 1 \
         "no readable schema.version" \
         $gate --url "http://$HOST:$port/healthz" --engine mysql --max "$CANDIDATE_MAX"
     stop_stub
 
-    port=$((base + 5))
+      port=$((base + 6))
     start_stub "$port" "$tmpdir/nonnumeric.json"
     case_run "non-numeric version" 1 \
         "no readable schema.version" \
         $gate --url "http://$HOST:$port/healthz" --engine mysql --max "$CANDIDATE_MAX"
     stop_stub
 
-    port=$((base + 6))
+      port=$((base + 7))
     start_stub "$port" "$tmpdir/no-max.json"
     case_run "schema block without max_supported" 1 \
         "no readable schema.max_supported" \

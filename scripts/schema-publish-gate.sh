@@ -88,13 +88,20 @@ if [ -z "$body" ]; then
     refuse "schema-publish-gate: REFUSE -- candidate $engine_name ceiling $CANDIDATE_MAX vs live database version unknown: $URL unreachable or returned nothing after ${TIMEOUT}s; refusing to tag latest (unknown is a refusal, never a pass)"
 fi
 
-# The body also carries other objects (checks, status), so parse only the lines
-# that survive from the schema object onward. Only an unquoted integer counts
-# as a version: anything else is unknown, and unknown refuses. schema.
-# max_supported (the live build's own ceiling) is required too, so a decoy JSON
-# page that happens to carry a "version" cannot satisfy the gate.
-db_raw=$(printf '%s' "$body" | tr '{,' '\n\n' | grep '"version"' | head -1 | sed -n 's/.*"version"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p')
-live_max=$(printf '%s' "$body" | tr '{,' '\n\n' | grep '"max_supported"' | head -1 | sed -n 's/.*"max_supported"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p')
+# The body also carries other objects (build, checks, status), so read the
+# integers out of the `schema` object only. An earlier version of this gate took
+# the FIRST `"version"` anywhere in the body, which was correct until the build
+# stamp landed: /healthz now reports {"build":{"version":"<sha>"},...,"schema":
+# {...}}, so the first match was the commit SHA, the numeric match failed, and
+# every publish was refused as "unknown". Fail-closed, so it froze the deployment
+# instead of shipping something bad — but a gate that refuses the happy path is a
+# gate somebody bypasses. Only an unquoted integer counts as a version: anything
+# else is unknown, and unknown refuses. schema.max_supported (the live build's own
+# ceiling) is required too, so a decoy page that happens to carry a "version"
+# cannot satisfy the gate.
+schema_obj=$(printf '%s' "$body" | sed -n 's/.*"schema"[[:space:]]*:[[:space:]]*{\([^}]*\)}.*/\1/p')
+db_raw=$(printf '%s' "$schema_obj" | sed -n 's/.*"version"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p')
+live_max=$(printf '%s' "$schema_obj" | sed -n 's/.*"max_supported"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p')
 
 if ! int_ok "$db_raw"; then
     refuse "schema-publish-gate: REFUSE -- candidate $engine_name ceiling $CANDIDATE_MAX vs live database version unknown: $URL returned no readable schema.version (missing schema block or non-numeric); refusing to tag latest (unknown is a refusal, never a pass)"
