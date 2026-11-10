@@ -1269,10 +1269,23 @@ func TestMySQL_SearchRepo_Search_WithTags(t *testing.T) {
 	_, err := noteRepo.Create(context.Background(), note)
 	require.NoError(t, err)
 
-	// Search with a tag filter — exercises the JSON_TABLE tag-join clause.
+	// Search with a tag filter — the note carries "go".
 	results, err := searchRepo.Search(context.Background(), user.ID, "findme", []string{"go"})
 	require.NoError(t, err)
-	_ = results
+	require.Len(t, results, 1)
+	assert.Equal(t, "Tagged MySQL Searchable", results[0].Title)
+
+	// Two tags the note carries are AND, not unsatisfiable: the regression that
+	// ticket 452 is about.
+	results, err = searchRepo.Search(context.Background(), user.ID, "findme", []string{"go", "mysql"})
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, "Tagged MySQL Searchable", results[0].Title)
+
+	// One tag the note does not carry excludes it.
+	results, err = searchRepo.Search(context.Background(), user.ID, "findme", []string{"go", "rust"})
+	require.NoError(t, err)
+	assert.Empty(t, results)
 }
 
 // ─── JournalRepo tests ────────────────────────────────────────────────────────

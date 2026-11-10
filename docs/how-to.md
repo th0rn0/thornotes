@@ -255,7 +255,9 @@ Tags let you cross-reference notes across folders. A note in `work/projects/` ca
 
 Click the **Search** icon or use the search box at the top of the sidebar. Search runs across note titles and full content. Results show the matching snippet and the folder path for context.
 
-> Note: highlighting is not implemented, and the two database backends differ. On SQLite the server returns a matching excerpt with `<mark>…</mark>` around the match, but the UI HTML-escapes the snippet before rendering, so the markers appear as literal text. That escaping is deliberate: the snippet comes from author-controlled note content, and rendering it unescaped would hand a note author an XSS primitive. On MySQL, which is what the bundled container image runs, the snippet is the first 200 characters of the note with no markers at all, so the excerpt has no relationship to the query. Both behaviours are tracked as H-02.
+Every word you type must appear in the note, and every tag you filter on must be on the note — two words are an AND, not an OR, and two tags mean "tagged with both". Tag matching is exact and case-sensitive: `#Home` and `#home` are different tags, and `%`/`_` in a tag are ordinary characters.
+
+The snippet is an excerpt of the note centred on the first match, with `<mark>…</mark>` around each occurrence and `…` where text was trimmed, and it is the same on every database backend. The UI HTML-escapes the snippet before rendering, so the markers appear as literal text; that escaping is deliberate: the snippet comes from author-controlled note content, and rendering it unescaped would hand a note author an XSS primitive.
 
 ---
 
