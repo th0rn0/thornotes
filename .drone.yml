@@ -2,11 +2,28 @@ kind: pipeline
 type: docker
 name: ci
 
+# One build per branch commit.
+#
+# `push` and `pull_request` both fire for the same SHA on a branch, so every PR
+# commit was built twice: two runners spent, and — because the GitHub status is
+# whatever finishes last — a build that failed on a flake could mark a commit red
+# after an identical build of it had passed. That is not hypothetical: #298 failed
+# on TestHub_TouchKeepsSubscriberAlive while #297, same commit, was green.
+#
+# The `ref` condition is what separates the cases: a branch commit builds once, as
+# a pull_request (which is the context a PR page shows and a branch-protection
+# rule would require), while main and tags build on push. The cost is that
+# pushing a branch with no PR no longer builds at all — open a PR if you want CI,
+# which is the normal flow.
 trigger:
   event:
     - push
     - pull_request
     - tag
+  ref:
+    - refs/heads/main
+    - refs/pull/**
+    - refs/tags/**
 
 services:
   - name: mariadb
