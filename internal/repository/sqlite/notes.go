@@ -401,6 +401,53 @@ func (r *NoteRepo) ListForContext(ctx context.Context, userID int64, folderID *i
 	return scanNotes(rows)
 }
 
+// IterateForContext streams notes for the context endpoint, newest-first,
+// stopping as soon as fn says it has enough. See repository.NoteRepository for
+// the contract; the short version is that Content is capped at contentChars so
+// one oversized note cannot pull its whole body into memory.
+func (r *NoteRepo) IterateForContext(ctx context.Context, userID int64, folderID *int64, contentChars int, fn func(*model.Note) (bool, error)) error {
+	q := `
+		SELECT id, user_id, folder_id, title, slug, title_key, disk_path,
+		       SUBSTR(content, 1, ?), content_hash, tags, share_token, fts_synced_at,
+		       created_at, updated_at
+		FROM notes WHERE user_id = ?`
+	args := []any{contentChars, userID}
+	if folderID != nil {
+		q += ` AND folder_id = ?`
+		args = append(args, *folderID)
+	}
+	q += ` ORDER BY updated_at DESC`
+
+	rows, err := r.readDB.QueryContext(ctx, q, args...)
+	if err != nil {
+		return fmt.Errorf("iterate notes for context: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		n := &model.Note{}
+		var tagsJSON string
+		if err := rows.Scan(
+			&n.ID, &n.UserID, &n.FolderID, &n.Title, &n.Slug, &n.TitleKey, &n.DiskPath,
+			&n.Content, &n.ContentHash, &tagsJSON, &n.ShareToken,
+			&n.FtsSyncedAt, &n.CreatedAt, &n.UpdatedAt,
+		); err != nil {
+			return fmt.Errorf("scan note: %w", err)
+		}
+		if err := json.Unmarshal([]byte(tagsJSON), &n.Tags); err != nil {
+			n.Tags = nil
+		}
+		keep, err := fn(n)
+		if err != nil {
+			return err
+		}
+		if !keep {
+			return nil
+		}
+	}
+	return rows.Err()
+}
+
 func scanNotes(rows *sql.Rows) ([]*model.Note, error) {
 	var notes []*model.Note
 	for rows.Next() {

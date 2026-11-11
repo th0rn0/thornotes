@@ -70,6 +70,19 @@ type NoteRepository interface {
 	// Pass nil folderID to include all notes across all folders.
 	// Results are ordered newest-first (updated_at DESC) for truncation priority.
 	ListForContext(ctx context.Context, userID int64, folderID *int64) ([]*model.Note, error)
+	// IterateForContext streams notes newest-first (updated_at DESC, nil folderID
+	// = all folders), invoking fn for each one until fn returns keep=false or the
+	// rows run out. It is what the context endpoint uses to stop reading at its
+	// character cap: ListForContext materialises every note's body to build the
+	// same answer, so its peak memory tracks the corpus instead of the cap
+	// (ticket N9).
+	//
+	// Content is truncated to contentChars characters. Callers must pass at least
+	// their cap plus one: a note whose body is longer than the cap can never fit,
+	// and the extra character is what makes that decidable from the body alone.
+	// A note longer than contentChars therefore arrives with a Content prefix,
+	// never with the whole body — do not persist it or hand it to a client.
+	IterateForContext(ctx context.Context, userID int64, folderID *int64, contentChars int, fn func(*model.Note) (bool, error)) error
 	Update(ctx context.Context, n *model.Note) error
 	// UpdateMetadataAndContent writes the note's metadata AND its body in one
 	// statement. UpdateNoteMetadata needs that: a title change rewrites the
