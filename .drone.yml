@@ -392,14 +392,16 @@ steps:
           2>/dev/null | awk '{print $1}')
         echo "Step network: ${STEP_NET:-bridge}"
         docker rm -f thornotes-smoke 2>/dev/null || true
+        docker volume rm thornotes-smoke-data 2>/dev/null || true
+        docker volume create thornotes-smoke-data >/dev/null
         docker run -d --name thornotes-smoke \
           ${STEP_NET:+--network "$STEP_NET"} \
-          --tmpfs /data \
+          -v thornotes-smoke-data:/data \
           th0rn0/thornotes:latest
         IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' thornotes-smoke)
         echo "Container IP: $IP"
         for i in $(seq 1 30); do
-          wget -qO- --timeout=3 "http://$IP:8080/" > /dev/null 2>&1 && echo "Server is up (attempt $i)" && docker stop thornotes-smoke && docker rm thornotes-smoke && exit 0
+          wget -qO- --timeout=3 "http://$IP:8080/" > /dev/null 2>&1 && echo "Server is up (attempt $i)" && docker stop thornotes-smoke && docker rm thornotes-smoke && docker volume rm thornotes-smoke-data >/dev/null && exit 0
           echo "Waiting... ($i/30)"
           sleep 2
         done
@@ -407,6 +409,7 @@ steps:
         docker logs thornotes-smoke
         docker stop thornotes-smoke
         docker rm thornotes-smoke
+        docker volume rm thornotes-smoke-data >/dev/null 2>&1 || true
         exit 1
     when:
       branch:

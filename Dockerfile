@@ -51,8 +51,17 @@ COPY --from=builder /thornotes /thornotes
 #     the user's directory keeps its own ownership. A bind mount the user
 #     pointed at deliberately is theirs; they make it writable themselves
 #     (see README "Data volume ownership").
+#
+# Caveat: because /data now exists in the image, `docker run --tmpfs /data`
+# mounts a root-owned tmpfs instead of Docker's usual 1777 default, which
+# uid 65532 cannot write. The CI smoke step therefore uses a named volume
+# (.drone.yml) — which also exercises this seeding on every main build. An
+# operator wanting a tmpfs must opt in explicitly, e.g.
+#   --tmpfs /data:uid=65532,gid=65532,mode=700
+#
 # A future refactoring that drops either COPY or VOLUME reintroduces the
-# first-run failure; the pair is what makes seeding happen.
+# first-run failure; the pair is what makes seeding happen (guarded by
+# TestDockerfile_SeedsFreshVolumesForUid65532).
 COPY --from=builder --chown=65532:65532 /data/ /data/
 VOLUME /data
 
