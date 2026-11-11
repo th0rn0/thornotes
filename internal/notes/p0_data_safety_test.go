@@ -160,21 +160,43 @@ func TestP0_C01_ImportCollisions_PreserveExistingNotesAndFolderTrees(t *testing.
 	assert.Equal(t, 1, res.NotesCreated, "only the non-colliding note should be created")
 	assert.Equal(t, 0, res.FoldersCreated, "Work folder already existed")
 
+	// The one note the archive created, found by the slug its entry name gives it.
+	workNotes, err := st.svc.FolderNotes(ctx, st.userID, workFolder.ID)
+	require.NoError(t, err)
+	var importedNote *model.NoteListItem
+	for _, n := range workNotes {
+		if n.Slug == "new-note" {
+			importedNote = n
+			break
+		}
+	}
+	require.NotNil(t, importedNote, "the archive's non-colliding entry should have been imported")
+
 	// Verify disk files and Reconcile.
 	//
 	// The pass repairs title drift and must do nothing else. The fixtures carry
 	// drift on purpose — each seeded body states a heading that differs from its
 	// title, which is a state the app still produces (autosave writes the body
-	// while the title is a separate field, and import titles a note from its
-	// filename), and the imported "Work/new-note.md" is a fourth of the same
-	// kind. So the count is pinned to exactly those four title repairs rather
-	// than to zero: zero is only reachable by conforming the fixtures, and a
-	// conformed fixture cannot see a pass that retitles when it should not.
-	// Nothing is created, deleted or clobbered — checked below, one note at a
-	// time.
+	// while the title is a separate field). So the count is pinned to exactly
+	// those three title repairs rather than to zero: zero is only reachable by
+	// conforming the fixtures, and a conformed fixture cannot see a pass that
+	// retitles when it should not.
+	//
+	// The imported "Work/new-note.md" used to be a fourth: import titled it from
+	// its filename and wrote a body whose heading said something else, so the
+	// first pass retitled it. Import now derives the title from the body the way
+	// disk discovery does (ticket 631) — its title is the heading it arrived
+	// with, and the pass has nothing to say about it. Its slug still comes from
+	// the filename, so the file did not move.
 	changes, err := st.svc.Reconcile(ctx, st.user)
 	require.NoError(t, err)
-	assert.Equal(t, 4, changes, "four title repairs (readme, todo, deep, new-note) and nothing else")
+	assert.Equal(t, 3, changes, "three title repairs (readme, todo, deep) and nothing else")
+
+	imported, err := st.svc.GetNote(ctx, st.userID, importedNote.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "Newly Imported Note", imported.Title, "an import is titled from its heading, so it never drifts")
+	assert.Equal(t, "new-note", imported.Slug, "the filename still decides the slug and the path")
+	assert.Equal(t, workFolder.DiskPath+"/new-note.md", imported.DiskPath)
 
 	gotRoot, err := st.svc.GetNote(ctx, st.userID, rootNote.ID)
 	require.NoError(t, err)
