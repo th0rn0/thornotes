@@ -123,7 +123,11 @@ curl -s https://notes.example.com/healthz | jq -r '.status, .startup.phase'
 # reconciling
 ```
 
-Wait for `status: "ok"` before treating the instance as ready; a healthcheck that reads any non-200 as "down" already does the right thing here. The pass is bounded by the size of the vault — measured on SQLite, ~2.7s for 400 notes, ~13s for 2,000 and ~33s for 5,000 — so a container start period shorter than that will flap, and `--skip-reconciliation` remains the escape hatch for a trusted restart of a large corpus. `error` still means what it meant: the database or the notes root needs a human, not a moment.
+Wait for `status: "ok"` before treating the instance as ready; a healthcheck that reads any non-200 as "down" already does the right thing here, and a consumer with `depends_on: {thornotes: {condition: service_healthy}}` will now wait for the pass too — that is the intent, not a side effect. `error` still means what it meant: the database or the notes root needs a human, not a moment.
+
+How long that window lasts depends on which of two passes you are in, and the two differ by more than an order of magnitude. The figures usually quoted for this pass — ~2.7s for 400 notes, ~13s for 2,000, ~33s for 5,000 on SQLite — are the **rebuild**: the notes table is empty or does not match the disk, as on a first boot, a fresh or restored volume, or an index that was lost. That pass reads and hashes every file and costs roughly 4.4 ms per note. A **restart over a vault whose database already matches the disk** — what an ordinary deploy actually pays — finds every hash unchanged, at roughly 0.08 ms per note: 0.16s rather than 8.8s for 2,000 notes, about 55× cheaper. Both were measured with 2,000 notes, and in both cases the port is bound and answering within 0.02s; it is only the note routes that answer `503` until the pass ends, while the app shell, `/healthz`, `/api/v1/auth/*` and static assets serve normally.
+
+So size a container start period for the rebuild, not for the restart. A start period chosen from the rebuild number is harmless on a restart that is ready in a fraction of a second; one chosen from the restart number will flap on a genuine rebuild. `--skip-reconciliation` remains the escape hatch for a trusted restart, but it disables the repair itself, so it is safe only when you know the disk and the index agree — it is not a way to avoid a delay that a matching restart does not incur anyway.
 
 ## Schema too new
 
