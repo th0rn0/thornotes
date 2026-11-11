@@ -16,7 +16,7 @@ import (
 	"github.com/th0rn0/thornotes/internal/model"
 )
 
-func openTestDB(t *testing.T) *db.Pool {
+func openTestDB(t testing.TB) *db.Pool {
 	t.Helper()
 	dir := t.TempDir()
 	pool, err := db.Open(filepath.Join(dir, "test.db"))
@@ -25,7 +25,7 @@ func openTestDB(t *testing.T) *db.Pool {
 	return pool
 }
 
-func createUser(t *testing.T, pool *db.Pool) *model.User {
+func createUser(t testing.TB, pool *db.Pool) *model.User {
 	t.Helper()
 	repo := NewUserRepo(pool.WriteDB)
 	user, err := repo.Create(context.Background(), "user1", "hash", "test-uuid-1")

@@ -160,57 +160,181 @@ func TestSearchRepo_StaleBacklog_SyncsAcrossBatches(t *testing.T) {
 	assert.Equal(t, tail.ID, tailResults[0].NoteID)
 }
 
-// The re-sync must cost less per note than re-indexing the same notes one at a
-// time, and the comparison is made in this process so it does not depend on how
-// fast the disk is: SyncNote is the one-at-a-time path (one transaction per
-// note), syncStale is the backlog path (one transaction per batch).
+// The re-sync must not hold the single write connection across the backlog.
+// That is proved here structurally, not measured: the hook runs between two
+// batches — after one transaction has committed, before the next one opens —
+// and performs an ordinary write on the same MaxOpenConns(1) write pool. If the
+// previous batch's transaction were still open, that write could not get the
+// connection: it would block until the hook's deadline and come back with an
+// error. With one transaction per batch it simply completes.
 //
-// On 26488a6 both are the same loop — Search called SyncNote once per stale
-// note — so the two numbers are equal by construction and this fails. That
-// equality is the bug: the re-sync took the single write connection once per
-// statement for the entire backlog.
-func TestSearchRepo_StaleBacklog_BatchedSyncBeatPerNoteTransactions(t *testing.T) {
+// There is deliberately no stopwatch in this gate. An earlier version of this
+// test compared batched and per-note wall-clock cost and passed at 11.70x on an
+// idle machine, then inverted on CI where the same ratio was 0.81x; see
+// BenchmarkSearchRepo_StaleBacklog for the numbers, which are evidence rather
+// than an assertion.
+//
+// On 26488a6 Search called SyncNote in a loop, so there were no batch
+// boundaries at all: the hook never fires and the count assertion below fails.
+func TestSearchRepo_StaleBacklog_ReleasesWriteConnBetweenBatches(t *testing.T) {
 	pool := openTestDB(t)
 	user := createUser(t, pool)
 	noteRepo := NewNoteRepo(pool.ReadDB, pool.WriteDB)
 	searchRepo := NewSearchRepo(pool.ReadDB, pool.WriteDB)
 	ctx := context.Background()
 
+	// More than one batch at the production limit, so there is a boundary
+	// between two transactions for the hook to fire on. The time budget may
+	// split these further; that only gives the hook more boundaries to prove.
+	const notes = 2*syncBatchSize + 50
+	for i := 0; i < notes; i++ {
+		_, err := noteRepo.Create(ctx, newNote(user.ID, "Release note",
+			"release-note-"+strconv.Itoa(i), "releasemark body "+strconv.Itoa(i)))
+		require.NoError(t, err)
+	}
+	_, err := pool.WriteDB.ExecContext(ctx, `UPDATE notes SET fts_synced_at = NULL`)
+	require.NoError(t, err)
+
+	var (
+		batches   int
+		writeErrs []error
+	)
+	searchRepo.syncBatchHook = func(batch int) {
+		batches++
+		// An ordinary write, on the write pool the re-sync is using. The
+		// deadline is a liveness bound, not a latency comparison: an
+		// uncontended create takes milliseconds on any machine, so it fires
+		// only when the connection really is held by a transaction.
+		wctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+		_, err := noteRepo.Create(wctx, newNote(user.ID, "Probe note",
+			"probe-note-"+strconv.Itoa(batch), "probemark body "+strconv.Itoa(batch)))
+		writeErrs = append(writeErrs, err)
+	}
+
+	_, err = searchRepo.Search(ctx, user.ID, "releasemark", nil)
+	require.NoError(t, err)
+
+	require.GreaterOrEqual(t, batches, 2,
+		"%d stale notes were re-indexed without a single batch boundary: the connection is held for the whole run", notes)
+	require.Len(t, writeErrs, batches)
+	for batch, err := range writeErrs {
+		require.NoErrorf(t, err,
+			"a write issued after batch %d committed could not be served: that transaction was still holding the write connection", batch)
+	}
+
+	// The probes the hook wrote are the only notes that should still be stale:
+	// they were created after the pass took its snapshot. Everything the pass
+	// took on must be stamped, boundary included.
+	var stale int
+	require.NoError(t, pool.ReadDB.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM notes WHERE fts_synced_at IS NULL`).Scan(&stale))
+	assert.Equal(t, len(writeErrs), stale,
+		"only the %d notes written from inside the pass should be left stale; the backlog itself must be fully stamped", len(writeErrs))
+}
+
+// The batch boundary is what bounds the connection hold, so the number of
+// transactions is part of the contract: ceil(stale/limit) for a backlog of N.
+// A regression to one transaction per note — the shape on 26488a6, where Search
+// called SyncNote in a loop — takes N transactions and fails here immediately.
+// That is the property the wall-clock comparison was trying to express and
+// could not: the ratio moved with machine load, the count does not.
+//
+// The time budget is put out of the way so the count is decided by the limit
+// alone. With the 5 ms budget in play a loaded machine legitimately commits
+// smaller batches — on CI the per-note cost was above the budget, so batches
+// degenerated to a note or two — and the assertion would be a race between the
+// batch size and commit latency instead of a statement about the code.
+func TestSearchRepo_StaleBacklog_CommitsOneTransactionPerBatch(t *testing.T) {
+	pool := openTestDB(t)
+	user := createUser(t, pool)
+	noteRepo := NewNoteRepo(pool.ReadDB, pool.WriteDB)
+	searchRepo := NewSearchRepo(pool.ReadDB, pool.WriteDB)
+	searchRepo.batchBudget = time.Hour
+	ctx := context.Background()
+
+	const notes = 3*syncBatchSize + 37
+	for i := 0; i < notes; i++ {
+		_, err := noteRepo.Create(ctx, newNote(user.ID, "Batch count note",
+			"batch-count-note-"+strconv.Itoa(i), "countmark body "+strconv.Itoa(i)))
+		require.NoError(t, err)
+	}
+	_, err := pool.WriteDB.ExecContext(ctx, `UPDATE notes SET fts_synced_at = NULL`)
+	require.NoError(t, err)
+
+	var batches int
+	searchRepo.syncBatchHook = func(int) { batches++ }
+
+	_, err = searchRepo.Search(ctx, user.ID, "countmark", nil)
+	require.NoError(t, err)
+
+	want := (notes + syncBatchSize - 1) / syncBatchSize
+	require.Equal(t, want, batches,
+		"re-indexing %d stale notes took %d transactions; it must take ceil(%d/%d)=%d, one per batch (one per note would be %d)",
+		notes, batches, notes, syncBatchSize, want, notes)
+
+	// Nothing skipped at a boundary: the count above would also be satisfied by
+	// batches that dropped notes.
+	var stale int
+	require.NoError(t, pool.ReadDB.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM notes WHERE fts_synced_at IS NULL`).Scan(&stale))
+	assert.Zero(t, stale, "every note in the backlog must be stamped, not just the ones inside the counted batches")
+}
+
+// BenchmarkSearchRepo_StaleBacklog records what batching bought, as evidence
+// rather than as a gate: `go test ./...` never runs a Benchmark, and on CI the
+// same numbers are a coin toss — the batched/per-note ratio was 11.70x on an
+// idle machine and inverted on a loaded runner.
+//
+//	go test -run '^$' -bench BenchmarkSearchRepo_StaleBacklog -benchtime 3x ./internal/repository/sqlite/
+//
+// Each iteration re-marks the whole corpus stale and re-indexes it once, once
+// through the backlog path (one transaction per batch) and once through the
+// one-at-a-time path (one transaction per note).
+func BenchmarkSearchRepo_StaleBacklog(b *testing.B) {
 	const notes = 200
+	pool := openTestDB(b)
+	user := createUser(b, pool)
+	noteRepo := NewNoteRepo(pool.ReadDB, pool.WriteDB)
+	searchRepo := NewSearchRepo(pool.ReadDB, pool.WriteDB)
+	ctx := context.Background()
+
 	ids := make([]int64, 0, notes)
 	for i := 0; i < notes; i++ {
-		n := newNote(user.ID, "Batch cost note", "batch-cost-note-"+strconv.Itoa(i),
-			"costmark body "+strconv.Itoa(i))
-		created, err := noteRepo.Create(ctx, n)
-		require.NoError(t, err)
+		created, err := noteRepo.Create(ctx, newNote(user.ID, "Batch cost note",
+			"batch-cost-note-"+strconv.Itoa(i), "costmark body "+strconv.Itoa(i)))
+		require.NoError(b, err)
 		ids = append(ids, created.ID)
 	}
 
-	markAllStale := func() {
-		t.Helper()
+	markAllStale := func(b *testing.B) {
+		b.Helper()
 		_, err := pool.WriteDB.ExecContext(ctx, `UPDATE notes SET fts_synced_at = NULL`)
-		require.NoError(t, err)
+		require.NoError(b, err)
+	}
+	perNote := func(b *testing.B) {
+		b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N*notes), "ns/note")
 	}
 
-	// Batched: one search re-indexes the whole backlog.
-	markAllStale()
-	start := time.Now()
-	_, err := searchRepo.Search(ctx, user.ID, "costmark", nil)
-	require.NoError(t, err)
-	batchedPerNote := time.Since(start) / notes
+	b.Run("batched", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			markAllStale(b)
+			if _, err := searchRepo.Search(ctx, user.ID, "costmark", nil); err != nil {
+				b.Fatal(err)
+			}
+		}
+		perNote(b)
+	})
 
-	// One at a time: the same notes, one transaction each.
-	markAllStale()
-	start = time.Now()
-	for _, id := range ids {
-		require.NoError(t, searchRepo.SyncNote(ctx, id))
-	}
-	singlePerNote := time.Since(start) / notes
-
-	t.Logf("%d notes: batched re-sync %s/note, one-at-a-time %s/note (%.2fx)",
-		notes, batchedPerNote, singlePerNote, float64(singlePerNote)/float64(batchedPerNote))
-
-	assert.Less(t, batchedPerNote, singlePerNote/2,
-		"re-indexing a backlog cost %s/note, against %s/note one note at a time: the batch is not amortising the commit",
-		batchedPerNote, singlePerNote)
+	b.Run("per-note", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			markAllStale(b)
+			for _, id := range ids {
+				if err := searchRepo.SyncNote(ctx, id); err != nil {
+					b.Fatal(err)
+				}
+			}
+		}
+		perNote(b)
+	})
 }

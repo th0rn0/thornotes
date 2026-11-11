@@ -16,10 +16,33 @@ import (
 type SearchRepo struct {
 	readDB  *sql.DB
 	writeDB *sql.DB
+
+	// batchLimit and batchBudget bound one re-sync transaction: at most
+	// batchLimit notes, or batchBudget of work, whichever comes first.
+	// NewSearchRepo sets the production values; they are fields only so a test
+	// can pin the batch shape — with the budget out of the way the number of
+	// transactions is decided by the limit alone, which makes it an assertion
+	// about the code instead of a race against this machine's commit latency.
+	batchLimit  int
+	batchBudget time.Duration
+
+	// syncBatchHook, when non-nil, runs after every batch has committed — which
+	// is the gap between two transactions: the batch's connection is back on
+	// the pool and the next batch has not begun. It is called once per batch
+	// (the last call has no batch after it). It is how a test proves that
+	// release rather than inferring it from a stopwatch — a write issued from
+	// inside the hook can only get the MaxOpenConns(1) write connection if the
+	// transaction is really over. Nil in production.
+	syncBatchHook func(batch int)
 }
 
 func NewSearchRepo(readDB, writeDB *sql.DB) *SearchRepo {
-	return &SearchRepo{readDB: readDB, writeDB: writeDB}
+	return &SearchRepo{
+		readDB:      readDB,
+		writeDB:     writeDB,
+		batchLimit:  syncBatchSize,
+		batchBudget: syncBatchBudget,
+	}
 }
 
 // Re-syncing stale notes happens on the write pool, which is MaxOpenConns(1):
@@ -58,11 +81,13 @@ func (r *SearchRepo) SyncNote(ctx context.Context, noteID int64) error {
 
 // syncStale re-indexes every note in ids, a bounded batch at a time, so the
 // single write connection goes back to the pool between batches. This is what
-// keeps a search from monopolising writes: the unbatched loop took the
-// connection once per statement for the whole run, and an ordinary write issued
-// during it queued behind the re-sync for seconds (ticket N10).
+// keeps a search from monopolising writes: the unbatched loop held the
+// connection for the run's whole duration — 23 s per 3,000 stale notes, 128 s
+// per 8,000 — so every ordinary write issued inside that window was 3-13x
+// slower with a tail near a second. Not a queue behind the backlog: a long
+// window (ticket N10, measured).
 func (r *SearchRepo) syncStale(ctx context.Context, ids []int64) error {
-	for start := 0; start < len(ids); {
+	for start, batch := 0, 0; start < len(ids); batch++ {
 		n, err := r.syncBatch(ctx, ids[start:])
 		if err != nil {
 			return err
@@ -74,6 +99,11 @@ func (r *SearchRepo) syncStale(ctx context.Context, ids []int64) error {
 			break
 		}
 		start += n
+		// The transaction has committed and its connection is back on the pool
+		// here: this is the boundary the release is proved at.
+		if r.syncBatchHook != nil {
+			r.syncBatchHook(batch)
+		}
 	}
 	return nil
 }
@@ -112,7 +142,7 @@ func (r *SearchRepo) syncBatch(ctx context.Context, ids []int64) (int, error) {
 	taken := 0
 	started := time.Now()
 	for _, id := range ids {
-		if taken > 0 && (taken >= syncBatchSize || time.Since(started) >= syncBatchBudget) {
+		if taken > 0 && (taken >= r.batchLimit || time.Since(started) >= r.batchBudget) {
 			break
 		}
 		if _, err := index.ExecContext(ctx, id); err != nil {

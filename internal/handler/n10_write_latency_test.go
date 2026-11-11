@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"sort"
 	"strings"
 	"testing"
@@ -20,13 +19,21 @@ import (
 //
 // Search re-indexes every note with fts_synced_at IS NULL, and every one of
 // those statements needs the MaxOpenConns(1) write connection
-// (internal/repository/sqlite/search.go). The claim under test (ticket 468) is
-// that an ordinary POST /api/v1/notes issued while that runs is serialised
-// behind the re-sync.
+// (internal/repository/sqlite/search.go). The defect (ticket 468) is not a
+// queue: no request waits seconds for the whole backlog to finish
+// (max_during/backlog was ~0.01 measured before the fix). It is a window — the
+// re-sync occupies the write connection for the run's whole duration, so an
+// ordinary POST /api/v1/notes issued inside that window is 3-13x slower with a
+// tail near a second. Batching closes the connection between batches and
+// shrinks the window 7-20x; each batch's commit is the irreducible residual on a
+// durable single-writer database.
 //
-// Everything here goes through the real router over HTTP: the claim is about
-// request latency, and a direct repository call would measure a different
-// thing.
+// What that means for this file: the numbers are evidence, so they live in
+// BenchmarkN10_WriteDuringResync, which `go test ./...` never runs. The gate is
+// structural and lives at the layer that owns the connection
+// (TestSearchRepo_StaleBacklog_ReleasesWriteConnBetweenBatches, which proves the
+// release from inside a batch boundary); the always-on test here guards the
+// end-to-end plumbing.
 
 const n10NoteChars = 2_000
 
@@ -51,7 +58,7 @@ func n10Content(i, chars int) string {
 
 // seedStaleNotes inserts n notes owned by username with fts_synced_at NULL, so
 // the next search has n notes to re-index — the backlog the ticket describes.
-func seedStaleNotes(t *testing.T, c *testClient, username string, n, noteChars int) {
+func seedStaleNotes(t testing.TB, c *testClient, username string, n, noteChars int) {
 	t.Helper()
 	ctx := context.Background()
 
@@ -153,84 +160,117 @@ func latencyStats(lat []time.Duration) (median, p95, max time.Duration) {
 	return s[len(s)/2], s[idx], s[len(s)-1]
 }
 
-// TestMeasure_N10_WriteDuringResync is the harness behind the ticket's N10
-// numbers. Opt-in because it seeds thousands of notes; the always-on guard is
-// TestHandler_Notes_Create_IsNotQueuedBehindResync.
-func TestMeasure_N10_WriteDuringResync(t *testing.T) {
-	if os.Getenv("THORNOTES_MEASURE") == "" {
-		t.Skip("measurement harness: set THORNOTES_MEASURE=1 to run")
-	}
+// BenchmarkN10_WriteDuringResync is the harness behind the ticket's N10 table.
+// It is a benchmark rather than a test because every number it produces is a
+// measurement of this machine: as an assertion it was a stopwatch, and that is
+// what failed CI.
+//
+//	go test -run '^$' -bench BenchmarkN10 -benchtime 1x ./internal/handler/
+//
+// One iteration is one pass: re-mark the seeded backlog stale, run the search
+// that re-indexes it, and issue POSTs continuously for as long as it is in
+// flight. Each iteration repeats that over the same corpus, so -benchtime 1x
+// gives the table in the PR untouched.
+func BenchmarkN10_WriteDuringResync(b *testing.B) {
+	const baselineN = 50
 
 	for _, n := range []int{500, 2000, 8000} {
-		t.Run(fmt.Sprintf("stale=%d", n), func(t *testing.T) {
-			c := newTestClient(t)
-			c.registerAndLogin(t)
+		b.Run(fmt.Sprintf("stale=%d", n), func(b *testing.B) {
+			ctx := context.Background()
+			c := newTestClient(b)
+			c.registerAndLogin(b)
 
 			// Baseline: same endpoint, same instance, no re-sync in flight.
 			var base []time.Duration
-			for i := 0; i < 50; i++ {
+			for i := 0; i < baselineN; i++ {
 				lat, err := postNote(c)
-				require.NoError(t, err)
+				require.NoError(b, err)
 				base = append(base, lat)
 			}
 			bm, bp, bx := latencyStats(base)
 
-			seedStaleNotes(t, c, "testuser", n, n10NoteChars)
+			seedStaleNotes(b, c, "testuser", n, n10NoteChars)
 
-			// Kick off the search that re-indexes the whole backlog.
-			searchDone := make(chan struct{})
-			var searchDur time.Duration
-			var searchErr error
-			go func() {
-				searchDur, searchErr = searchNotes(context.Background(), c, "reconcile")
-				close(searchDone)
-			}()
+			var (
+				during    []time.Duration
+				searchDur time.Duration
+				searchErr error
+			)
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				// Every seeded note back to stale for this pass.
+				_, err := c.pool.WriteDB.ExecContext(ctx, `UPDATE notes SET fts_synced_at = NULL`)
+				require.NoError(b, err)
 
-			// Write throughout it.
-			var during []time.Duration
-			var writeErr error
-		loop:
-			for {
-				select {
-				case <-searchDone:
-					break loop
-				default:
+				searchDone := make(chan struct{})
+				go func() {
+					searchDur, searchErr = searchNotes(ctx, c, "reconcile")
+					close(searchDone)
+				}()
+
+				during = during[:0]
+			loop:
+				for {
+					select {
+					case <-searchDone:
+						break loop
+					default:
+					}
+					lat, err := postNote(c)
+					if err != nil {
+						b.Fatal(err)
+					}
+					during = append(during, lat)
 				}
-				lat, err := postNote(c)
-				if err != nil {
-					writeErr = err
-					break loop
-				}
-				during = append(during, lat)
+				<-searchDone
+				require.NoError(b, searchErr)
 			}
-			<-searchDone
-			require.NoError(t, searchErr)
-			require.NoError(t, writeErr)
+			b.StopTimer()
 
 			dm, dp, dx := latencyStats(during)
-			t.Logf("stale=%d | resync+search wall=%s | baseline POST n=%d median=%s p95=%s max=%s | during-resync POST n=%d median=%s p95=%s max=%s | max_during/backlog=%.2f",
+			// Milliseconds with the fraction kept: the interesting numbers here
+			// are single-digit, and truncating them to whole ms hides the
+			// difference the change is about.
+			ms := func(d time.Duration) float64 { return float64(d.Nanoseconds()) / 1e6 }
+			b.ReportMetric(ms(bm), "base_med_ms")
+			b.ReportMetric(ms(bp), "base_p95_ms")
+			b.ReportMetric(ms(bx), "base_max_ms")
+			b.ReportMetric(ms(dm), "during_med_ms")
+			b.ReportMetric(ms(dp), "during_p95_ms")
+			b.ReportMetric(ms(dx), "during_max_ms")
+			b.ReportMetric(ms(searchDur), "resync_ms")
+			b.ReportMetric(float64(dx)/float64(searchDur), "during_max_over_resync")
+			b.Logf("stale=%d | resync+search wall=%s | baseline POST n=%d median=%s p95=%s max=%s | during-resync POST n=%d median=%s p95=%s max=%s | max_during/backlog=%.2f",
 				n, searchDur, len(base), bm, bp, bx, len(during), dm, dp, dx,
 				float64(dx)/float64(searchDur))
 		})
 	}
 }
 
-// TestHandler_Notes_Create_IsNotQueuedBehindResync is the ticket's named check
-// for N10: a note creation issued while a search re-indexes a backlog must
-// complete, and must not wait for the backlog to finish.
+// TestHandler_Notes_Create_CompletesDuringResync is the ticket's N10 check
+// end to end, through the real router: a note creation issued while a search
+// re-indexes a backlog must be served, and the pass must finish with the whole
+// backlog indexed.
 //
-// The measurement that fails on 26488a6 lives at the repository layer
-// (TestSearchRepo_StaleBacklog_BatchedSyncBeatPerNoteTransactions), because that
-// is where batching changed the cost of the re-sync. What this test adds is the
-// end-to-end shape the ticket describes — the re-sync running through the real
-// router while ordinary writes are served — and it is written so a slow machine
-// moves both numbers together rather than tripping the assertion.
+// It was called TestHandler_Notes_Create_IsNotQueuedBehindResync and asserted
+// that the slowest write inside the window was under a quarter of the pass's
+// duration. That name and that clause both rest on the premise the measurement
+// refuted: there is no queue behind the backlog, there is a long window, and
+// the write's latency inside it depends on commit latency and load. It passed
+// by luck; the equivalent assertion in the repository test failed on CI.
 //
-// Skipped under -short: it is a timing test, and `go test ./...` is where the
-// gate runs it.
-func TestHandler_Notes_Create_IsNotQueuedBehindResync(t *testing.T) {
+// So no clock here. The property "the write connection is released between
+// batches" is proved deterministically where it belongs, by
+// TestSearchRepo_StaleBacklog_ReleasesWriteConnBetweenBatches, which issues a
+// real write from inside a batch boundary with MaxOpenConns(1) and requires it
+// to succeed. This test keeps the end-to-end shape honest: writes are served
+// while the pass is in flight, every one of them succeeds, and the pass leaves
+// nothing stale.
+//
+// Skipped under -short: it seeds thousands of notes.
+func TestHandler_Notes_Create_CompletesDuringResync(t *testing.T) {
 	if testing.Short() {
-		t.Skip("timing test: skipped under -short")
+		t.Skip("seeds a large backlog: skipped under -short")
 	}
 	const (
 		backlogNotes = 3000
@@ -241,6 +281,8 @@ func TestHandler_Notes_Create_IsNotQueuedBehindResync(t *testing.T) {
 	c := newTestClient(t)
 	c.registerAndLogin(t)
 
+	// Recorded for the log line only. A baseline is context for the numbers in
+	// the benchmark, never a threshold.
 	var base []time.Duration
 	for i := 0; i < baselineN; i++ {
 		lat, err := postNote(c)
@@ -270,25 +312,37 @@ func TestHandler_Notes_Create_IsNotQueuedBehindResync(t *testing.T) {
 		if !running {
 			break
 		}
+		// postNote requires 201: a write rejected or failed during the pass
+		// fails the test here.
 		lat, err := postNote(c)
 		require.NoError(t, err)
 		during = append(during, lat)
 	}
 	<-searchDone
 	require.NoError(t, searchErr)
+
+	// The pass was in flight long enough for writes to land inside it. Without
+	// this the loop below proves nothing: it would be asserting about a window
+	// that never existed.
 	require.GreaterOrEqual(t, len(during), 10,
-		"the re-sync finished before ten writes were issued during it; the backlog is too small to measure")
+		"the re-sync finished before ten writes were issued during it; the backlog is too small to exercise the window")
+
+	// The pass did the work it was asked to do, boundary included: no seeded
+	// note may be left stale. The notes the loop above created are expected to
+	// be stale — they arrived after the pass took its snapshot — so they are
+	// excluded here and bounded below instead.
+	var staleSeeded, staleTotal int
+	require.NoError(t, c.pool.ReadDB.QueryRowContext(context.Background(),
+		`SELECT COUNT(*) FROM notes WHERE fts_synced_at IS NULL AND slug LIKE 'stale-note-%'`).Scan(&staleSeeded))
+	require.NoError(t, c.pool.ReadDB.QueryRowContext(context.Background(),
+		`SELECT COUNT(*) FROM notes WHERE fts_synced_at IS NULL`).Scan(&staleTotal))
+	assert.Zero(t, staleSeeded, "the pass must leave nothing of the backlog stale: a batch boundary must not drop notes")
+	assert.LessOrEqual(t, staleTotal, len(during),
+		"%d notes are stale but only %d were created during the pass: something older than the pass was skipped", staleTotal, len(during))
 
 	duringMedian, duringP95, duringMax := latencyStats(during)
 	t.Logf("baseline write median=%s | re-sync of %d stale notes took %s (%.2fms/note) | writes during it: n=%d median=%s p95=%s max=%s | max/backlog=%.3f",
 		baseMedian, backlogNotes, searchDur, float64(searchDur/backlogNotes)/float64(time.Millisecond),
 		len(during), duringMedian, duringP95, duringMax,
 		float64(duringMax)/float64(searchDur))
-
-	// The writes were served while the re-sync ran — none of them queued behind
-	// it. A quarter of the backlog is a generous line: before batching, the
-	// worst write during a 3,000-note re-sync was 0.6% of its duration, so this
-	// clause was already true and must stay true.
-	assert.Less(t, duringMax, searchDur/4,
-		"a write took %s while the re-sync ran for %s — it was queued behind the backlog", duringMax, searchDur)
 }
