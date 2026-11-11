@@ -15,13 +15,33 @@ import "strings"
 // note's own.
 const headingScanLines = 16
 
-// headingTitle returns the first markdown H1 ("# Heading") line in content.
+// headingTitle returns the first markdown H1 ("# Heading") line in content,
+// truncated to the title limit.
 //
 // ok is false when the content states no heading at all, which is not the same
 // as stating an empty one: a caller that treats "no heading" as "the title is
 // the filename" would overwrite the human title of every note that has no body
 // yet.
 func headingTitle(content string) (string, bool) {
+	title, ok := statedHeading(content)
+	if !ok {
+		return "", false
+	}
+	if len(title) > maxTitleLen {
+		title = title[:maxTitleLen]
+	}
+	return title, true
+}
+
+// statedHeading returns the first markdown H1 line's text exactly as the
+// content states it, with no truncation.
+//
+// It exists for the caller that must tell "a heading I can use" from "a heading
+// too long to be a title": import falls back to the filename rather than
+// truncating, and it cannot make that call from headingTitle's output because
+// that output is already cut to the limit. Which lines count as the heading is
+// still decided here, once, for every reader of the rule.
+func statedHeading(content string) (string, bool) {
 	for _, line := range strings.SplitN(content, "\n", headingScanLines) {
 		trimmed := strings.TrimSpace(line)
 		if !strings.HasPrefix(trimmed, "# ") {
@@ -30,9 +50,6 @@ func headingTitle(content string) (string, bool) {
 		title := strings.TrimSpace(strings.TrimPrefix(trimmed, "#"))
 		if title == "" {
 			continue
-		}
-		if len(title) > maxTitleLen {
-			title = title[:maxTitleLen]
 		}
 		return title, true
 	}

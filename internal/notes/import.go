@@ -18,14 +18,54 @@ type ImportResult struct {
 	FoldersCreated int `json:"folders_created"`
 }
 
+// importTitleFallback is the title an imported note falls back to: the entry or
+// file name without its .md suffix, and "Imported Note" when the name carries
+// nothing to use. It is also what the slug is derived from, so it must stay the
+// filename's own reading — a round trip depends on the file keeping the name it
+// arrived with (ticket 615).
+func importTitleFallback(filename string) string {
+	name := strings.TrimSuffix(filename, ".md")
+	if name == "" {
+		name = "Imported Note"
+	}
+	return name
+}
+
+// importTitle is the title an imported note is created with: the "# H1" its
+// body states, or the filename-derived fallback when the body states no
+// heading.
+//
+// This is the same rule disk discovery applies to a note found on disk
+// (deriveTitle, reconcile step 8) — the body states the title, the filename is
+// only the fallback — and it is applied at import because import writes the
+// body in the same breath as the row. Titling from the filename and letting
+// the first reconcile pass converge the row a moment later titled one note
+// twice in front of the user: one title on insert, another a pass later, which
+// is what ticket 631 is about. Deriving it here means the pass finds nothing
+// to converge, because there was never a disagreement to repair.
+//
+// One deliberate difference from deriveTitle: a heading longer than the title
+// limit falls back to the filename instead of being truncated. A truncated
+// heading is a title nobody wrote, and it would be stored on a row whose file
+// still states the longer line.
+func importTitle(content, fallback string) string {
+	heading, ok := statedHeading(content)
+	if !ok || len(heading) > maxTitleLen {
+		return fallback
+	}
+	return heading
+}
+
 // ImportMarkdown imports a single .md file as a root-level note.
 func (s *Service) ImportMarkdown(ctx context.Context, userID int64, userUUID string, filename, content string) (*ImportResult, error) {
-	title := strings.TrimSuffix(filename, ".md")
-	if title == "" {
-		title = "Imported Note"
-	}
+	name := importTitleFallback(filename)
+	title := importTitle(content, name)
 
-	note, err := s.CreateNote(ctx, userID, userUUID, nil, title, nil)
+	// The slug — and therefore the file's path — still comes from the filename.
+	// The zip round trip depends on it: entry names are sanitised titles, so a
+	// re-import restores the same layout (ticket 615). Only the title is derived
+	// from the body, and deriving it must not move a file.
+	note, err := s.createNoteWithSlug(ctx, userID, userUUID, nil, title, slugify(name), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -76,10 +116,8 @@ func (s *Service) ImportZip(ctx context.Context, userID int64, userUUID string, 
 		content := buf.String()
 		dir := filepath.ToSlash(filepath.Dir(f.Name))
 		base := filepath.Base(f.Name)
-		title := strings.TrimSuffix(base, ".md")
-		if title == "" {
-			title = "Imported Note"
-		}
+		name := importTitleFallback(base)
+		title := importTitle(content, name)
 
 		// Resolve or create the parent folder.
 		var parentFolder *model.Folder
@@ -95,7 +133,8 @@ func (s *Service) ImportZip(ctx context.Context, userID int64, userUUID string, 
 			folderID = &parentFolder.ID
 		}
 
-		note, err := s.CreateNote(ctx, userID, userUUID, folderID, title, nil)
+		// Slug and path come from the entry's filename, never from the title.
+		note, err := s.createNoteWithSlug(ctx, userID, userUUID, folderID, title, slugify(name), nil)
 		if err != nil {
 			// Skip conflicts (duplicate title in same folder).
 			if apperror.IsConflict(err) {
