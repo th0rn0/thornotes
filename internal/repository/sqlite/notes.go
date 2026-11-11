@@ -128,7 +128,7 @@ func scanNoteListItems(rows *sql.Rows) ([]*model.NoteListItem, error) {
 
 func (r *NoteRepo) ListAllForWatch(ctx context.Context, userID int64) ([]*model.NoteWatchRecord, error) {
 	rows, err := r.readDB.QueryContext(ctx,
-		`SELECT id, folder_id, slug, disk_path, content_hash FROM notes WHERE user_id = ?`, userID)
+		`SELECT id, folder_id, title, slug, disk_path, content_hash FROM notes WHERE user_id = ?`, userID)
 	if err != nil {
 		return nil, fmt.Errorf("list notes for watch: %w", err)
 	}
@@ -137,7 +137,7 @@ func (r *NoteRepo) ListAllForWatch(ctx context.Context, userID int64) ([]*model.
 	var records []*model.NoteWatchRecord
 	for rows.Next() {
 		rec := &model.NoteWatchRecord{}
-		if err := rows.Scan(&rec.ID, &rec.FolderID, &rec.Slug, &rec.DiskPath, &rec.ContentHash); err != nil {
+		if err := rows.Scan(&rec.ID, &rec.FolderID, &rec.Title, &rec.Slug, &rec.DiskPath, &rec.ContentHash); err != nil {
 			return nil, err
 		}
 		records = append(records, rec)
@@ -200,6 +200,36 @@ func (r *NoteRepo) Update(ctx context.Context, n *model.Note) error {
 	return nil
 }
 
+// UpdateMetadataAndContent writes the note's metadata and its body in one
+// statement. UpdateNoteMetadata needs that: a title change rewrites the file's
+// "# H1" (so the body moves too), and the row must not be observable in a state
+// where the title and the heading it was derived from disagree.
+func (r *NoteRepo) UpdateMetadataAndContent(ctx context.Context, n *model.Note) error {
+	tagsJSON, err := json.Marshal(n.Tags)
+	if err != nil {
+		return fmt.Errorf("marshal tags: %w", err)
+	}
+
+	res, err := r.writeDB.ExecContext(ctx, `
+		UPDATE notes SET title = ?, slug = ?, title_key = ?, disk_path = ?, tags = ?,
+		       content = ?, content_hash = ?, fts_synced_at = NULL, updated_at = datetime('now')
+		WHERE id = ? AND user_id = ?`,
+		n.Title, n.Slug, n.TitleKey, n.DiskPath, string(tagsJSON),
+		n.Content, n.ContentHash, n.ID, n.UserID,
+	)
+	if err != nil {
+		if isUniqueConstraint(err) {
+			return apperror.Conflict(fmt.Sprintf("note %q already exists in this folder", n.Title))
+		}
+		return fmt.Errorf("update note: %w", err)
+	}
+	rows, _ := res.RowsAffected()
+	if rows == 0 {
+		return apperror.ErrNotFound
+	}
+	return nil
+}
+
 func (r *NoteRepo) UpdateContent(ctx context.Context, userID, noteID int64, content, contentHash, expectedHash string) error {
 	res, err := r.writeDB.ExecContext(ctx, `
 		UPDATE notes
@@ -226,6 +256,29 @@ func (r *NoteRepo) UpdateContent(ctx context.Context, userID, noteID int64, cont
 			return apperror.ErrNotFound
 		}
 		return apperror.ErrConflict
+	}
+	return nil
+}
+
+// SetTitle repairs a note's title and its normalized title key, leaving slug,
+// disk_path, content and tags alone. The reconciler calls it when the file's
+// "# H1" no longer matches the row (ticket N7); it holds no tag list to write
+// back and must not invent one, and the filename is the disk's business.
+//
+// fts_synced_at is cleared because title is an indexed column: until the sync
+// path runs, FTS still holds the old title's tokens and a search for a word the
+// note no longer carries returns it.
+func (r *NoteRepo) SetTitle(ctx context.Context, userID, noteID int64, title, titleKey string) error {
+	res, err := r.writeDB.ExecContext(ctx,
+		`UPDATE notes SET title = ?, title_key = ?, fts_synced_at = NULL, updated_at = datetime('now')
+		 WHERE id = ? AND user_id = ?`,
+		title, titleKey, noteID, userID,
+	)
+	if err != nil {
+		return fmt.Errorf("set title: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return apperror.ErrNotFound
 	}
 	return nil
 }

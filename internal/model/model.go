@@ -82,6 +82,7 @@ type SearchResult struct {
 type NoteWatchRecord struct {
 	ID          int64
 	FolderID    *int64
+	Title       string
 	Slug        string
 	DiskPath    string
 	ContentHash string

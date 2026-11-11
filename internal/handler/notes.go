@@ -87,6 +87,8 @@ func (h *NotesHandler) Patch(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "content_hash required when patching content"})
 			return
 		}
+		content := *req.Content
+		expectedHash := *req.ContentHash
 		// If the same PATCH also carries metadata (title and/or tags), validate
 		// the current content_hash and apply the metadata update BEFORE writing
 		// the new content so a metadata conflict/validation error never leaves
@@ -97,7 +99,7 @@ func (h *NotesHandler) Patch(c *gin.Context) {
 				writeError(c, err)
 				return
 			}
-			if note.ContentHash != *req.ContentHash {
+			if note.ContentHash != expectedHash {
 				writeError(c, apperror.ErrConflict)
 				return
 			}
@@ -109,8 +111,22 @@ func (h *NotesHandler) Patch(c *gin.Context) {
 				writeError(c, err)
 				return
 			}
+			// A title change rewrites the file's "# H1" as well as the row, so
+			// the metadata step above may have committed a new body and a new
+			// content_hash. Read the row back: the caller's hash is stale from
+			// here on, and the content it sent still states the old heading,
+			// which would undo the rename on the next reconcile pass.
+			after, err := h.svc.GetNote(c.Request.Context(), user.ID, noteID)
+			if err != nil {
+				writeError(c, err)
+				return
+			}
+			expectedHash = after.ContentHash
+			if req.Title != nil {
+				content = notes.RetitleHeading(content, title)
+			}
 		}
-		newHash, err := h.svc.UpdateNoteContent(c.Request.Context(), user.ID, noteID, *req.Content, *req.ContentHash)
+		newHash, err := h.svc.UpdateNoteContent(c.Request.Context(), user.ID, noteID, content, expectedHash)
 		if err != nil {
 			writeError(c, err)
 			return

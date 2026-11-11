@@ -161,9 +161,20 @@ func TestP0_C01_ImportCollisions_PreserveExistingNotesAndFolderTrees(t *testing.
 	assert.Equal(t, 0, res.FoldersCreated, "Work folder already existed")
 
 	// Verify disk files and Reconcile.
+	//
+	// The pass repairs title drift and must do nothing else. The fixtures carry
+	// drift on purpose — each seeded body states a heading that differs from its
+	// title, which is a state the app still produces (autosave writes the body
+	// while the title is a separate field, and import titles a note from its
+	// filename), and the imported "Work/new-note.md" is a fourth of the same
+	// kind. So the count is pinned to exactly those four title repairs rather
+	// than to zero: zero is only reachable by conforming the fixtures, and a
+	// conformed fixture cannot see a pass that retitles when it should not.
+	// Nothing is created, deleted or clobbered — checked below, one note at a
+	// time.
 	changes, err := st.svc.Reconcile(ctx, st.user)
 	require.NoError(t, err)
-	assert.Equal(t, 0, changes, "Reconcile must find zero missing/corrupted files after import collisions")
+	assert.Equal(t, 4, changes, "four title repairs (readme, todo, deep, new-note) and nothing else")
 
 	gotRoot, err := st.svc.GetNote(ctx, st.userID, rootNote.ID)
 	require.NoError(t, err)
@@ -542,10 +553,14 @@ func TestP0_C01_MoveNote_DestinationCollision_PreservesSourceAndTarget(t *testin
 	require.NoError(t, err, "source file at root must survive rejected move")
 	assert.Equal(t, sourceContent, string(sourceBytes))
 
-	// Reconcile must see zero drift and delete nothing.
+	// Reconcile must delete nothing. It does repair the two title drifts these
+	// fixtures carry — both bodies state a heading that differs from their
+	// title, which is the state a rejected move has to survive, not a state the
+	// move caused — so the count is pinned to those two repairs rather than to
+	// zero.
 	changes, err := st.svc.Reconcile(ctx, st.user)
 	require.NoError(t, err)
-	assert.Equal(t, 0, changes)
+	assert.Equal(t, 2, changes, "two title repairs (target, source) and nothing else")
 
 	// Both DB rows, contents, hashes, tags, and share tokens must be untouched.
 	gotTarget, err := st.svc.GetNote(ctx, st.userID, target.ID)
