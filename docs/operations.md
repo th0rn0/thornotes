@@ -113,6 +113,18 @@ The value is the commit the binary was built from, injected at build time (`-X m
 
 The endpoint is unauthenticated deliberately. Knowing the commit of a notes server is not a secret, and requiring a login to answer it means only someone with host access can tell whether a deploy landed. Use it instead of the front-end asset digest (`app.js?v=…`): that hashes the assets, not the commit, so several releases that touch no JavaScript serve byte-identical digests.
 
+## Starting up: "reconciling" is not an error
+
+The listener opens before the startup reconcile finishes, so a booting instance answers `503` for anything that reads or writes the note index until that pass is done — `status` is `"reconciling"` and `startup.phase` says the same, while `schema`, `build` and `checks` remain readable:
+
+```bash
+curl -s https://notes.example.com/healthz | jq -r '.status, .startup.phase'
+# reconciling
+# reconciling
+```
+
+Wait for `status: "ok"` before treating the instance as ready; a healthcheck that reads any non-200 as "down" already does the right thing here. The pass is bounded by the size of the vault — measured on SQLite, ~2.7s for 400 notes, ~13s for 2,000 and ~33s for 5,000 — so a container start period shorter than that will flap, and `--skip-reconciliation` remains the escape hatch for a trusted restart of a large corpus. `error` still means what it meant: the database or the notes root needs a human, not a moment.
+
 ## Schema too new
 
 The database has been migrated by a newer build than the image you just started supports. Startup refuses before applying migrations. For a running instance, inspect `GET /healthz`: compare `schema.version` (database version) with `schema.max_supported` (the running binary's migration ceiling). This endpoint is unavailable when startup itself is refused, so inspect the image before deployment as well: its OCI label `co.thornotes.schema.max` reports the SQLite migration ceiling and `co.thornotes.schema.max.mysql` reports the MySQL ceiling. Compare the appropriate label with the database's recorded version.

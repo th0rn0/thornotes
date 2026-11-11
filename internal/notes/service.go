@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/rs/zerolog/log"
 
@@ -53,6 +54,11 @@ type Service struct {
 	// healthMu guards lastReconcile, the readiness signal for the notes root.
 	healthMu      sync.RWMutex
 	lastReconcile *ReconcileHealth
+
+	// reconciling is set while a *startup* reconcile pass is in flight: the
+	// listener is open before that pass finishes, so index-derived requests are
+	// refused until it is clear. See readiness.go. Zero value = ready.
+	reconciling atomic.Bool
 
 	// tree serialises path-changing mutations per user: subtree operations take
 	// the exclusive side, single-note path writes the shared side.

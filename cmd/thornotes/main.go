@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"html/template"
 	iofs "io/fs"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -133,6 +134,14 @@ func main() {
 	notesSvc := notes.NewService(noteRepo, folderRepo, searchRepo, journalRepo, linkRepo, fs)
 	applyReconcileGuardFromEnv(notesSvc)
 
+	// Open the startup window before anything can serve a request. The listener
+	// below comes up before the startup reconcile finishes, so from here until
+	// that pass ends (startupReconcile, which closes it on every exit path) the
+	// router refuses requests that would be answered from a half-repaired index.
+	// Opening it here rather than inside the pass is deliberate: there must be no
+	// instant in which the port is listening and the window is still shut.
+	notesSvc.BeginStartup()
+
 	// Development-only: seed a dev user + folder tree + ~100 notes.
 	// Idempotent — skipped entirely if the dev user already exists.
 	if cfg.SeedDev {
@@ -200,9 +209,25 @@ func main() {
 	watchCtx, watchCancel := context.WithCancel(context.Background())
 	defer watchCancel()
 
+	// Bind before the startup pass runs, and before the listener starts serving.
+	//
+	// Two reasons, both about the readiness window opened above. Bind errors
+	// (an occupied port, a bad address) are configuration mistakes and must fail
+	// at t=0 rather than after a pass that takes half a minute and repairs the
+	// whole index first. And binding here rather than inside ListenAndServe is
+	// what makes the ordering airtight: between net.Listen and srv.Serve no
+	// request is answered, so the window is guaranteed to be shut over the
+	// listener before the first request can be served against a half-repaired
+	// index.
+	ln, err := net.Listen("tcp", cfg.Addr)
+	if err != nil {
+		log.Error().Err(err).Str("addr", cfg.Addr).Msg("listen")
+		os.Exit(1)
+	}
+
 	go func() {
 		log.Info().Str("addr", cfg.Addr).Str("driver", cfg.DBDriver).Str("version", Version).Msg("thornotes starting")
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
 			log.Error().Err(err).Msg("server error")
 			os.Exit(1)
 		}
@@ -221,26 +246,9 @@ func main() {
 	}()
 
 	// Startup reconciliation: compare every note's on-disk hash against the DB.
-	// Skippable via --skip-reconciliation on trusted restarts with large corpora.
-	if cfg.SkipReconciliation {
-		log.Info().Msg("startup reconciliation skipped (--skip-reconciliation)")
-	} else {
-		userIDs, reconcileErr := userRepo.IDs(context.Background())
-		if reconcileErr != nil {
-			log.Warn().Err(reconcileErr).Msg("startup reconcile: list users")
-		} else {
-			for _, uid := range userIDs {
-				user, err := userRepo.GetByID(context.Background(), uid)
-				if err != nil {
-					log.Warn().Err(err).Int64("user_id", uid).Msg("startup reconcile: get user")
-					continue
-				}
-				if _, err := notesSvc.Reconcile(context.Background(), user); err != nil {
-					log.Warn().Err(err).Int64("user_id", uid).Msg("startup reconcile error")
-				}
-			}
-		}
-	}
+	// This is synchronous and the readiness window opened above stays open for
+	// its duration; startupReconcile closes it on every exit path.
+	startupReconcile(context.Background(), notesSvc, userRepo, cfg.SkipReconciliation)
 
 	// Disk watcher: poll for file changes and push SSE notifications.
 	if cfg.WatchInterval > 0 {
