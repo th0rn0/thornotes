@@ -15,6 +15,9 @@ WORKDIR /build
 COPY go.mod go.sum ./
 RUN go mod download
 
+# ── First-run data directory (see the final stage for why it exists) ─────────
+RUN mkdir -p /data/notes
+
 # Build a fully static binary.
 # CGO_ENABLED=0 is explicit: modernc.org/sqlite is pure Go, but this ensures
 # no CGO sneaks in from transitive deps and the binary stays scratch-compatible.
@@ -29,6 +32,29 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
 FROM scratch
 
 COPY --from=builder /thornotes /thornotes
+
+# ── First-run data directory ─────────────────────────────────────────────────
+# The container runs as uid 65532 (below). A fresh Docker volume starts
+# root-owned, and a root-owned volume at /data makes SQLite fail with
+# "unable to open database file" — the crash a first-time user sees after
+# pasting the README quick start.
+#
+# The fix is baked into the image: /data/notes exists in the image, owned by
+# 65532, and VOLUME /data below makes Docker seed an empty named or anonymous
+# volume from that image content (preserving ownership) at first mount. The
+# documented `docker run -v thornotes-data:/data ...` therefore works as-is.
+#
+# Scope of the seeding, on purpose:
+#   - named/anonymous volume at /data (quick start, compose)  -> seeded, writable
+#   - named volume at /data/notes (MariaDB compose)           -> seeded, writable
+#   - bind mount over /data or /data/notes                    -> nothing copied,
+#     the user's directory keeps its own ownership. A bind mount the user
+#     pointed at deliberately is theirs; they make it writable themselves
+#     (see README "Data volume ownership").
+# A future refactoring that drops either COPY or VOLUME reintroduces the
+# first-run failure; the pair is what makes seeding happen.
+COPY --from=builder --chown=65532:65532 /data/ /data/
+VOLUME /data
 
 # ── Artefact metadata ────────────────────────────────────────────────────────
 # co.thornotes.schema.max is the highest migration this image embeds, so
@@ -65,8 +91,10 @@ LABEL co.thornotes.schema.max="${THORNOTES_SCHEMA_MAX}" \
 # Mount a writable volume at /data, e.g.:
 #   docker run -v thornotes-data:/data -p 8080:8080 th0rn0/thornotes
 #
-# The data directory must be writable by UID 65532. On first run:
-#   docker run --rm -v thornotes-data:/data busybox chown -R 65532:65532 /data
+# A fresh named volume is seeded with uid 65532 ownership by the image itself
+# (COPY --chown + VOLUME /data above), so the command above works as-is.
+# A bind mount is not seeded — make it writable by uid 65532 yourself, e.g.:
+#   sudo chown -R 65532:65532 /host/path/to/data
 
 ENV THORNOTES_ADDR=:8080
 ENV THORNOTES_DB=/data/thornotes.db

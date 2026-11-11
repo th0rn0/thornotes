@@ -45,6 +45,20 @@ docker run -d \
 
 Open [http://localhost:8080](http://localhost:8080) and register your account. Once you've signed up, set `THORNOTES_ALLOW_REGISTRATION=false` and restart to close public sign-up. With the flag off, the "Create account" link is removed from the auth screen entirely, the register form is removed from the DOM, and `POST /api/v1/auth/register` returns `404 Not Found` for every caller including the very first user — closed means closed. Always start with the flag on (or unset; default is on), register the admin account, then restart with the flag off.
 
+### Data volume ownership
+
+The container runs as uid 65532, and the image seeds a **fresh named volume** at `/data` with that ownership on first mount — the quick start above and the Compose files below work as-is on a brand-new volume, no manual `chown` needed.
+
+Two cases need no help from the image and get none:
+
+- **A bind mount** (`-v /srv/thornotes:/data`) is your directory: the image deliberately copies nothing into it, so it keeps its own ownership. Make it writable by uid 65532 yourself before the first start:
+
+  ```sh
+  sudo chown -R 65532:65532 /srv/thornotes
+  ```
+
+- **An existing volume** with data already in it is left exactly as it is.
+
 For a full walkthrough of all features, see the **[How-To Guide](docs/how-to.md)**. For database migration backups and recovery, see the **[Operations Runbook](docs/operations.md)**.
 
 ### Docker Compose
