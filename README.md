@@ -59,6 +59,14 @@ Two cases need no help from the image and get none:
 
 - **An existing volume** with data already in it is left exactly as it is.
 
+**A tmpfs is the one case that needs explicit flags.** Because the image carries `/data`, a plain `--tmpfs /data` mounts a root-owned mode-755 tmpfs instead of Docker's usual world-writable default, which uid 65532 cannot write — the container exits with `unable to open database file` on every start. If you want your data directory in RAM, say so in the flags themselves:
+
+```sh
+docker run --tmpfs /data:uid=65532,gid=65532,mode=700 ...
+```
+
+Note that nothing on a tmpfs survives a container restart, so this suits testing or stateless use.
+
 For a full walkthrough of all features, see the **[How-To Guide](docs/how-to.md)**. For database migration backups and recovery, see the **[Operations Runbook](docs/operations.md)**.
 
 ### Docker Compose
