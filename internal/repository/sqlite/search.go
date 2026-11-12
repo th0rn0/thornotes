@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/th0rn0/thornotes/internal/model"
 	"github.com/th0rn0/thornotes/internal/repository"
@@ -15,11 +16,49 @@ import (
 type SearchRepo struct {
 	readDB  *sql.DB
 	writeDB *sql.DB
+
+	// batchLimit and batchBudget bound one re-sync transaction: at most
+	// batchLimit notes, or batchBudget of work, whichever comes first.
+	// NewSearchRepo sets the production values; they are fields only so a test
+	// can pin the batch shape — with the budget out of the way the number of
+	// transactions is decided by the limit alone, which makes it an assertion
+	// about the code instead of a race against this machine's commit latency.
+	batchLimit  int
+	batchBudget time.Duration
+
+	// syncBatchHook, when non-nil, runs after every batch has committed — which
+	// is the gap between two transactions: the batch's connection is back on
+	// the pool and the next batch has not begun. It is called once per batch
+	// (the last call has no batch after it). It is how a test proves that
+	// release rather than inferring it from a stopwatch — a write issued from
+	// inside the hook can only get the MaxOpenConns(1) write connection if the
+	// transaction is really over. Nil in production.
+	syncBatchHook func(batch int)
 }
 
 func NewSearchRepo(readDB, writeDB *sql.DB) *SearchRepo {
-	return &SearchRepo{readDB: readDB, writeDB: writeDB}
+	return &SearchRepo{
+		readDB:      readDB,
+		writeDB:     writeDB,
+		batchLimit:  syncBatchSize,
+		batchBudget: syncBatchBudget,
+	}
 }
+
+// Re-syncing stale notes happens on the write pool, which is MaxOpenConns(1):
+// one connection, shared with every ordinary write the instance is serving. So
+// the re-sync must not hold that connection for the length of the backlog. It
+// works in batches instead, each its own transaction, and a batch ends after
+// whichever comes first: syncBatchSize notes, or syncBatchBudget of work. The
+// time budget is the one that actually bounds a waiting write — a note's cost
+// depends on its size and on how fast the disk acknowledges a commit, so a
+// count alone would hold the connection for an unbounded interval on a slow
+// volume. Together they keep the hold at tens of milliseconds whatever the
+// backlog is (ticket N10).
+const (
+	syncBatchSize   = 100
+	syncBatchBudget = 5 * time.Millisecond
+)
 
 // SyncNote brings a single note's FTS entry up to date.
 //
@@ -36,16 +75,88 @@ func NewSearchRepo(readDB, writeDB *sql.DB) *SearchRepo {
 // and replaces the row's whole entry in one statement, so a failed sync cannot
 // leave the note half-unindexed.
 func (r *SearchRepo) SyncNote(ctx context.Context, noteID int64) error {
-	_, err := r.writeDB.ExecContext(ctx, `
-		INSERT OR REPLACE INTO notes_fts(rowid, title, content)
-		SELECT id, title, content FROM notes WHERE id = ?`, noteID)
-	if err != nil {
-		return fmt.Errorf("sync fts note %d: %w", noteID, err)
-	}
-
-	_, err = r.writeDB.ExecContext(ctx,
-		`UPDATE notes SET fts_synced_at = datetime('now') WHERE id = ?`, noteID)
+	_, err := r.syncBatch(ctx, []int64{noteID})
 	return err
+}
+
+// syncStale re-indexes every note in ids, a bounded batch at a time, so the
+// single write connection goes back to the pool between batches. This is what
+// keeps a search from monopolising writes: the unbatched loop held the
+// connection for the run's whole duration — 23 s per 3,000 stale notes, 128 s
+// per 8,000 — so every ordinary write issued inside that window was 3-13x
+// slower with a tail near a second. Not a queue behind the backlog: a long
+// window (ticket N10, measured).
+func (r *SearchRepo) syncStale(ctx context.Context, ids []int64) error {
+	for start, batch := 0, 0; start < len(ids); batch++ {
+		n, err := r.syncBatch(ctx, ids[start:])
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			// Unreachable: syncBatch always takes at least one note when handed
+			// any. Breaking rather than spinning keeps a future refactor from
+			// turning a search into an infinite loop.
+			break
+		}
+		start += n
+		// The transaction has committed and its connection is back on the pool
+		// here: this is the boundary the release is proved at.
+		if r.syncBatchHook != nil {
+			r.syncBatchHook(batch)
+		}
+	}
+	return nil
+}
+
+// syncBatch re-indexes as much of ids as fits one bounded transaction and
+// reports how many notes it took. Two statements per note — the FTS entry and
+// the fts_synced_at stamp — plus one commit for the batch, which is also why
+// the backlog finishes far sooner than one implicit transaction per statement
+// allowed.
+//
+// A batch either lands whole or not at all: a failure part-way through rolls the
+// batch back and leaves its notes stale, so the next search retries them rather
+// than picking up half-stamped rows.
+func (r *SearchRepo) syncBatch(ctx context.Context, ids []int64) (int, error) {
+	tx, err := r.writeDB.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("sync fts batch: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	index, err := tx.PrepareContext(ctx, `
+		INSERT OR REPLACE INTO notes_fts(rowid, title, content)
+		SELECT id, title, content FROM notes WHERE id = ?`)
+	if err != nil {
+		return 0, fmt.Errorf("prepare fts sync: %w", err)
+	}
+	defer func() { _ = index.Close() }()
+
+	stamp, err := tx.PrepareContext(ctx,
+		`UPDATE notes SET fts_synced_at = datetime('now') WHERE id = ?`)
+	if err != nil {
+		return 0, fmt.Errorf("prepare fts sync stamp: %w", err)
+	}
+	defer func() { _ = stamp.Close() }()
+
+	taken := 0
+	started := time.Now()
+	for _, id := range ids {
+		if taken > 0 && (taken >= r.batchLimit || time.Since(started) >= r.batchBudget) {
+			break
+		}
+		if _, err := index.ExecContext(ctx, id); err != nil {
+			return 0, fmt.Errorf("sync fts note %d: %w", id, err)
+		}
+		if _, err := stamp.ExecContext(ctx, id); err != nil {
+			return 0, fmt.Errorf("sync fts note %d: %w", id, err)
+		}
+		taken++
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("sync fts batch commit: %w", err)
+	}
+	return taken, nil
 }
 
 // Search runs an FTS5 query and returns matching notes for userID.
@@ -80,10 +191,8 @@ func (r *SearchRepo) Search(ctx context.Context, userID int64, query string, tag
 	}
 	stale.Close()
 
-	for _, id := range staleIDs {
-		if err := r.SyncNote(ctx, id); err != nil {
-			return nil, err
-		}
+	if err := r.syncStale(ctx, staleIDs); err != nil {
+		return nil, err
 	}
 
 	// Text terms are AND. searchtext.Terms is the one splitter, so this query

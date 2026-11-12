@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"os"
 	"testing"
 
@@ -1588,4 +1589,41 @@ func TestMySQL_FolderAndNoteRepo_ListSubtree(t *testing.T) {
 		"test-uuid-1/100%_done/Sub/child-note.md",
 		"test-uuid-1/100%_done/root-note.md",
 	}, paths, "only the subtree")
+}
+
+// IterateForContext is the context endpoint's read path (ticket N9). Same
+// contract as the SQLite implementation, and the SUBSTR that clips each body is
+// the one thing that is engine-specific.
+func TestMySQL_NoteRepo_IterateForContext_ClipsContentAndStops(t *testing.T) {
+	pool := openTestMySQL(t)
+	user := createMySQLUser(t, pool)
+	ctx := context.Background()
+	noteRepo := NewNoteRepo(pool.WriteDB)
+
+	const long = "0123456789ABCDEFGHIJ"
+	var ids []int64
+	for _, slug := range []string{"first-note", "second-note", "third-note"} {
+		n := createMySQLNoteAt(t, pool, user.ID, nil, slug, slug, "test-uuid-1/"+slug+".md")
+		_, err := pool.WriteDB.ExecContext(ctx,
+			`UPDATE notes SET content = ?, updated_at = ? WHERE id = ?`,
+			long, fmt.Sprintf("2026-01-0%d 00:00:00", len(ids)+1), n.ID)
+		require.NoError(t, err)
+		ids = append(ids, n.ID)
+	}
+
+	var visits []string
+	err := noteRepo.IterateForContext(ctx, user.ID, nil, 5, func(n *model.Note) (bool, error) {
+		visits = append(visits, n.Slug+":"+n.Content)
+		return true, nil
+	})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"third-note:01234", "second-note:01234", "first-note:01234"}, visits)
+
+	visits = nil
+	err = noteRepo.IterateForContext(ctx, user.ID, nil, 5, func(n *model.Note) (bool, error) {
+		visits = append(visits, n.Slug)
+		return len(visits) < 2, nil
+	})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"third-note", "second-note"}, visits)
 }
