@@ -77,8 +77,21 @@ func commitInitialIgnore(repo *gogit.Repository) error {
 	return nil
 }
 
-// writeGitIgnore creates a .gitignore at dir that excludes thornotes temp/probe files.
-// It uses O_EXCL so it never overwrites an existing file.
+// gitIgnoreEntries are the paths the store creates for itself at the notes root.
+// They are infrastructure, not content: none of them may be committed, and a
+// missing entry leaves every instance with a permanently dirty working tree that
+// the next delete would otherwise sweep into its commit. The two names that exist
+// as constants are used rather than retyped, so a new root-level file cannot be
+// added without being excluded here.
+var gitIgnoreEntries = []string{
+	".thornotes-*.tmp",   // Write's temp files
+	".thornotes-probe-*", // the writability probe
+	trashDirName + "/",   // trash-based deletes
+	ownerLockName,        // the cross-process owner lock
+}
+
+// writeGitIgnore creates a .gitignore at dir that excludes the store's own
+// infrastructure files. It uses O_EXCL so it never overwrites an existing file.
 func writeGitIgnore(dir string) error {
 	path := dir + "/.gitignore"
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
@@ -89,7 +102,7 @@ func writeGitIgnore(dir string) error {
 		return fmt.Errorf("write .gitignore: %w", err)
 	}
 	defer f.Close()
-	_, err = f.WriteString(".thornotes-*.tmp\n.thornotes-probe-*\n.thornotes-trash/\n")
+	_, err = f.WriteString(strings.Join(gitIgnoreEntries, "\n") + "\n")
 	return err
 }
 

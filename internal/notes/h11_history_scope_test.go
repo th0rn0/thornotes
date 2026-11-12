@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
@@ -82,6 +83,19 @@ func h11Status(t *testing.T, dir string) []string {
 	return lines
 }
 
+// h11Ignored returns the .gitignore rule that ignores path, or "" when git does
+// not ignore it.
+func h11Ignored(t *testing.T, dir, path string) string {
+	t.Helper()
+	cmd := exec.Command("git", "check-ignore", "-v", path)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
 // h11EditOutsideAPI simulates a user editing a note with their own editor: the
 // file changes on disk, but nothing is staged or committed.
 func h11EditOutsideAPI(t *testing.T, path string) {
@@ -157,9 +171,20 @@ func TestGitHistory_DeleteFolderCommitsRemovals(t *testing.T) {
 
 // With no third-party edits in play, a folder delete must leave the working tree
 // clean: a dirty tree is what let the next unrelated commit sweep the removals in.
+// A real instance takes the cross-process owner lock at the notes root before it
+// serves anything, so this runs with that lock file on disk too — it is the
+// condition "clean" is actually about, and a test root alone never creates it.
 func TestGitHistory_DeleteFolderLeavesCleanWorktree(t *testing.T) {
 	st := h11NewGitStack(t)
 	ctx := context.Background()
+
+	fs := st.svc.FileStore()
+	require.NoError(t, fs.AcquireOwnerLock())
+	t.Cleanup(fs.ReleaseOwnerLock)
+	// Spelled out rather than taken from the package constant, so the test proves
+	// the on-disk name and cannot silently stop covering the condition.
+	lockPath := filepath.Join(st.notesDir, ".thornotes-owner.lock")
+	require.FileExists(t, lockPath, "the test must run with the owner lock, as production does")
 
 	folder, err := st.svc.CreateFolder(ctx, st.userID, "test-uuid", nil, "Archive")
 	require.NoError(t, err)
@@ -173,10 +198,16 @@ func TestGitHistory_DeleteFolderLeavesCleanWorktree(t *testing.T) {
 	t.Logf("git log -1 --stat:\n%s", h11Git(t, st.notesDir, "log", "-1", "--stat"))
 	t.Logf("git status --short:\n%s", h11Git(t, st.notesDir, "status", "--short"))
 
+	// The store's own lock file must be invisible to git, not merely uncommitted.
+	ignored := h11Ignored(t, st.notesDir, ".thornotes-owner.lock")
+	t.Logf("git check-ignore -v .thornotes-owner.lock: %s", ignored)
+	assert.NotEmpty(t, ignored,
+		".thornotes-owner.lock must be ignored by the generated .gitignore, not just untracked")
+
 	// A nested note is still one file of the subtree, removed by the one commit.
 	assert.Equal(t, []string{deep.DiskPath}, h11HeadPaths(t, st.notesDir))
 	assert.Empty(t, h11Status(t, st.notesDir),
-		"folder deletion must leave a clean working tree")
+		"folder deletion must leave a clean working tree, owner lock included")
 }
 
 // A rename must commit both ends of the move and nothing else.
