@@ -1048,3 +1048,40 @@ func TestService_NoteContext_FolderFilter(t *testing.T) {
 	assert.Contains(t, result.Context, "Work Note")
 	assert.NotContains(t, result.Context, "Root Note")
 }
+
+// The response is a contract the app consumes, so ticket N9's change to how the
+// notes are read must not change a single byte of it. A corpus that fits under
+// the cap is assembled exactly as before: newest-first, "# Title\n\nbody\n\n---\n\n"
+// per note, nothing else.
+func TestService_NoteContext_ExactResponse(t *testing.T) {
+	stack := newTestStackFull(t)
+	svc, userID, pool := stack.svc, stack.userID, stack.pool
+	ctx := context.Background()
+
+	older, err := svc.CreateNote(ctx, userID, "test-uuid", nil, "Older Note", nil)
+	require.NoError(t, err)
+	_, err = svc.UpdateNoteContent(ctx, userID, older.ID, "older body", older.ContentHash)
+	require.NoError(t, err)
+
+	newer, err := svc.CreateNote(ctx, userID, "test-uuid", nil, "Newer Note", nil)
+	require.NoError(t, err)
+	_, err = svc.UpdateNoteContent(ctx, userID, newer.ID, "newer body", newer.ContentHash)
+	require.NoError(t, err)
+
+	// updated_at has second granularity and both notes were just written, so the
+	// ordering has to be pinned explicitly rather than left to insertion order.
+	_, err = pool.WriteDB.ExecContext(ctx,
+		`UPDATE notes SET updated_at = '2026-01-01 00:00:01' WHERE id = ?`, older.ID)
+	require.NoError(t, err)
+	_, err = pool.WriteDB.ExecContext(ctx,
+		`UPDATE notes SET updated_at = '2026-01-01 00:00:02' WHERE id = ?`, newer.ID)
+	require.NoError(t, err)
+
+	result, err := svc.NoteContext(ctx, userID, nil)
+	require.NoError(t, err)
+	assert.Equal(t,
+		"# Newer Note\n\nnewer body\n\n---\n\n# Older Note\n\nolder body\n\n---\n\n",
+		result.Context)
+	assert.Equal(t, 2, result.NoteCount)
+	assert.False(t, result.Truncated)
+}

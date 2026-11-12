@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"testing"
 
@@ -15,7 +16,7 @@ import (
 	"github.com/th0rn0/thornotes/internal/model"
 )
 
-func openTestDB(t *testing.T) *db.Pool {
+func openTestDB(t testing.TB) *db.Pool {
 	t.Helper()
 	dir := t.TempDir()
 	pool, err := db.Open(filepath.Join(dir, "test.db"))
@@ -24,7 +25,7 @@ func openTestDB(t *testing.T) *db.Pool {
 	return pool
 }
 
-func createUser(t *testing.T, pool *db.Pool) *model.User {
+func createUser(t testing.TB, pool *db.Pool) *model.User {
 	t.Helper()
 	repo := NewUserRepo(pool.WriteDB)
 	user, err := repo.Create(context.Background(), "user1", "hash", "test-uuid-1")
@@ -1740,6 +1741,49 @@ func TestNoteRepo_ListForContext_WithFolder(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, got, 1)
 	assert.Equal(t, "Folder Note", got[0].Title)
+}
+
+// IterateForContext is the context endpoint's read path (ticket N9): it streams
+// notes and clips each body, so the caller can stop at its character cap without
+// the repository having materialised the corpus.
+func TestNoteRepo_IterateForContext_ClipsContentAndStops(t *testing.T) {
+	pool := openTestDB(t)
+	user := createUser(t, pool)
+	ctx := context.Background()
+	noteRepo := NewNoteRepo(pool.ReadDB, pool.WriteDB)
+
+	long := "0123456789ABCDEFGHIJ"
+	for i, slug := range []string{"first-note", "second-note", "third-note"} {
+		n, err := noteRepo.Create(ctx, &model.Note{
+			UserID: user.ID, Title: slug, Slug: slug, DiskPath: "test-uuid/" + slug + ".md",
+			Content: long, ContentHash: "hash-" + slug,
+		})
+		require.NoError(t, err)
+		// Pin the order so the iteration sequence is the one asserted below.
+		_, err = pool.WriteDB.ExecContext(ctx,
+			`UPDATE notes SET updated_at = ? WHERE id = ?`,
+			fmt.Sprintf("2026-01-0%d 00:00:00", i+1), n.ID)
+		require.NoError(t, err)
+	}
+
+	var visits []string
+	err := noteRepo.IterateForContext(ctx, user.ID, nil, 5, func(n *model.Note) (bool, error) {
+		visits = append(visits, n.Slug+":"+n.Content)
+		return true, nil
+	})
+	require.NoError(t, err)
+	// Newest first, and every body clipped to the caller's limit: anything past
+	// the limit cannot fit the caller's budget, so reading it would be waste.
+	assert.Equal(t, []string{"third-note:01234", "second-note:01234", "first-note:01234"}, visits)
+
+	// A short-circuit stops the read: the third note must never be visited.
+	visits = nil
+	err = noteRepo.IterateForContext(ctx, user.ID, nil, 5, func(n *model.Note) (bool, error) {
+		visits = append(visits, n.Slug)
+		return len(visits) < 2, nil
+	})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"third-note", "second-note"}, visits)
 }
 
 // ─── APIToken SetName / SetScope same-value regressions ───────────────────────

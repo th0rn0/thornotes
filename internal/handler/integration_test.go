@@ -44,7 +44,7 @@ type testClient struct {
 	notesDir string
 }
 
-func newTestClient(t *testing.T) *testClient {
+func newTestClient(t testing.TB) *testClient {
 	return newTestClientWithRegistration(t, true)
 }
 
@@ -52,7 +52,7 @@ func newTestClient(t *testing.T) *testClient {
 // with the given allowRegistration flag. Use this for tests that need to
 // exercise the closed-instance gate on the register endpoint; existing
 // tests keep using newTestClient (registration open) unchanged.
-func newTestClientWithRegistration(t *testing.T, allowRegistration bool) *testClient {
+func newTestClientWithRegistration(t testing.TB, allowRegistration bool) *testClient {
 	t.Helper()
 	dir := t.TempDir()
 	pool, err := db.Open(filepath.Join(dir, "test.db"))
@@ -95,7 +95,7 @@ func newTestClientWithRegistration(t *testing.T, allowRegistration bool) *testCl
 	}
 }
 
-func (c *testClient) do(t *testing.T, method, path string, body any) *http.Response {
+func (c *testClient) do(t testing.TB, method, path string, body any) *http.Response {
 	t.Helper()
 	var bodyBytes []byte
 	if body != nil {
@@ -120,14 +120,14 @@ func (c *testClient) do(t *testing.T, method, path string, body any) *http.Respo
 	return resp
 }
 
-func (c *testClient) register(t *testing.T, username, password string) {
+func (c *testClient) register(t testing.TB, username, password string) {
 	t.Helper()
 	resp := c.do(t, http.MethodPost, "/api/v1/auth/register", map[string]string{"username": username, "password": password})
 	defer resp.Body.Close()
 	require.Equal(t, http.StatusCreated, resp.StatusCode)
 }
 
-func (c *testClient) login(t *testing.T, username, password string) {
+func (c *testClient) login(t testing.TB, username, password string) {
 	t.Helper()
 	resp := c.do(t, http.MethodPost, "/api/v1/auth/login", map[string]string{"username": username, "password": password})
 	require.Equal(t, http.StatusOK, resp.StatusCode)
@@ -144,7 +144,7 @@ func (c *testClient) login(t *testing.T, username, password string) {
 	c.csrfToken = result["csrf_token"]
 }
 
-func (c *testClient) registerAndLogin(t *testing.T) {
+func (c *testClient) registerAndLogin(t testing.TB) {
 	t.Helper()
 	c.register(t, "testuser", "securepassword123!")
 	c.login(t, "testuser", "securepassword123!")
