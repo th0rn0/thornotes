@@ -37,6 +37,7 @@ func New(
 	r.Use(gin.Recovery())
 	r.Use(zerologAccessMiddleware())
 	r.Use(security.SecureHeadersMiddleware())
+	r.Use(readinessGate(notesSvc))
 
 	// Snapshot the static tree once so every asset URL the shell emits and
 	// every cache header it is served with agree. A failure here would mean
@@ -86,6 +87,7 @@ func New(
 	healthOpts := []handler.HealthOption{
 		handler.WithNotesRootChecker(notesSvc),
 		handler.WithBuildVersion(buildVersion),
+		handler.WithStartupProbe(notesSvc),
 	}
 	if schemaReporter, ok := dbHealth.(handler.SchemaReporter); ok {
 		healthOpts = append(healthOpts, handler.WithSchemaReporter(schemaReporter))
@@ -221,4 +223,64 @@ func zerologAccessMiddleware() gin.HandlerFunc {
 			Str("ip", c.ClientIP()).
 			Msg("request")
 	}
+}
+
+// readinessGate refuses requests that would be answered from a note index the
+// startup reconcile is still rebuilding (see internal/notes/readiness.go).
+//
+// The listener is deliberately open while that pass runs — the port has to
+// answer, and a bind conflict should fail at t=0 rather than thirty seconds in
+// — so the index cannot be trusted yet: the list is short, search misses notes
+// that are on disk, and a note the caller already has an id for can answer 404.
+// Those are wrong answers, and the honest response during the window is "not
+// yet" rather than a partially populated list.
+func readinessGate(svc *notes.Service) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if !svc.StartupReconciling() || !indexDerivedPath(c.Request.URL.Path) {
+			c.Next()
+			return
+		}
+		// One second is a hint, not a promise: the pass is bounded by the size of
+		// the vault (33s for 5,000 notes on SQLite), so a client that honours
+		// Retry-After exactly once will retry into another 503. It is the right
+		// header to send anyway — it is what a retrying proxy reads.
+		c.Header("Retry-After", "1")
+		c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{
+			"error": "starting up: the note index is still being reconciled, retry shortly",
+			"phase": "reconciling",
+		})
+	}
+}
+
+// indexDerivedPath reports whether a request to path can only be answered from
+// the note index, and so must be refused while the startup pass is running.
+//
+// The gate is expressed as "inside the API, MCP or the public share view, unless
+// it is one of the two API routes that touch only sessions and users" rather
+// than as a list of index-reading routes. The API is one namespace, so a route
+// added later under it is covered by default — the failure mode of a per-route
+// list is that the index quietly stops being protected the first time somebody
+// forgets to extend it. The exception list is two entries long and does not grow
+// with the product:
+//
+//   - /api/v1/auth/* (register, login, logout, me, config) and /api/v1/csrf read
+//     users and sessions only. Blocking login for the length of the pass would be
+//     a worse outage than the one being fixed, and it is the one window in which
+//     nobody can act on the notes anyway.
+//   - everything outside /api, /mcp and /s is the app shell, a static asset or
+//     the service worker: embedded bytes or a template render, no index. Serving
+//     the shell is what lets a browser sitting on a booting instance (including
+//     one arriving on a deep link to /folder/note-slug) show the app and retry,
+//     instead of a bare JSON error. /s/:token is the one HTML view that does read
+//     a note, which is why it is named here.
+func indexDerivedPath(path string) bool {
+	switch {
+	case path == "/api/v1/csrf", strings.HasPrefix(path, "/api/v1/auth/"):
+		return false
+	case strings.HasPrefix(path, "/api/"),
+		strings.HasPrefix(path, "/mcp"),
+		strings.HasPrefix(path, "/s/"):
+		return true
+	}
+	return false
 }

@@ -29,10 +29,18 @@ type SchemaReporter interface {
 	SchemaStatus() (version, maxSupported int)
 }
 
+// StartupProbe reports whether a startup reconcile pass is still running, i.e.
+// whether the note index is still being repaired and requests that read it are
+// being refused (see internal/notes/readiness.go).
+type StartupProbe interface {
+	StartupReconciling() bool
+}
+
 type HealthHandler struct {
 	db      DBHealthChecker
 	notes   NotesRootHealthChecker
 	schema  SchemaReporter
+	startup StartupProbe
 	version string
 }
 
@@ -65,6 +73,13 @@ func WithSchemaReporter(s SchemaReporter) HealthOption {
 	return func(h *HealthHandler) { h.schema = s }
 }
 
+// WithStartupProbe adds the startup block to /healthz and lets a reconciling
+// instance report itself as not ready. Without it the endpoint behaves exactly
+// as before: a caller with no startup pass to report is ready by definition.
+func WithStartupProbe(p StartupProbe) HealthOption {
+	return func(h *HealthHandler) { h.startup = p }
+}
+
 func NewHealthHandler(db DBHealthChecker, opts ...HealthOption) *HealthHandler {
 	h := &HealthHandler{db: db}
 	for _, opt := range opts {
@@ -73,12 +88,20 @@ func NewHealthHandler(db DBHealthChecker, opts ...HealthOption) *HealthHandler {
 	return h
 }
 
-// Check handles GET /healthz. Returns 200 when all checks pass, 503 otherwise.
-// The endpoint is unauthenticated so load balancers and monitoring can reach it.
+// Check handles GET /healthz. Returns 200 when all checks pass and the instance
+// is ready, 503 otherwise. The endpoint is unauthenticated so load balancers and
+// monitoring can reach it.
 //
 // An unhealthy notes root deliberately fails readiness: an instance whose
 // reconciler refused a pass has an intact but stale index, and an operator must
 // see that before trusting it with writes.
+//
+// So does a startup reconcile that has not finished: `status` is "reconciling"
+// and the code is 503 for as long as the instance is being indexed. That is a
+// deliberate answer in two directions — a load balancer must not put a booting
+// instance into rotation (it would answer from a half-repaired index), and an
+// operator must be able to tell "still indexing" from "database down" without
+// reading logs. Before this change a booting instance reported "ok" and 200.
 func (h *HealthHandler) Check(c *gin.Context) {
 	checks := h.db.HealthCheck()
 	if h.notes != nil {
@@ -87,6 +110,13 @@ func (h *HealthHandler) Check(c *gin.Context) {
 		} else {
 			checks["notes_root"] = "ok"
 		}
+	}
+	// The startup phase is reported alongside the checks rather than as one of
+	// them: it is a state, not a failure, so it can never be "ok" in one pass and
+	// "error" in the next for the same reason.
+	phase := "ready"
+	if h.startup != nil && h.startup.StartupReconciling() {
+		phase = "reconciling"
 	}
 	status := "ok"
 	if len(checks) == 0 {
@@ -98,13 +128,21 @@ func (h *HealthHandler) Check(c *gin.Context) {
 			break
 		}
 	}
+	// A failure outranks the phase: "error" tells an operator to look at the
+	// volume or the database, where "reconciling" only asks them to wait.
+	if status == "ok" && phase != "ready" {
+		status = phase
+	}
 	code := http.StatusOK
-	if status == "error" {
+	if status != "ok" {
 		code = http.StatusServiceUnavailable
 	}
 	resp := gin.H{
 		"status": status,
 		"checks": checks,
+	}
+	if h.startup != nil {
+		resp["startup"] = gin.H{"phase": phase}
 	}
 	// The schema block lets an operator compare a running instance against an
 	// image before deploying it. It never affects the status code: a database

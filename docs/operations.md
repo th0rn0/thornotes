@@ -113,6 +113,22 @@ The value is the commit the binary was built from, injected at build time (`-X m
 
 The endpoint is unauthenticated deliberately. Knowing the commit of a notes server is not a secret, and requiring a login to answer it means only someone with host access can tell whether a deploy landed. Use it instead of the front-end asset digest (`app.js?v=…`): that hashes the assets, not the commit, so several releases that touch no JavaScript serve byte-identical digests.
 
+## Starting up: "reconciling" is not an error
+
+The listener opens before the startup reconcile finishes, so a booting instance answers `503` for anything that reads or writes the note index until that pass is done — `status` is `"reconciling"` and `startup.phase` says the same, while `schema`, `build` and `checks` remain readable:
+
+```bash
+curl -s https://notes.example.com/healthz | jq -r '.status, .startup.phase'
+# reconciling
+# reconciling
+```
+
+Wait for `status: "ok"` before treating the instance as ready; a healthcheck that reads any non-200 as "down" already does the right thing here, and a consumer with `depends_on: {thornotes: {condition: service_healthy}}` will now wait for the pass too — that is the intent, not a side effect. `error` still means what it meant: the database or the notes root needs a human, not a moment.
+
+How long that window lasts depends on which of two passes you are in, and the two differ by more than an order of magnitude. The figures usually quoted for this pass — ~2.7s for 400 notes, ~13s for 2,000, ~33s for 5,000 on SQLite — are the **rebuild**: the notes table is empty or does not match the disk, as on a first boot, a fresh or restored volume, or an index that was lost. That pass reads and hashes every file and costs roughly 4.4 ms per note. A **restart over a vault whose database already matches the disk** — what an ordinary deploy actually pays — finds every hash unchanged, at roughly 0.08 ms per note: 0.16s rather than 8.8s for 2,000 notes, about 55× cheaper. Both were measured with 2,000 notes, and in both cases the port is bound and answering within 0.02s; it is only the note routes that answer `503` until the pass ends, while the app shell, `/healthz`, `/api/v1/auth/*` and static assets serve normally.
+
+So size a container start period for the rebuild, not for the restart. A start period chosen from the rebuild number is harmless on a restart that is ready in a fraction of a second; one chosen from the restart number will flap on a genuine rebuild. `--skip-reconciliation` remains the escape hatch for a trusted restart, but it disables the repair itself, so it is safe only when you know the disk and the index agree — it is not a way to avoid a delay that a matching restart does not incur anyway.
+
 ## Schema too new
 
 The database has been migrated by a newer build than the image you just started supports. Startup refuses before applying migrations. For a running instance, inspect `GET /healthz`: compare `schema.version` (database version) with `schema.max_supported` (the running binary's migration ceiling). This endpoint is unavailable when startup itself is refused, so inspect the image before deployment as well: its OCI label `co.thornotes.schema.max` reports the SQLite migration ceiling and `co.thornotes.schema.max.mysql` reports the MySQL ceiling. Compare the appropriate label with the database's recorded version.
