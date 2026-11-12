@@ -43,6 +43,8 @@ docker run -d \
 
 Open [http://localhost:8080](http://localhost:8080) and register your account.
 
+A fresh named volume (`thornotes-data`) is seeded with the right ownership automatically. If you bind-mount a host directory instead, make it writable by uid 65532 first — see [Data volume ownership](../README.md#data-volume-ownership).
+
 For persistent configuration or MariaDB, use Docker Compose — see the [README](../README.md#docker-compose) for full examples.
 
 ### Option 2: Linux binary
