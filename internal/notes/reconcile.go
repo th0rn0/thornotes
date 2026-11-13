@@ -69,7 +69,17 @@ type reconcileResult struct {
 	// [[wikilink]] target and the indexed title all move, so it counts towards
 	// total() and wakes the watcher's SSE notification rather than happening
 	// invisibly.
-	NotesRetitled     int
+	NotesRetitled int
+	// LinksRewritten counts [[links]] in *other* notes whose target was moved
+	// onto the new title of a note this pass retitled (ticket 633). Rewriting
+	// somebody's prose is a change, so it counts towards total() too: a pass
+	// that quietly edits 97 notes is the same trust problem in the other
+	// direction from a pass that quietly orphans them. LinksSkipped counts the
+	// ones deliberately left alone (a shared old title, or a new title that
+	// does not resolve back to the note) so the log says what was not done and
+	// why.
+	LinksRewritten    int
+	LinksSkipped      int
 	FoldersCreated    int
 	FoldersDeleted    int
 	FoldersRepaired   int
@@ -79,7 +89,7 @@ type reconcileResult struct {
 // total returns the total number of disk-vs-DB drift events repaired.
 func (r reconcileResult) total() int {
 	return r.NotesCreated + r.NotesDeleted + r.NotesUpdated + r.NotesPathRepaired + r.NotesRetitled +
-		r.FoldersCreated + r.FoldersDeleted + r.FoldersRepaired
+		r.LinksRewritten + r.FoldersCreated + r.FoldersDeleted + r.FoldersRepaired
 }
 
 // reconcileUserFromDisk performs full bidirectional sync between the on-disk
@@ -418,6 +428,7 @@ func (s *Service) reconcileUserFromDisk(ctx context.Context, user *model.User) (
 	// Steady state costs one string compare per note in a pass that already read
 	// every file for the hash compare, and writes nothing: title equality is the
 	// fast path, exactly as content-hash equality is above.
+	retitles := make([]titleMove, 0)
 	for diskPath, content := range diskNotes {
 		rec, ok := dbNotesByPath[diskPath]
 		if !ok {
@@ -438,8 +449,52 @@ func (s *Service) reconcileUserFromDisk(ctx context.Context, user *model.User) (
 		}
 		log.Info().Int64("note_id", rec.ID).Str("disk_path", diskPath).
 			Str("from", rec.Title).Str("to", title).Msg("reconcile: note title converged from disk heading")
+		retitles = append(retitles, titleMove{
+			noteID:   rec.ID,
+			oldTitle: rec.Title,
+			newTitle: title,
+			// A title converged from a heading never renames the file, so the
+			// slug is unchanged and only the title form of a link can be
+			// orphaned here.
+			oldSlug: rec.Slug,
+		})
 		rec.Title = title
 		result.NotesRetitled++
+	}
+
+	// 9c. Take the inbound links with each moved title (ticket 633).
+	//
+	// Link resolution matches on the title, so a title that moved stops being
+	// the target of every [[old title]] that used to point here. Those links
+	// live in *other* notes' bodies, which is why this is a second write in the
+	// same pass rather than a field on the retitled row: the repair is to move
+	// the links onto the new name, not to keep the old name alive in a
+	// resolution table.
+	//
+	// Each rewrite is a normal save under the source note's own lock with the
+	// same content-hash compare every other save uses, and each one is logged
+	// (note, from, to) and counted, because a pass that edits other people's
+	// notes in silence would be its own kind of untrustworthy.
+	for _, mv := range retitles {
+		res, err := s.rewriteInboundLinks(ctx, user.ID, mv)
+		if err != nil {
+			log.Warn().Err(err).Int64("note_id", mv.noteID).
+				Str("from", mv.oldTitle).Str("to", mv.newTitle).
+				Msg("reconcile: rewrite inbound links after title convergence")
+			continue
+		}
+		result.LinksRewritten += res.LinksRewritten
+		result.LinksSkipped += res.LinksSkippedShared + res.LinksSkippedUnresolved
+		if res.NotesRewritten > 0 {
+			log.Info().
+				Int64("user_id", user.ID).
+				Int64("note_id", mv.noteID).
+				Str("from", mv.oldTitle).
+				Str("to", mv.newTitle).
+				Int("notes_rewritten", res.NotesRewritten).
+				Int("links_rewritten", res.LinksRewritten).
+				Msg("reconcile: inbound links moved with the converged title")
+		}
 	}
 
 	// 10. Rebuild the link graph for the user. Backfills title keys (migration

@@ -50,27 +50,17 @@ func parseLinkRef(raw string) LinkRef {
 }
 
 // stripFencedCode removes ``` and ~~~ fenced code blocks: the opening fence
-// line, the closing fence line, and every line between them.
+// line, the closing fence line, and every line between them. It shares
+// walkLines with maskCode so the two views of "inside a fence" are the same
+// view.
 func stripFencedCode(body string) string {
-	lines := strings.Split(body, "\n")
-	out := make([]string, 0, len(lines))
-	fence := byte(0)
-	for _, line := range lines {
-		trimmed := strings.TrimLeft(line, " \t")
-		if fence == 0 {
-			if c, ok := fenceMarker(trimmed); ok {
-				fence = c
-				continue // drop opening fence line
-			}
-			out = append(out, line)
-			continue
+	lines := make([]string, 0, strings.Count(body, "\n")+1)
+	walkLines(body, func(line string, inCode bool) {
+		if !inCode {
+			lines = append(lines, line)
 		}
-		if c, ok := fenceMarker(trimmed); ok && c == fence {
-			fence = 0 // drop closing fence line (fall through, not appended)
-		}
-		// lines inside a fence are dropped
-	}
-	return strings.Join(out, "\n")
+	})
+	return strings.Join(lines, "\n")
 }
 
 // fenceMarker reports whether trimmed starts a code fence (3+ backticks or

@@ -215,3 +215,39 @@ func (h *NotesHandler) Backlinks(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, view)
 }
+
+// brokenLinksJSON is the read-only dangling-link report (ticket 633 §2). It is
+// a report, not a repair: nothing here is ever applied to a note.
+type brokenLinksJSON struct {
+	Notes          int                `json:"notes"`
+	Links          int                `json:"links"`
+	Broken         []notes.BrokenLink `json:"broken"`
+	RepairRequires string             `json:"repair_requires"`
+}
+
+// brokenLinksRepairRequires states what a real repair would take. It travels
+// with the report because the tempting reading of a dangling link is "guess and
+// fix", and the reason that is refused belongs next to the list.
+const brokenLinksRepairRequires = "a title history — what each note used to be called. " +
+	"The notes tree records one only where the instance was started with -enable-git-history, " +
+	"and it is per-instance, so it cannot be assumed; note_links stores target hashes, not names, " +
+	"so the old titles cannot be recovered from the index. Without that history the links below " +
+	"have to be repaired by a person reading them. The near_match field is a hint for that " +
+	"person and is never applied automatically: a guessed link is a silently wrong one."
+
+// BrokenLinks handles GET /api/v1/links/broken — every link that does not
+// resolve today, with the note it sits in and a nearest-title hint.
+func (h *NotesHandler) BrokenLinks(c *gin.Context) {
+	user := ginUser(c)
+	inv, err := h.svc.BrokenLinks(c.Request.Context(), user.ID)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, brokenLinksJSON{
+		Notes:          inv.Notes,
+		Links:          inv.Links,
+		Broken:         inv.Broken,
+		RepairRequires: brokenLinksRepairRequires,
+	})
+}
