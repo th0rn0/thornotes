@@ -316,10 +316,14 @@ function createEditor(parent, { onChange, theme } = {}) {
       // because CM6's focus handler restores that saved value whenever scrollTop
       // drops to 0, which would undo our reset the first time the user clicks into
       // the editor after switching notes.
-      view.scrollDOM.scrollTop = 0;
-      if (view.inputState) {
-        view.inputState.lastScrollTop = 0;
-        view.inputState.lastScrollLeft = 0;
+      const result = computeScrollToTopState({
+        scrollDOM: view.scrollDOM,
+        inputState: view.inputState
+      });
+      view.scrollDOM.scrollTop = result.scrollDOM.scrollTop;
+      if (result.inputState) {
+        view.inputState.lastScrollTop = result.inputState.lastScrollTop;
+        view.inputState.lastScrollLeft = result.inputState.lastScrollLeft;
       }
     },
     setTheme(name) {
