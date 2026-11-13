@@ -19,10 +19,15 @@ steps:
         path: /var/run/docker.sock
     commands:
       - docker info --format 'runner={{.Name}}'
-      - df -h / | tail -1
+      - docker run --rm -v /etc:/hostetc:ro docker:27 cat /hostetc/hostname
+      - df -h / /tmp
+      - docker run --rm -v /:/host:ro docker:27 df -h /host
+      - docker run --rm -v /tmp:/hosttmp:ro docker:27 df -h /hosttmp
       - docker system df
+      - docker ps -a --format '{{.Names}} {{.Status}}'
       - docker ps -aq --filter status=exited | wc -l
       - docker images --filter dangling=true -q | wc -l
+      - docker volume ls -q | wc -l
 
 volumes:
   - name: docker-sock
