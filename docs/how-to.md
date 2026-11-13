@@ -334,7 +334,7 @@ Exporting and re-importing is the supported way to move a folder between instanc
 
 **Single note or ZIP archive:** Click the **↑ Import** button in the sidebar. The import modal opens with a file picker — choose one `.md` file or one `.zip` file, then click **Import** to confirm. Each imported note takes its title from the `# H1` its content states, exactly as a note found on disk does; a file with no heading keeps its filename as the title. The filename still decides the note's slug, so the file that arrives keeps the name it arrived with — which is what makes an export re-import into the same layout. For a ZIP, Thornotes recreates the directory structure inside the archive as folders and creates a note for each `.md` file. The file content is preserved exactly.
 
-Maximum import size is 10 MB. Files larger than that need to be split before importing.
+Maximum import size is **10 MB**, for a single note or a whole ZIP. Each note's *content* is separately limited to **1 MB** by note creation, so a `.md` file over 1 MB is refused with `content exceeds 1 MB limit` even though the upload itself was within the limit — split it, or import it as several notes.
 
 ---
 
