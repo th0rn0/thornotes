@@ -67,7 +67,7 @@ docker run --tmpfs /data:uid=65532,gid=65532,mode=700 ...
 
 Note that nothing on a tmpfs survives a container restart, so this suits testing or stateless use.
 
-For a full walkthrough of all features, see the **[How-To Guide](docs/how-to.md)**. For database migration backups and recovery, see the **[Operations Runbook](docs/operations.md)**.
+For a full walkthrough of all features, see the **[How-To Guide](docs/how-to.md)**. For database migration backups and recovery, see the **[Operations Runbook](docs/operations.md)**. To verify the stored link graph against a real corpus with `scripts/verify_wikilinks.py`, see **[Verifying the wikilink graph](docs/wikilinks-oracle.md)**.
 
 ### Docker Compose
 
