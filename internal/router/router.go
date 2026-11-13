@@ -179,6 +179,12 @@ func New(
 		history.POST("/:id/history/:sha/restore", csrfMW, historyH.Restore)
 	}
 
+	// Links — the read-only dangling-link report (ticket 633).
+	links := r.Group("/api/v1/links", sessionMW)
+	{
+		links.GET("/broken", notesH.BrokenLinks)
+	}
+
 	// Account — API token management.
 	account := r.Group("/api/v1/account", sessionMW)
 	{

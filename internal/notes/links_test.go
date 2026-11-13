@@ -59,7 +59,7 @@ func TestIndexLinks_Unresolved(t *testing.T) {
 	assert.False(t, out[0].Ambiguous)
 }
 
-func TestIndexLinks_RenameRepairsInbound(t *testing.T) {
+func TestIndexLinks_RenameMovesInboundLink(t *testing.T) {
 	s := newTestStackFull(t)
 	ctx := context.Background()
 
@@ -75,14 +75,26 @@ func TestIndexLinks_RenameRepairsInbound(t *testing.T) {
 	require.Len(t, out, 1)
 	require.NotNil(t, out[0].ToNoteID)
 
-	// Rename the target — the inbound edge should become unresolved.
+	// Rename the target — the link that named it follows the new title, so the
+	// edge still resolves and the backlink survives the rename (ticket 633).
 	err = s.svc.UpdateNoteMetadata(ctx, s.userID, "test-uuid", b.ID, "New Title", nil)
 	require.NoError(t, err)
+
+	note, err := s.svc.GetNote(ctx, s.userID, a.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "see [[New Title]]", note.Content)
 
 	out, err = linkRepo(s).ListOutgoing(ctx, s.userID, a.ID)
 	require.NoError(t, err)
 	require.Len(t, out, 1)
-	assert.Nil(t, out[0].ToNoteID, "renaming the target should leave the inbound link unresolved")
+	require.NotNil(t, out[0].ToNoteID, "rewriting the link keeps the target resolved")
+	assert.Equal(t, b.ID, *out[0].ToNoteID)
+	assert.Equal(t, "New Title", out[0].RawTarget)
+
+	back, err := s.svc.Backlinks(ctx, s.userID, b.ID)
+	require.NoError(t, err)
+	require.Len(t, back, 1)
+	assert.Equal(t, a.ID, back[0].FromNoteID)
 }
 
 func TestIndexLinks_DeleteNoteCascade(t *testing.T) {

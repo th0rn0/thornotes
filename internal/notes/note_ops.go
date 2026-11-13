@@ -196,6 +196,13 @@ func (s *Service) UpdateNoteContent(ctx context.Context, userID, noteID int64, c
 // title, under the note lock. Writing only the row is what made a rename
 // survive until the next reconcile pass and then be undone by it.
 //
+// A title is also how other notes address this one, so a rename moves the links
+// too: every `[[old title]]` that resolved here is rewritten to the new title,
+// anchor and display text untouched (ticket 633 — the alternative, an alias
+// table keeping old titles alive, was considered and rejected). The rewrite
+// pass runs after the note lock is released, one source note at a time, and is
+// logged and counted.
+//
 // When the title changes the slug is recomputed; if the slug differs the note
 // file is renamed on disk and disk_path is updated in the DB. If the DB update
 // fails after the disk rename (or the heading rewrite), both are rolled back so
@@ -208,15 +215,85 @@ func (s *Service) UpdateNoteContent(ctx context.Context, userID, noteID int64, c
 // rename instead of being overwritten by the row's older copy.
 func (s *Service) UpdateNoteMetadata(ctx context.Context, userID int64, userUUID string, noteID int64, title string, tags []string) error {
 	defer s.lockTreeShared(userID)()
+
+	note, oldTitle, oldSlug, err := s.applyMetadataUpdate(ctx, userID, userUUID, noteID, title, tags)
+	if err != nil {
+		return err
+	}
+
+	if oldTitle != "" && oldTitle != note.Title {
+		// The pass takes each *source* note's lock one at a time. Holding this
+		// note's lock while doing that would let two renames that link to each
+		// other deadlock, so applyMetadataUpdate has already released it.
+		//
+		// The resolver is built after the rename has landed — it has to describe
+		// the world the rewritten links resolve in — and is handed to the pass
+		// rather than reloaded inside it.
+		pass, perr := s.loadLinkRewritePass(ctx, userID)
+		var res linkRewriteResult
+		rerr := perr
+		if rerr == nil {
+			res, rerr = s.rewriteInboundLinks(ctx, userID, titleMove{
+				noteID:   note.ID,
+				oldTitle: oldTitle,
+				newTitle: note.Title,
+				oldSlug:  oldSlug,
+			}, pass)
+		}
+		if rerr != nil {
+			// Fall back to re-resolution alone: nothing is rewritten, and the
+			// links that now dangle are marked unresolved, which is the
+			// truthful signal and exactly what happened before this pass
+			// existed.
+			log.Warn().Err(rerr).Int64("note_id", note.ID).Msg("rename: rewrite inbound links")
+			if err := s.indexNoteLinksUnderLock(ctx, note, oldTitle); err != nil {
+				log.Warn().Err(err).Int64("note_id", note.ID).Msg("index links after metadata update")
+			}
+			return nil
+		}
+		log.Info().
+			Int64("note_id", note.ID).
+			Str("from", oldTitle).
+			Str("to", note.Title).
+			Int("notes_rewritten", res.NotesRewritten).
+			Int("links_rewritten", res.LinksRewritten).
+			Int("links_skipped_shared", res.LinksSkippedShared).
+			Int("links_skipped_unresolved", res.LinksSkippedUnresolved).
+			Msg("rename: inbound links moved with the title")
+	}
+
+	if err := s.indexNoteLinksUnderLock(ctx, note, ""); err != nil {
+		log.Warn().Err(err).Int64("note_id", noteID).Msg("index links after metadata update")
+	}
+	return nil
+}
+
+// indexNoteLinksUnderLock re-indexes one note's outgoing edges while holding its
+// own note lock — the discipline every ordinary write uses, so a rename cannot
+// race the index of a note whose body it did not touch.
+func (s *Service) indexNoteLinksUnderLock(ctx context.Context, note *model.Note, oldTitle string) error {
+	mu := s.lockNote(note.ID)
+	mu.Lock()
+	defer mu.Unlock()
+	return s.indexLinks(ctx, note, oldTitle)
+}
+
+// applyMetadataUpdate is the locked half of UpdateNoteMetadata: it commits the
+// rename and returns the note as it now stands, plus the title and slug it had
+// before, which the link rewrite needs. The caller already holds the tree-shared
+// lock; a nested RLock here could deadlock behind a waiting writer.
+func (s *Service) applyMetadataUpdate(ctx context.Context, userID int64, userUUID string, noteID int64, title string, tags []string) (*model.Note, string, string, error) {
 	mu := s.lockNote(noteID)
 	mu.Lock()
 	defer mu.Unlock()
 
 	note, err := s.notes.GetByID(ctx, userID, noteID)
 	if err != nil {
-		return err
+		return nil, "", "", err
 	}
 	oldTitle := note.Title
+	oldSlug := note.Slug
+
 	oldContent := note.Content
 	oldDiskPath := note.DiskPath
 	renamed := false
@@ -226,29 +303,29 @@ func (s *Service) UpdateNoteMetadata(ctx context.Context, userID int64, userUUID
 		// more than headingTitle will read back, so a title that could not
 		// survive the round trip is refused rather than truncated.
 		if len(title) > maxTitleLen {
-			return apperror.BadRequest("title must be 1–500 characters")
+			return nil, "", "", apperror.BadRequest("title must be 1–500 characters")
 		}
 		newSlug := slugify(title)
 		if newSlug != note.Slug {
 			if existing, err := s.notes.GetByFolderAndSlug(ctx, userID, note.FolderID, newSlug); err == nil && existing.ID != note.ID {
-				return apperror.Conflict(fmt.Sprintf("note %q already exists in this folder", title))
+				return nil, "", "", apperror.Conflict(fmt.Sprintf("note %q already exists in this folder", title))
 			} else if err != nil && !errors.Is(err, apperror.ErrNotFound) {
-				return err
+				return nil, "", "", err
 			}
 			var folderPath string
 			if note.FolderID != nil {
 				folder, err := s.folders.GetByID(ctx, userID, *note.FolderID)
 				if err != nil {
-					return err
+					return nil, "", "", err
 				}
 				folderPath = folder.DiskPath
 			}
 			newDiskPath := notesDiskPath(userUUID, folderPath, newSlug)
 			if err := s.fs.RenameFileExclusive(note.DiskPath, newDiskPath); err != nil {
 				if errors.Is(err, os.ErrExist) {
-					return apperror.Conflict(fmt.Sprintf("note %q already exists in this folder", title))
+					return nil, "", "", apperror.Conflict(fmt.Sprintf("note %q already exists in this folder", title))
 				}
-				return apperror.Internal("rename note file", err)
+				return nil, "", "", apperror.Internal("rename note file", err)
 			}
 			note.Slug = newSlug
 			note.DiskPath = newDiskPath
@@ -301,7 +378,7 @@ func (s *Service) UpdateNoteMetadata(ctx context.Context, userID int64, userUUID
 	if rewriteBody {
 		if err := s.fs.Write(note.DiskPath, note.Content); err != nil {
 			rollback()
-			return apperror.Internal("write note heading", err)
+			return nil, "", "", apperror.Internal("write note heading", err)
 		}
 	}
 
@@ -309,13 +386,10 @@ func (s *Service) UpdateNoteMetadata(ctx context.Context, userID int64, userUUID
 	// reader can observe a row whose title and heading disagree.
 	if err := s.notes.UpdateMetadataAndContent(ctx, note); err != nil {
 		rollback()
-		return err
+		return nil, "", "", err
 	}
 
-	if err := s.indexLinks(ctx, note, oldTitle); err != nil {
-		log.Warn().Err(err).Int64("note_id", noteID).Msg("index links after metadata update")
-	}
-	return nil
+	return note, oldTitle, oldSlug, nil
 }
 
 // MoveNote moves a note to newFolderID (nil = root). It:

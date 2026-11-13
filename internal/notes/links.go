@@ -13,13 +13,21 @@ import (
 // set. Resolution matches the wikilinks reference (slug OR normalized title,
 // nearest common ancestor, explicit ambiguity) without any fuzzy matching.
 func (s *Service) loadResolver(ctx context.Context, userID int64) (*wikilinks.Resolver, error) {
+	resolver, _, err := s.loadResolverAndNotes(ctx, userID)
+	return resolver, err
+}
+
+// loadResolverAndNotes is loadResolver for callers that also need the note list
+// the resolver was built from (the link rewrite asks it who else answers to a
+// title that just moved).
+func (s *Service) loadResolverAndNotes(ctx context.Context, userID int64) (*wikilinks.Resolver, []*model.NoteListItem, error) {
 	items, err := s.notes.ListAll(ctx, userID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	folders, err := s.folders.Tree(ctx, userID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	nrefs := make([]wikilinks.NoteRef, 0, len(items))
@@ -30,7 +38,7 @@ func (s *Service) loadResolver(ctx context.Context, userID int64) (*wikilinks.Re
 	for _, f := range folders {
 		frefs = append(frefs, wikilinks.FolderRef{ID: f.ID, ParentID: f.ParentID})
 	}
-	return wikilinks.NewResolver(nrefs, frefs), nil
+	return wikilinks.NewResolver(nrefs, frefs), items, nil
 }
 
 // computeEdges extracts links from a note's content and resolves each target,
@@ -76,6 +84,15 @@ func (s *Service) indexLinks(ctx context.Context, note *model.Note, oldTitle str
 	if err != nil {
 		return err
 	}
+	return s.indexLinksWithResolver(ctx, note, oldTitle, resolver)
+}
+
+// indexLinksWithResolver is indexLinks for a caller that already holds a
+// resolver over the user's notes — the title rewrite pass, which would otherwise
+// reload the whole note list once per note it rewrote, making the pass
+// O(rewritten notes × notes). The resolver must describe the current titles; a
+// caller mid-rewrite is safe because a rewrite moves link targets only.
+func (s *Service) indexLinksWithResolver(ctx context.Context, note *model.Note, oldTitle string, resolver *wikilinks.Resolver) error {
 	if err := s.links.ReplaceLinks(ctx, note.UserID, note.ID, computeEdges(note, resolver)); err != nil {
 		return err
 	}
