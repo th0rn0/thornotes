@@ -84,6 +84,15 @@ func (s *Service) indexLinks(ctx context.Context, note *model.Note, oldTitle str
 	if err != nil {
 		return err
 	}
+	return s.indexLinksWithResolver(ctx, note, oldTitle, resolver)
+}
+
+// indexLinksWithResolver is indexLinks for a caller that already holds a
+// resolver over the user's notes — the title rewrite pass, which would otherwise
+// reload the whole note list once per note it rewrote, making the pass
+// O(rewritten notes × notes). The resolver must describe the current titles; a
+// caller mid-rewrite is safe because a rewrite moves link targets only.
+func (s *Service) indexLinksWithResolver(ctx context.Context, note *model.Note, oldTitle string, resolver *wikilinks.Resolver) error {
 	if err := s.links.ReplaceLinks(ctx, note.UserID, note.ID, computeEdges(note, resolver)); err != nil {
 		return err
 	}

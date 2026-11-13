@@ -108,6 +108,62 @@ func linkRewriteCases() []titleRepairCase {
 			assert.Equal(t, "the notes", edges[0].LinkText)
 		}},
 
+		{"one pass converges several titles and moves every link", func(t *testing.T, st *titleStack) {
+			ctx := context.Background()
+			// Three titles move in the same pass, and one note links all three.
+			// The pass shares one resolver across the moves, so it has to be a
+			// resolver built after the retitles: built before them, none of the
+			// new titles would resolve and no link would move.
+			source, err := st.svc.CreateNote(ctx, st.userID, st.user.UUID, nil, "Source Page", nil)
+			require.NoError(t, err)
+			targets := make([]int64, 0, 3)
+			for _, title := range []string{"Alpha", "Beta", "Gamma"} {
+				n, err := st.svc.CreateNote(ctx, st.userID, st.user.UUID, nil, title, nil)
+				require.NoError(t, err)
+				targets = append(targets, n.ID)
+				writeNoteFile(t, st, n.DiskPath, "# "+title+"\n\ntarget body")
+			}
+			const body = "see [[Alpha]], [[Beta#Detail|the beta]] and [[Gamma]]"
+			_, err = st.svc.UpdateNoteContent(ctx, st.userID, source.ID, body, source.ContentHash)
+			require.NoError(t, err)
+
+			// Every heading drifts, one external edit each.
+			for i, title := range []string{"Alpha", "Beta", "Gamma"} {
+				n, err := st.svc.GetNote(ctx, st.userID, targets[i])
+				require.NoError(t, err)
+				writeNoteFile(t, st, n.DiskPath, "# "+title+" Two\n\ntarget body")
+			}
+
+			_, err = st.svc.Reconcile(ctx, st.user)
+			require.NoError(t, err)
+
+			want := "see [[Alpha Two]], [[Beta Two#Detail|the beta]] and [[Gamma Two]]"
+			got, err := st.svc.GetNote(ctx, st.userID, source.ID)
+			require.NoError(t, err)
+			assert.Equal(t, want, got.Content,
+				"every move in the pass is rewritten, each onto its own new title")
+			assert.Equal(t, want, readNoteFile(t, st, got.DiskPath))
+
+			// And each rewritten link resolves to the note that moved.
+			for i, title := range []string{"Alpha Two", "Beta Two", "Gamma Two"} {
+				edges, err := st.svc.OutgoingLinks(ctx, st.userID, source.ID)
+				require.NoError(t, err)
+				found := false
+				for _, e := range edges {
+					if e.RawTarget == title {
+						require.NotNil(t, e.ToNoteID)
+						assert.Equal(t, targets[i], *e.ToNoteID)
+						found = true
+					}
+				}
+				assert.True(t, found, "no edge for %q", title)
+			}
+
+			changed, err := st.svc.Reconcile(ctx, st.user)
+			require.NoError(t, err)
+			assert.Zero(t, changed, "the multi-move pass still terminates")
+		}},
+
 		{"a second pass immediately afterwards changes nothing", func(t *testing.T, st *titleStack) {
 			ctx := context.Background()
 			target, err := st.svc.CreateNote(ctx, st.userID, st.user.UUID, nil, "Before", nil)

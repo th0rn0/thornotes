@@ -56,26 +56,60 @@ type linkRewriteResult struct {
 	LinksSkippedUnresolved int
 }
 
+// linkRewritePass is the world one rewrite pass works in: the resolver and the
+// note list it was built from. A pass builds it once, *after* every title it is
+// about has moved, and hands it to each rewrite — that ordering is what makes it
+// the right view (the world the rewritten links have to resolve in), and sharing
+// it is what makes the pass affordable: loading the whole note list once per
+// moved title made the loop O(movers × notes), so a 200-note vault whose every
+// title drifted spent ~5 s of startup reconcile in it, in front of the 466
+// readiness gate, on every restart until the vault converged.
+type linkRewritePass struct {
+	resolver *wikilinks.Resolver
+	// items is the note list the resolver was built from. The rewrite asks it
+	// who else answers to a title that just moved, to refuse a shared old
+	// title rather than silently pick a winner.
+	items []*model.NoteListItem
+}
+
+// loadLinkRewritePass builds the resolver for a rewrite pass. During a title
+// rewrite nothing but link targets changes, so one resolver stays true for the
+// whole pass: titles, slugs and folders are fixed once the retitles are applied.
+func (s *Service) loadLinkRewritePass(ctx context.Context, userID int64) (*linkRewritePass, error) {
+	resolver, items, err := s.loadResolverAndNotes(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	return &linkRewritePass{resolver: resolver, items: items}, nil
+}
+
 // rewriteInboundLinks points the notes that link to a moved title at the new
 // one. Callers hold the tree-shared lock (or the exclusive one) but must NOT
 // hold the moved note's lock: this pass takes each source note's own lock, one
 // at a time, so two renames that cross-link cannot deadlock.
 //
+// pass is the resolver for the whole pass, built after the titles moved; a nil
+// pass is loaded here, which is only appropriate for a single move.
+//
 // Writes go through the normal save path — per-note lock, content-hash compare,
 // disk first then DB, file rolled back if the DB refuses — so a rewrite cannot
 // clobber an edit in flight and lands the same way any other save does.
-func (s *Service) rewriteInboundLinks(ctx context.Context, userID int64, mv titleMove) (linkRewriteResult, error) {
+func (s *Service) rewriteInboundLinks(ctx context.Context, userID int64, mv titleMove, pass *linkRewritePass) (linkRewriteResult, error) {
 	var res linkRewriteResult
 	if mv.oldTitle == "" || mv.oldTitle == mv.newTitle {
 		return res, nil
 	}
 
-	resolver, items, err := s.loadResolverAndNotes(ctx, userID)
-	if err != nil {
-		return res, err
+	if pass == nil {
+		p, err := s.loadLinkRewritePass(ctx, userID)
+		if err != nil {
+			return res, err
+		}
+		pass = p
 	}
-	// The resolver above describes the world *after* the move, which is the
-	// world the rewritten links have to resolve in.
+	resolver, items := pass.resolver, pass.items
+	// The resolver describes the world *after* the move, which is the world the
+	// rewritten links have to resolve in.
 
 	oldKey := wikilinks.NormalizeKey(mv.oldTitle)
 	// Did the old name belong to more than one note? Then every link that used
@@ -163,7 +197,7 @@ func (s *Service) rewriteInboundLinks(ctx context.Context, userID int64, mv titl
 			continue
 		}
 
-		n, changed := s.rewriteNoteLinks(ctx, userID, fromID, mv.newTitle, names)
+		n, changed := s.rewriteNoteLinks(ctx, userID, fromID, mv.newTitle, names, resolver)
 		if !changed {
 			continue
 		}
@@ -185,11 +219,16 @@ func (s *Service) rewriteInboundLinks(ctx context.Context, userID int64, mv titl
 // write could not be committed). It is the ordinary save path: content-hash
 // compare against the row, disk write, DB update, file restored if the row
 // refuses.
+//
+// resolver is the pass's, not a fresh one: re-indexing the note it just wrote
+// resolves targets against the same world the rewrite validated against, and
+// loading the note list again here would put the per-note cost back.
 func (s *Service) rewriteNoteLinks(
 	ctx context.Context,
 	userID, noteID int64,
 	newTitle string,
 	names func(target string) bool,
+	resolver *wikilinks.Resolver,
 ) (rewritten int, changed bool) {
 	mu := s.lockNote(noteID)
 	mu.Lock()
@@ -236,7 +275,7 @@ func (s *Service) rewriteNoteLinks(
 
 	// Re-resolve this note's outgoing edges now, so the graph reflects the new
 	// targets in the same pass that wrote them.
-	if err := s.indexLinks(ctx, note, ""); err != nil {
+	if err := s.indexLinksWithResolver(ctx, note, "", resolver); err != nil {
 		log.Warn().Err(err).Int64("note_id", note.ID).Msg("rename: reindex rewritten links")
 	}
 	return n, true

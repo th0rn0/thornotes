@@ -225,12 +225,21 @@ func (s *Service) UpdateNoteMetadata(ctx context.Context, userID int64, userUUID
 		// The pass takes each *source* note's lock one at a time. Holding this
 		// note's lock while doing that would let two renames that link to each
 		// other deadlock, so applyMetadataUpdate has already released it.
-		res, rerr := s.rewriteInboundLinks(ctx, userID, titleMove{
-			noteID:   note.ID,
-			oldTitle: oldTitle,
-			newTitle: note.Title,
-			oldSlug:  oldSlug,
-		})
+		//
+		// The resolver is built after the rename has landed — it has to describe
+		// the world the rewritten links resolve in — and is handed to the pass
+		// rather than reloaded inside it.
+		pass, perr := s.loadLinkRewritePass(ctx, userID)
+		var res linkRewriteResult
+		rerr := perr
+		if rerr == nil {
+			res, rerr = s.rewriteInboundLinks(ctx, userID, titleMove{
+				noteID:   note.ID,
+				oldTitle: oldTitle,
+				newTitle: note.Title,
+				oldSlug:  oldSlug,
+			}, pass)
+		}
 		if rerr != nil {
 			// Fall back to re-resolution alone: nothing is rewritten, and the
 			// links that now dangle are marked unresolved, which is the

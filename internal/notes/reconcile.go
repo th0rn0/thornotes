@@ -475,25 +475,43 @@ func (s *Service) reconcileUserFromDisk(ctx context.Context, user *model.User) (
 	// same content-hash compare every other save uses, and each one is logged
 	// (note, from, to) and counted, because a pass that edits other people's
 	// notes in silence would be its own kind of untrustworthy.
-	for _, mv := range retitles {
-		res, err := s.rewriteInboundLinks(ctx, user.ID, mv)
-		if err != nil {
-			log.Warn().Err(err).Int64("note_id", mv.noteID).
-				Str("from", mv.oldTitle).Str("to", mv.newTitle).
-				Msg("reconcile: rewrite inbound links after title convergence")
-			continue
-		}
-		result.LinksRewritten += res.LinksRewritten
-		result.LinksSkipped += res.LinksSkippedShared + res.LinksSkippedUnresolved
-		if res.NotesRewritten > 0 {
-			log.Info().
-				Int64("user_id", user.ID).
-				Int64("note_id", mv.noteID).
-				Str("from", mv.oldTitle).
-				Str("to", mv.newTitle).
-				Int("notes_rewritten", res.NotesRewritten).
-				Int("links_rewritten", res.LinksRewritten).
-				Msg("reconcile: inbound links moved with the converged title")
+	//
+	// links_skipped counts the moves this pass refused (a shared old title, a
+	// new title that does not resolve back); it does not count an edge that was
+	// never resolved in the first place — a link naming a note that does not
+	// exist was never this note's link, so it is neither moved nor skipped and a
+	// pass that reports links_skipped=0 may still have had nothing to move.
+	//
+	// The resolver is built once, here, after every retitle has landed: it
+	// describes the world the rewritten links have to resolve in, and building
+	// it per move made this loop O(movers × notes).
+	if len(retitles) > 0 {
+		pass, perr := s.loadLinkRewritePass(ctx, user.ID)
+		if perr != nil {
+			log.Warn().Err(perr).Int64("user_id", user.ID).
+				Msg("reconcile: build resolver for the inbound link rewrite")
+		} else {
+			for _, mv := range retitles {
+				res, err := s.rewriteInboundLinks(ctx, user.ID, mv, pass)
+				if err != nil {
+					log.Warn().Err(err).Int64("note_id", mv.noteID).
+						Str("from", mv.oldTitle).Str("to", mv.newTitle).
+						Msg("reconcile: rewrite inbound links after title convergence")
+					continue
+				}
+				result.LinksRewritten += res.LinksRewritten
+				result.LinksSkipped += res.LinksSkippedShared + res.LinksSkippedUnresolved
+				if res.NotesRewritten > 0 {
+					log.Info().
+						Int64("user_id", user.ID).
+						Int64("note_id", mv.noteID).
+						Str("from", mv.oldTitle).
+						Str("to", mv.newTitle).
+						Int("notes_rewritten", res.NotesRewritten).
+						Int("links_rewritten", res.LinksRewritten).
+						Msg("reconcile: inbound links moved with the converged title")
+				}
+			}
 		}
 	}
 
