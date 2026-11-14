@@ -3233,6 +3233,230 @@ CM6.commands.table = function(ed) {
   view.focus();
 };
 
+// ── Board view ───────────────────────────────────────────────────────────────
+
+let boardViewActive = false;
+let boardViewLoaded = false;
+
+function relativeDate(dateStr) {
+  if (!dateStr) return '';
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return '';
+  const now = Date.now();
+  const diffMs = now - d.getTime();
+  const diffSec = Math.floor(diffMs / 1000);
+  if (diffSec < 60) return 'just now';
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return diffMin + 'm ago';
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return diffHr + 'h ago';
+  const diffDay = Math.floor(diffHr / 24);
+  if (diffDay < 30) return diffDay + 'd ago';
+  const diffMon = Math.floor(diffDay / 30);
+  if (diffMon < 12) return diffMon + 'mo ago';
+  const diffYr = Math.floor(diffDay / 365);
+  return diffYr + 'y ago';
+}
+
+async function loadBoardView() {
+  const body = document.getElementById('board-body');
+  const loading = document.getElementById('board-loading');
+  const summary = document.getElementById('board-summary');
+
+  if (loading) loading.style.display = '';
+  if (summary) summary.textContent = '';
+
+  try {
+    const notes = await api('GET', '/api/v1/notes/all');
+    if (!boardViewActive) return; // toggled off while loading
+
+    const board = buildBoard(notes);
+    renderBoard(board, body);
+
+    if (summary) {
+      summary.textContent = board.totalCards + ' notes across ' + board.lanes.length + ' lane' + (board.lanes.length !== 1 ? 's' : '');
+    }
+    boardViewLoaded = true;
+  } catch (err) {
+    if (body) {
+      body.innerHTML = '';
+      const errEl = document.createElement('div');
+      errEl.className = 'bv-error';
+      errEl.textContent = 'Failed to load notes.';
+      body.appendChild(errEl);
+    }
+  }
+}
+
+function renderBoard(board, container) {
+  if (!container) return;
+  container.innerHTML = '';
+
+  if (board.totalCards === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'bv-empty';
+    empty.textContent = 'No status-tagged notes found. Add a status-* tag to a note to see it here.';
+    container.appendChild(empty);
+    return;
+  }
+
+  const fragment = document.createDocumentFragment();
+
+  for (const lane of board.lanes) {
+    const laneEl = document.createElement('div');
+    laneEl.className = 'bv-lane';
+    laneEl.dataset.project = lane.project;
+
+    const laneHeader = document.createElement('div');
+    laneHeader.className = 'bv-lane-header';
+    laneHeader.textContent = lane.label;
+    laneEl.appendChild(laneHeader);
+
+    const columnsEl = document.createElement('div');
+    columnsEl.className = 'bv-columns';
+
+    for (const col of board.columns) {
+      const laneCards = col.cards.filter(c => c.project === lane.project);
+      const colEl = document.createElement('div');
+      colEl.className = 'bv-column';
+      colEl.dataset.status = col.status;
+
+      const colHeader = document.createElement('div');
+      colHeader.className = 'bv-column-header';
+      const colTitle = document.createElement('span');
+      colTitle.textContent = col.label;
+      const colCount = document.createElement('span');
+      colCount.className = 'bv-column-count';
+      colCount.textContent = String(laneCards.length);
+      colHeader.appendChild(colTitle);
+      colHeader.appendChild(colCount);
+      colEl.appendChild(colHeader);
+
+      const cardsEl = document.createElement('div');
+      cardsEl.className = 'bv-column-cards';
+
+      for (const card of laneCards) {
+        const note = card.note;
+        const a = document.createElement('a');
+        a.className = 'bv-card';
+        a.href = '#';
+        a.dataset.noteId = String(note.id);
+        a.setAttribute('role', 'button');
+        a.setAttribute('aria-label', note.title + ' — ' + col.label);
+
+        const titleEl = document.createElement('div');
+        titleEl.className = 'bv-card-title';
+        titleEl.textContent = note.title;
+        a.appendChild(titleEl);
+
+        const metaEl = document.createElement('div');
+        metaEl.className = 'bv-card-meta';
+
+        if (card.priority != null) {
+          const priEl = document.createElement('span');
+          priEl.className = 'bv-card-priority';
+          priEl.textContent = 'P' + card.priority;
+          metaEl.appendChild(priEl);
+        }
+
+        const dateEl = document.createElement('span');
+        dateEl.className = 'bv-card-date';
+        dateEl.textContent = relativeDate(note.updated_at);
+        metaEl.appendChild(dateEl);
+
+        a.appendChild(metaEl);
+
+        // Other tags (not status-*, project-*, priority-*)
+        const otherTags = (note.tags || []).filter(t =>
+          !t.startsWith('status-') && !t.startsWith('project-') && !t.startsWith('priority-')
+        );
+        if (otherTags.length > 0) {
+          const tagsEl = document.createElement('div');
+          tagsEl.className = 'bv-card-tags';
+          for (const tag of otherTags) {
+            const tagEl = document.createElement('span');
+            tagEl.className = 'bv-card-tag';
+            tagEl.textContent = tag;
+            tagsEl.appendChild(tagEl);
+          }
+          a.appendChild(tagsEl);
+        }
+
+        cardsEl.appendChild(a);
+      }
+
+      colEl.appendChild(cardsEl);
+      columnsEl.appendChild(colEl);
+    }
+
+    laneEl.appendChild(columnsEl);
+    fragment.appendChild(laneEl);
+  }
+
+  container.appendChild(fragment);
+}
+
+function toggleBoardView() {
+  boardViewActive = !boardViewActive;
+  const btn = document.getElementById('board-toggle-btn');
+  const boardView = document.getElementById('board-view');
+  const editorContainer = document.getElementById('editor-container');
+  const folderView = document.getElementById('folder-view');
+  const emptyState = document.getElementById('empty-state');
+
+  localStorage.setItem('boardViewActive', boardViewActive ? 'true' : 'false');
+
+  if (boardViewActive) {
+    if (btn) btn.setAttribute('aria-pressed', 'true');
+    if (btn) btn.classList.add('active');
+    if (boardView) boardView.classList.add('active');
+    if (editorContainer) editorContainer.style.display = 'none';
+    if (folderView) folderView.style.display = 'none';
+    if (emptyState) emptyState.style.display = 'none';
+    currentFolderViewId = null;
+    loadBoardView();
+  } else {
+    if (btn) btn.setAttribute('aria-pressed', 'false');
+    if (btn) btn.classList.remove('active');
+    if (boardView) boardView.classList.remove('active');
+    if (emptyState) emptyState.style.display = '';
+  }
+}
+
+function initBoardView() {
+  const btn = document.getElementById('board-toggle-btn');
+  if (!btn) return;
+
+  // Restore state from localStorage
+  let saved = false;
+  try { saved = localStorage.getItem('boardViewActive') === 'true'; } catch (e) {}
+  if (saved) {
+    boardViewActive = false; // toggleBoardView will flip it
+    toggleBoardView();
+  }
+
+  btn.addEventListener('click', function(e) {
+    e.preventDefault();
+    toggleBoardView();
+  });
+}
+
+// Board card click — open the note
+document.addEventListener('click', function(e) {
+  const card = e.target.closest('.bv-card');
+  if (!card) return;
+  e.preventDefault();
+  const noteId = card.dataset.noteId;
+  if (noteId) {
+    // Exit board view and open the note normally
+    if (boardViewActive) toggleBoardView();
+    openNote(parseInt(noteId, 10));
+  }
+});
+
+// Initialise board view toggle on load
+initBoardView();
+
 // Settings modal
 document.getElementById('settings-modal').addEventListener('click', function(e) { if (e.target === this) closeSettings(); });
 document.getElementById('settings-done-btn').addEventListener('click', closeSettings);
