@@ -171,7 +171,20 @@ func (s *Service) reconcileUserFromDisk(ctx context.Context, user *model.User) (
 	//    disk_path is gone from disk but a directory matching its name now
 	//    exists under its parent's current disk_path. This is the
 	//    folder-rename-cascade-failure recovery path.
-	for _, f := range dbFolders {
+	//
+	//    Parents first, by path depth. A child's expected path is built from its
+	//    parent's *current* disk_path, so a child visited before a parent that is
+	//    itself stale finds nothing, looks unrecoverable, and is then deleted by
+	//    step 5/6 with its notes. Rows from Tree arrive ordered by parent_id,
+	//    which is parent-before-child only for a tree built by creating parents
+	//    first — a folder moved under a younger sibling's subtree breaks the
+	//    coincidence (ticket 472).
+	repairOrder := make([]*model.FolderTreeItem, len(dbFolders))
+	copy(repairOrder, dbFolders)
+	sort.SliceStable(repairOrder, func(i, j int) bool {
+		return pathDepth(repairOrder[i].DiskPath) < pathDepth(repairOrder[j].DiskPath)
+	})
+	for _, f := range repairOrder {
 		if _, ok := diskFolders[f.DiskPath]; ok {
 			continue
 		}
