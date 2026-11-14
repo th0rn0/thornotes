@@ -113,6 +113,55 @@ The value is the commit the binary was built from, injected at build time (`-X m
 
 The endpoint is unauthenticated deliberately. Knowing the commit of a notes server is not a secret, and requiring a login to answer it means only someone with host access can tell whether a deploy landed. Use it instead of the front-end asset digest (`app.js?v=…`): that hashes the assets, not the commit, so several releases that touch no JavaScript serve byte-identical digests.
 
+## Is production behind main? (deploy lag — ticket 653)
+
+CI status cannot answer "is it deployed". On 2026-11-14 two main builds ran at
+once, both push the mutable tag `th0rn0/thornotes:latest`, and the older
+build's push finished second: the tag moved **backwards**, watchtower pulled
+it, and production served the previous merge for 24 minutes — a poller saw
+`aa6edb30` become `239bbfe1` — while every Drone build and `main` itself was
+green. `/healthz` was the only witness. The pipeline is serialised since then
+(`concurrency: limit: 1` in `.drone.yml`, so two builds can no longer
+interleave their pushes), and every build also pushes an immutable
+`sha-<commit>` tag — but "impossible" is a claim, so a detector also runs.
+
+`scripts/deploy-lag-check.sh` compares the SERVED `/healthz` `build.version`
+with `origin/main`'s head (it fetches `origin/main` itself) and decides:
+
+| State | Response |
+|---|---|
+| deployed == `origin/main` | silent, exit 0 |
+| deployed is **not an ancestor** of `origin/main` | alert immediately — production runs code main does not contain |
+| main ahead by more than `--max-behind-builds` (default 1) | alert immediately — a deploy was lost or reversed |
+| main ahead by ≤ 1 build, persisting past `--lag-minutes` (default 15) | alert once — this is the 653 signature |
+| `/healthz` unreachable, unparseable, git fetch failed | exit 75, no alert-shaped output |
+
+This repo squash-merges, so one commit on `main` is one build. A one-build
+behind-state that is fresh is a normal in-flight deploy and stays silent; only
+the persistence of the gap (or a gap wider than one build) alerts.
+
+The check runs on a host cron every 10 minutes via the devops profile
+(`deploy_lag_monitor.sh`, no-agent; alerts go to the Discord webhook). To
+check by hand or drill a stale state without touching production:
+
+```bash
+scripts/deploy-lag-check.sh \
+  --healthz https://notes.example.com/healthz \
+  --repo /path/to/thornotes-checkout \
+  --state /tmp/deploy-lag-state
+
+# drill: pretend /healthz reported an older commit (ticket 653's incident state)
+FORCE_BUILD_VERSION=239bbfe1a248c468b0dc07a2e20783ca42f2b3dd \
+  scripts/deploy-lag-check.sh --repo /path/to/thornotes-checkout \
+  --state /tmp/deploy-lag-state --lag-minutes 0
+```
+
+When it alerts: check Drone build history for `main`'s head, compare the
+registry's `sha-<commit>` tag with what `:latest` points at, and restart the
+newest main build so `:latest` lands on the newer commit again (this is how
+the 2026-11-14 incident was recovered, build #397). `scripts/deploy-lag-check.test.sh`
+exercises every decision against a git fixture and a stub `/healthz`.
+
 ## Starting up: "reconciling" is not an error
 
 The listener opens before the startup reconcile finishes, so a booting instance answers `503` for anything that reads or writes the note index until that pass is done — `status` is `"reconciling"` and `startup.phase` says the same, while `schema`, `build` and `checks` remain readable:

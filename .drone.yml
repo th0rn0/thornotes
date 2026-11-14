@@ -2,6 +2,33 @@ kind: pipeline
 type: docker
 name: ci
 
+# One build of this pipeline at a time (ticket 653).
+#
+# On 2026-11-14 two main builds ran at once (#393 for 239bbfe and #395 for
+# aa6edb3) and both push the same mutable tag th0rn0/thornotes:latest. The
+# older build's build-push finished second (14:31:45Z after 14:30:43Z), so the
+# tag moved BACKWARDS and watchtower redeployed the previous merge to
+# production — 24 minutes of production behind main with every dashboard
+# green. Serialising the pipeline makes the interleave impossible instead of
+# improbable.
+#
+# Two caveats keep this honest, and neither is a reason to relax the limit:
+#   - Drone enforces concurrency as "a reasonable effort", not a formal
+#     guarantee. The detector for a backwards move that slips through anyway
+#     is scripts/deploy-lag-check.sh on a host cron (ticket 653).
+#   - The limit is per pipeline name, so a pull_request validation can queue
+#     behind a main build (~13 min). That is accepted rather than split into a
+#     second PR pipeline, because a split duplicates the whole test matrix and
+#     diverged duplicates are exactly the bug class #500/#72 had to dig out.
+#     The two runners still pay off across queued builds and other repos.
+#
+# Every build that pushes :latest also pushes an immutable sha-<commit> tag
+# (see the build-push steps): a tag per commit means any backwards move is
+# visible in the registry itself, and the smoke test pins the exact image it
+# just pushed instead of racing :latest.
+concurrency:
+  limit: 1
+
 # One build per branch commit.
 #
 # `push` and `pull_request` both fire for the same SHA on a branch, so every PR
@@ -292,6 +319,13 @@ steps:
         from_secret: dockerhub_token
       tags:
         - latest
+        # Immutable tag, one per commit (ticket 653): a 40-hex sha-<sha> tag
+        # makes the backwards-:latest race inspectable after the fact — the
+        # registry always answers "which commit does this image belong to"
+        # without a surviving CI log, and :latest can never silently strand
+        # the only copy of a commit's image (Docker Hub GCs digests no tag
+        # points at; the #393/#395 manifests were unrecoverable within hours).
+        - sha-${DRONE_COMMIT_SHA}
       # co.thornotes.schema.max on the image is the highest migration the build
       # embeds, so an operator can tell from `docker inspect` whether an image is
       # older than a database before deploying it. The values are the SQLite and
@@ -317,6 +351,8 @@ steps:
         from_secret: dockerhub_token
       tags:
         - latest
+        # Immutable tag per commit, same scheme as build-push above.
+        - sha-${DRONE_COMMIT_SHA}
         - ${DRONE_TAG}
       build_args:
         - THORNOTES_SCHEMA_MAX=10
@@ -386,7 +422,12 @@ steps:
       - name: docker-sock
         path: /var/run/docker.sock
     commands:
-      - docker pull th0rn0/thornotes:latest
+      # Pull this build's immutable sha tag, not :latest: the smoke test must
+      # verify the exact image this build pushed (ticket 653). With the
+      # pipeline concurrency limit at 1 nothing else can push :latest mid-run,
+      # but pinning the sha tag costs nothing and keeps the check valid even
+      # if a retry or manual push lands in between.
+      - docker pull th0rn0/thornotes:sha-$DRONE_COMMIT_SHA
       - |
         STEP_NET=$(docker inspect "$(cat /etc/hostname)" \
           -f '{{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{end}}' \
@@ -398,7 +439,7 @@ steps:
         docker run -d --name thornotes-smoke \
           ${STEP_NET:+--network "$STEP_NET"} \
           -v thornotes-smoke-data:/data \
-          th0rn0/thornotes:latest
+          th0rn0/thornotes:sha-$DRONE_COMMIT_SHA
         IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' thornotes-smoke)
         echo "Container IP: $IP"
         for i in $(seq 1 30); do
