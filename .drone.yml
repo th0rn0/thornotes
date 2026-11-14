@@ -104,6 +104,7 @@ steps:
       - node --test web/static/js/sw-version.test.js
       - node --test web/static/js/graph-utils.test.js
       - node --test web/static/js/share-clear.test.js
+      - node --test web/static/js/board-view.test.js
       - npm install --prefix web/cm6-bundle
       - node --test web/cm6-bundle/index.test.mjs
 
