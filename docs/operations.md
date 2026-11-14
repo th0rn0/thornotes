@@ -136,13 +136,13 @@ The database has been migrated by a newer build than the image you just started 
 The emitted error is:
 
 ```text
-schema version 9 is newer than this build supports (8) — deploy a build with migration ≥ 9, or restore the database backup taken before migration 9
+schema version 10 is newer than this build supports (9) — deploy a build with migration ≥ 10, or restore the database backup taken before migration 10
 ```
 
 There are two legitimate exits:
 
-1. Deploy a build whose migration set reaches the database's recorded version (at least version 9 in the example).
-2. Restore the backup taken before migration 9, then deploy the older build.
+1. Deploy a build whose migration set reaches the database's recorded version (at least version 10 in the example).
+2. Restore the backup taken before migration 10, then deploy the older build.
 
 Do not lower the database version marker to make an old image start. That does not reverse the migration.
 

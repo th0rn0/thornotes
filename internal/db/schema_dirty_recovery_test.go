@@ -7,8 +7,8 @@ package db
 // database left dirty does. schema_floor_test.go pins the same refusal for
 // SQLite at the *newest* version. Neither covers what an interrupted migration
 // partway through the sequence leaves behind — a database stamped at version N
-// with dirty=1 while this build carries migrations up to 9 — which is the state
-// a crash during 006..009 actually produces on SQLite, and the one an operator
+// with dirty=1 while this build carries migrations up to 10 — which is the state
+// a crash during 006..010 actually produces on SQLite, and the one an operator
 // meets.
 //
 // The behaviour is asserted, not assumed: Thornotes refuses, names the version,
@@ -86,11 +86,11 @@ func TestOpen_DirtyMidSequence_RefusesThenDocumentedRepairRecovers(t *testing.T)
 	pool, err := Open(path)
 	require.NoError(t, err, "a cleared dirty flag must let startup migrate the rest")
 	version, maxSupported := pool.SchemaStatus()
-	assert.Equal(t, 9, version, "startup must bring the schema to the newest migration")
+	assert.Equal(t, 10, version, "startup must bring the schema to the newest migration")
 	assert.Equal(t, maxSupported, version)
 
-	// Usable, not merely open: a row can be written and the index 009 rebuilds
-	// is there.
+	// Usable, not merely open: a row can be written and the index the FTS
+	// migrations rebuild is there.
 	_, err = pool.WriteDB.Exec(
 		`INSERT INTO users (username, password_hash, uuid) VALUES ('recovered', 'hash', 'uuid-recovered')`)
 	require.NoError(t, err, "the recovered database must accept writes")
@@ -101,10 +101,10 @@ func TestOpen_DirtyMidSequence_RefusesThenDocumentedRepairRecovers(t *testing.T)
 	var ftsRows int
 	require.NoError(t, pool.ReadDB.QueryRow(
 		`SELECT COUNT(*) FROM notes_fts`).Scan(&ftsRows),
-		"009 must have rebuilt notes_fts as a usable contentless-delete table")
+		"the FTS migrations must have rebuilt notes_fts as a usable contentless-delete table")
 
 	after := snapshotDB(t, openRawSQLite(t, path))
-	assert.Equal(t, 9, after.version)
+	assert.Equal(t, 10, after.version)
 	assert.False(t, after.dirty, "a completed migration must clear the dirty flag")
 	assert.Equal(t, 1, after.users)
 
@@ -114,5 +114,5 @@ func TestOpen_DirtyMidSequence_RefusesThenDocumentedRepairRecovers(t *testing.T)
 	require.NoError(t, err, "re-opening a recovered database must succeed")
 	defer again.Close()
 	version, _ = again.SchemaStatus()
-	assert.Equal(t, 9, version)
+	assert.Equal(t, 10, version)
 }
