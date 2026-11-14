@@ -1632,13 +1632,15 @@ function toggleEditorPreviewEdit() {
 // Applies the correct editor view when a note is opened.  New notes always
 // open in editor mode; existing notes use the global defaultNoteView setting.
 function applyNoteOpenView(isNew) {
-  const targetView = isNew ? 'editor' : (localStorage.getItem('defaultNoteView') || 'editor');
+  const storedView = localStorage.getItem('defaultNoteView');
+  const targetView = computeTargetView(isNew, storedView);
+  
   if (targetView === 'preview') {
     if (editorSplitOpen) toggleEditorSplit();
     if (editorPreviewEditOpen) toggleEditorPreviewEdit();
-    if (!editorPreviewOpen) {
+    if (shouldOpenPreview(targetView, editorPreviewOpen)) {
       toggleEditorPreview();
-    } else {
+    } else if (shouldRenderPreview(targetView, editorPreviewOpen)) {
       // Preview already open — re-render with the new note's content.
       renderPreviewContent(editor.getValue());
       if (editorPreviewEl) editorPreviewEl.scrollTop = 0;
@@ -1729,7 +1731,7 @@ function onEditorChange() {
 // user keeps typing, and the session-expired banner is already telling them
 // to reload. Mirrored by session-expiry.test.js.
 function scheduleAutoSave() {
-  if (sessionExpired) return;
+  if (!canScheduleAutoSave(sessionExpired)) return;
   setSaveStatus('saving');
   clearTimeout(saveTimer);
   saveTimer = setTimeout(autoSave, AUTO_SAVE_DELAY_MS);
@@ -1745,14 +1747,13 @@ function handleSessionExpired() {
   if (sessionExpired) return;
   sessionExpired = true;
   clearTimeout(saveTimer);
-  setSaveStatus('error');
+  setSaveStatus(computeSaveStatusOnError());
   const banner = document.getElementById('session-expired-banner');
   if (banner) banner.style.display = 'block';
 }
 
 async function autoSave() {
-  if (!currentNote) return;
-  if (sessionExpired) return;  // session is dead; the banner is already up
+  if (!canAutoSave(sessionExpired, currentNote)) return;  // session is dead or no note loaded
   const content = editor.getValue();
   try {
     const res = await api('PATCH', `/api/v1/notes/${currentNote.id}`, {
@@ -1760,15 +1761,15 @@ async function autoSave() {
       content_hash: currentNote.content_hash,
     });
     currentNote.content_hash = res.content_hash;
-    setSaveStatus('saved');
+    setSaveStatus(computeSaveStatusOnSuccess());
   } catch (e) {
     if (e.status === 409) {
       showConflictModal();
     } else if (e.status === 507) {
-      setSaveStatus('error');
+      setSaveStatus(computeSaveStatusOnError());
       document.getElementById('disk-full-banner').style.display = 'block';
     } else {
-      setSaveStatus('error');
+      setSaveStatus(computeSaveStatusOnError());
     }
   }
 }
@@ -2120,7 +2121,7 @@ async function api(method, path, body) {
   // autosave, title/tag edits, folder ops — instead of each one silently
   // swallowing the error. Guarded on currentUser so a failed login attempt
   // (also a 401) does not trip the banner. See handleSessionExpired.
-  if (res.status === 401 && currentUser) {
+  if (shouldExpireSession(res.status, currentUser, sessionExpired)) {
     handleSessionExpired();
   }
 
