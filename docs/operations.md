@@ -193,15 +193,20 @@ The Drone runner keeps expensive tool caches on its host and bind-mounts them in
 
 Thornotes production auto-deploys `th0rn0/thornotes:latest` via watchtower; nobody runs `scripts/deploy-gate.sh` on that path. `scripts/host-backup.sh` is the protection for it: a rolling dump-plus-bundle taken **before** an unseen deploy can matter, with a restore proof every run — and, per the reachability finding below, it runs **on the host (MAX) itself**, not from CI.
 
-### Where the Drone runner actually is (proven 2026-11-06)
+### Where the Drone runner actually is (measured 2026-11-06, corrected 2026-11-14)
 
-The `docker-runner-1` CI runner is a dedicated CI box, **not** the production Docker host. Evidence (read-only probe steps shipped on branch `ops/safety-net`, Drone builds #271, #275, #277 — a step's `docker ps` shows a container-name set only that daemon would have):
+There are two Drone runners: `max` (441 G) and `drone-runner-tehhulk` (74 G). A runner probe reports on whichever runner picked up that build, so the earlier probes in builds #271, #275, and #277 (branch `ops/safety-net`) establish facts about `drone-runner-tehhulk`, not every runner. A container-name list alone does not distinguish a CI box from production.
 
-- The step's docker daemon reports `hostname=drone-runner-tehhulk`, Debian 13, 8 CPU, Docker server 29.4.1, and its container list is only `drone-*` CI containers plus the runner itself — no production containers, no Hermes containers.
-- The box is on the LAN: its steps ping `10.0.0.14` (0.259 ms). But MAX's Docker API is closed to it: TCP `2375`/`2376` answered `closed/unreachable` from the runner box, while `22`/`80`/`9443`/`8999` were open.
-- `/servdata/thornotes` is MAX's filesystem and does **not** exist on the runner: binding it into a step auto-created an *empty* directory on the runner's own storage, and a probe marker written there stayed on `drone-runner-tehhulk` (marker file removed again in build #277).
+Build #379 (branch `ops/ci-prune-when-full`) measured the other case from inside a runner:
 
-Consequence: a Drone cron on branch `ops/safety-net` would run the backup on `drone-runner-tehhulk` — where there is no production database and no notes tree. It would either abort at discovery or, worse, silently back up some CI container. A cron that reads as covered while protecting nothing is worse than no cron, so the in-repo `safety-net` pipeline is kept for the day a runner is genuinely colocated with production, and **must not be wired to a Drone cron under the current placement**. The production protection is the host-side block below.
+```text
++ docker info --format 'runner={{.Name}}'
+runner=max
++ cat /etc/hostname
+max
+```
+
+That is MAX, the production Docker host: its daemon has the production services (`thornotes`, `thornotes-db-1`, `watchtower`, `homeassistant`, `jellyfin`, `radarr`, `sonarr`, `portainer`) as well as `drone-runner` and `drone-server`; `/servdata` is the production data mount. Thus one of the two runners is production, but nothing pins the `safety-net` pipeline to it. An unpinned Drone cron could land on `drone-runner-tehhulk`, where it would back up only a CI box or abort. **Do not wire the safety-net backup to a Drone cron; run it host-side on MAX using the block below.**
 
 ### Paste-ready host-side block (MAX) — no CI dependency
 
