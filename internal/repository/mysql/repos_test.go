@@ -27,11 +27,15 @@ const mysqlDSNEnv = "THORNOTES_TEST_MYSQL_DSN"
 // MySQL leg again.
 const requireMySQLEnv = "THORNOTES_REQUIRE_MYSQL"
 
-// openTestMySQL opens a real MySQL connection using the DSN in
-// THORNOTES_TEST_MYSQL_DSN and clears the schema so the test starts from a
-// known-empty database. Without the per-test reset, tests that share a fixed
-// username (createMySQLUser uses "user1") fail with "username already taken"
-// as soon as a second test runs against the same database.
+// openTestMySQL returns this package's shared MySQL pool and clears the schema
+// so the test starts from a known-empty database. TestMain opens and owns the
+// pool (see main_test.go); this function never opens or closes one, because a
+// pool per test is what exhausted the server at -count>1.
+//
+// Without the per-test reset, tests that share a fixed username (createMySQLUser
+// uses "user1") fail with "username already taken" as soon as a second test runs
+// against the same database — which is now always, so the truncation is the
+// whole of the isolation guarantee and must not be dropped.
 func openTestMySQL(t *testing.T) *db.Pool {
 	t.Helper()
 	dsn := os.Getenv(mysqlDSNEnv)
@@ -42,11 +46,11 @@ func openTestMySQL(t *testing.T) *db.Pool {
 		}
 		t.Skip(msg)
 	}
-	pool, err := db.OpenMySQL(dsn)
-	require.NoError(t, err)
-	t.Cleanup(func() { pool.Close() })
-	truncateAll(t, pool)
-	return pool
+	if sharedPool == nil {
+		t.Fatalf("shared MySQL test pool is not open: TestMain must open it once per process")
+	}
+	truncateAll(t, sharedPool)
+	return sharedPool
 }
 
 // truncateAll deletes every row from the application tables, leaving the
