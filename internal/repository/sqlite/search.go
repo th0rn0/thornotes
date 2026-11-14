@@ -201,6 +201,15 @@ func (r *SearchRepo) Search(ctx context.Context, userID int64, query string, tag
 	if len(terms) == 0 {
 		return nil, nil
 	}
+	// A stopword is dropped rather than searched for, on this engine too: FTS5
+	// would happily index "the", so leaving it in would make SQLite narrow a
+	// query MySQL answers in full — the same disagreement as ticket 619's, in
+	// the other direction. A query of nothing but stopwords leaves no terms, and
+	// the answer to that is the same empty answer as an empty query.
+	terms = searchtext.WithoutStopwords(terms)
+	if len(terms) == 0 {
+		return nil, nil
+	}
 
 	// The split is engine-independent: a term below repository.MinIndexedTerm is
 	// scanned here exactly as it is on MySQL, so the two engines agree on which
@@ -254,7 +263,9 @@ func (r *SearchRepo) Search(ctx context.Context, userID int64, query string, tag
 
 	// The snippet is built in Go by searchtext.Snippet from the note's content,
 	// not by FTS5's snippet() — MySQL has no equivalent and production runs
-	// MySQL, so both engines take the same path.
+	// MySQL, so both engines take the same path. The terms it is handed are the
+	// ones actually searched for, so the excerpt centres on a word that matched
+	// rather than on the stopword that happened to open the note.
 	q := fmt.Sprintf(`
 		SELECT n.id, n.title, n.slug, n.content, n.tags
 		FROM %s

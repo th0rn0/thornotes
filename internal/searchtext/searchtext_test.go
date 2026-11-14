@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestTerms(t *testing.T) {
@@ -27,6 +28,183 @@ func TestTerms(t *testing.T) {
 				return
 			}
 			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+// The stopword list is pinned word for word, because it is a claim about someone
+// else's database rather than a preference: InnoDB's default stopword list holds
+// 36 rows (35 distinct — MariaDB 11.8.9 lists "the" twice) and exactly these 18
+// are at least three characters long, so they are the only ones that would reach
+// the full-text index and be refused by it. Editing Stopwords in either direction
+// without editing this list must fail the build: shortening it puts the zero-row
+// defect back for whichever word is removed, and lengthening it makes a word that
+// is findable today unsearchable.
+func TestStopwords_FrozenList(t *testing.T) {
+	want := []string{
+		"about", "are", "com", "for", "from",
+		"how", "that", "the", "this", "und",
+		"was", "what", "when", "where", "who",
+		"will", "with", "www",
+	}
+
+	require.Equal(t, want, Stopwords, "InnoDB's default stopwords at or above the index floor")
+	require.Len(t, Stopwords, 18)
+}
+
+// TestWithoutStopwords is the drop rule itself: which words go, which stay, and
+// the fact that removing one never reorders or rewrites the rest.
+func TestWithoutStopwords(t *testing.T) {
+	tests := []struct {
+		name  string
+		terms []string
+		want  []string
+	}{
+		{
+			name:  "empty query",
+			terms: nil,
+		},
+		{
+			name:  "no stopword, nothing to do",
+			terms: []string{"boiler", "service"},
+			want:  []string{"boiler", "service"},
+		},
+		{
+			name:  "a stopword before the term",
+			terms: []string{"the", "quick"},
+			want:  []string{"quick"},
+		},
+		{
+			name:  "a stopword after the term",
+			terms: []string{"quick", "the"},
+			want:  []string{"quick"},
+		},
+		{
+			name:  "a stopword between two terms",
+			terms: []string{"quick", "the", "brown"},
+			want:  []string{"quick", "brown"},
+		},
+		{
+			// The list is matched on the token, so the case it is typed in
+			// cannot save a stopword — "The" is the same word to the index.
+			name:  "a stopword in capitals",
+			terms: []string{"The", "quick"},
+			want:  []string{"quick"},
+		},
+		{
+			name:  "a stopword in mixed case",
+			terms: []string{"WhEn", "quick"},
+			want:  []string{"quick"},
+		},
+		{
+			// ... and neither can the punctuation a person types around it:
+			// "the," is the token "the" to every tokenizer involved.
+			name:  "a stopword with punctuation",
+			terms: []string{"the,", "quick."},
+			want:  []string{"quick."},
+		},
+		{
+			name:  "a stopword in brackets",
+			terms: []string{"(the)", "quick"},
+			want:  []string{"quick"},
+		},
+		{
+			// Keep what is not the refused word. "theatre" and "without" contain
+			// a stopword but are not one, and dropping them would narrow the
+			// query to nothing — the opposite failure.
+			name:  "words that merely contain a stopword are kept",
+			terms: []string{"theatre", "without", "within", "theme"},
+			want:  []string{"theatre", "without", "within", "theme"},
+		},
+		{
+			// A multi-token term is kept whole: it is a phrase, not the word the
+			// index refuses, and dropping it would widen the query.
+			name:  "a hyphenated term is a phrase, not a stopword",
+			terms: []string{"the-quick"},
+			want:  []string{"the-quick"},
+		},
+		{
+			// Below the index floor the word never reaches the index — 619's
+			// LIKE scan finds it — so it is not this rule's business. Dropping
+			// these would take away a search that works today.
+			name:  "short stopwords are left to the short-term scan",
+			terms: []string{"a", "of", "to", "in", "is", "at", "an", "as", "be", "by", "de", "en", "i", "it", "la", "on", "or"},
+			want:  []string{"a", "of", "to", "in", "is", "at", "an", "as", "be", "by", "de", "en", "i", "it", "la", "on", "or"},
+		},
+		{
+			name:  "every term a stopword leaves none",
+			terms: []string{"the", "what", "when"},
+		},
+		{
+			name:  "order is preserved",
+			terms: []string{"alpha", "the", "beta", "who", "gamma"},
+			want:  []string{"alpha", "beta", "gamma"},
+		},
+		{
+			name:  "duplicates of a kept term are kept",
+			terms: []string{"quick", "the", "quick"},
+			want:  []string{"quick", "quick"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := WithoutStopwords(tc.terms)
+			if len(tc.want) == 0 {
+				assert.Empty(t, got)
+				return
+			}
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+// TestWithoutStopwords_EveryListedWordDrops walks the list itself, so a word added
+// to Stopwords is dropped without the table above being extended by hand.
+func TestWithoutStopwords_EveryListedWordDrops(t *testing.T) {
+	for _, word := range Stopwords {
+		for _, variant := range []string{word, strings.ToUpper(word), strings.ToUpper(word[:1]) + word[1:], word + ","} {
+			assert.True(t, isStopword(variant), "%q must be recognised as the stopword %q", variant, word)
+		}
+		assert.Equal(t, []string{"quick"}, WithoutStopwords([]string{word, "quick"}), "%q", word)
+	}
+}
+
+// TestWithoutStopwords_DoesNotMutateTheInput guards the callers: the term list is
+// also handed to searchtext.Snippet after this, and both repositories pass the
+// same slice they were given.
+func TestWithoutStopwords_DoesNotMutateTheInput(t *testing.T) {
+	terms := []string{"the", "quick", "who"}
+
+	kept := WithoutStopwords(terms)
+
+	assert.Equal(t, []string{"the", "quick", "who"}, terms)
+	assert.Equal(t, []string{"quick"}, kept)
+}
+
+// TestTermTokens pins the shared tokenizer, which two rules measure terms with:
+// this package's stopword match and repository.MinIndexedTerm's floor.
+func TestTermTokens(t *testing.T) {
+	tests := []struct {
+		term string
+		want []string
+	}{
+		{"", nil},
+		{"!!!", nil},
+		{"go", []string{"go"}},
+		{"go.", []string{"go"}},
+		{"(ip)", []string{"ip"}},
+		{"the,", []string{"the"}},
+		{"the-quick", []string{"the", "quick"}},
+		{"50%", []string{"50"}},
+		{"a_b", []string{"a", "b"}},
+		{"wifi2", []string{"wifi2"}},
+		{"äöü", []string{"äöü"}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.term, func(t *testing.T) {
+			assert.Equal(t, tc.want, TermTokens(tc.term))
 		})
 	}
 }

@@ -1,7 +1,7 @@
 package repository
 
 import (
-	"unicode"
+	"github.com/th0rn0/thornotes/internal/searchtext"
 )
 
 // MinIndexedTerm is the shortest search term the full-text index is trusted to
@@ -73,23 +73,12 @@ func termIndexable(term string) bool {
 // fragments a word tokenizer indexes, with the punctuation it breaks on removed.
 // Lengths are counted in runes, so three multi-byte letters are three characters,
 // which is how both engines count them.
+//
+// The tokenizer lives in internal/searchtext, next to the stopword list, which
+// measures terms the same way: two rules that disagree about what a token is
+// would each be defensible and the pair wrong.
 func termTokens(term string) []string {
-	var tokens []string
-	var current []rune
-	for _, r := range term {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) {
-			current = append(current, r)
-			continue
-		}
-		if len(current) > 0 {
-			tokens = append(tokens, string(current))
-			current = current[:0]
-		}
-	}
-	if len(current) > 0 {
-		tokens = append(tokens, string(current))
-	}
-	return tokens
+	return searchtext.TermTokens(term)
 }
 
 // ShortTermPredicate returns the SQL predicate that matches a note whose title or
