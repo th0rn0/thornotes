@@ -407,10 +407,10 @@ Content-Type: multipart/form-data
 
 | File type | Behaviour |
 |-----------|-----------|
-| `.md` | Imported as a single root-level note. The filename (minus `.md`) becomes the title. |
-| `.zip` | Each `.md` file inside is imported as a note. Directories in the ZIP become folders. Non-`.md` files are silently skipped. Duplicate titles within the same folder are skipped. |
+| `.md` | Imported as a single root-level note. Its title comes from the `# H1` in its content; if the content has no heading, the filename (minus `.md`) is used. The filename determines the note's slug and path. |
+| `.zip` | Each `.md` file inside is imported as a note using the same title rule. Directories in the ZIP become folders. Non-`.md` files are silently skipped. Duplicate titles within the same folder are skipped. |
 
-Maximum upload size: **10 MB**.
+The import request (including a ZIP archive) is limited to **10 MB**. Each note's content is separately limited to **1 MB** by note creation, so a `.md` file over 1 MB is refused with `content exceeds 1 MB limit` even when the request is within the 10 MB upload limit.
 
 **Response:**
 
