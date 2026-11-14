@@ -193,7 +193,7 @@ The Drone runner keeps expensive tool caches on its host and bind-mounts them in
 
 Thornotes production auto-deploys `th0rn0/thornotes:latest` via watchtower; nobody runs `scripts/deploy-gate.sh` on that path. `scripts/host-backup.sh` is the protection for it: a rolling dump-plus-bundle taken **before** an unseen deploy can matter, with a restore proof every run — and, per the reachability finding below, it runs **on the host (MAX) itself**, not from CI.
 
-### Where the Drone runner actually is (proven 2026-11-06)
+### Where the Drone runner actually is (measured 2026-11-06, corrected 2026-11-14)
 
 There are two Drone runners: `max` (441 G) and `drone-runner-tehhulk` (74 G). A runner probe reports on whichever runner picked up that build, so the earlier probes in builds #271, #275, and #277 (branch `ops/safety-net`) establish facts about `drone-runner-tehhulk`, not every runner. A container-name list alone does not distinguish a CI box from production.
 
