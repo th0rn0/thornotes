@@ -29,6 +29,7 @@ import (
 	"github.com/th0rn0/thornotes/internal/model"
 	"github.com/th0rn0/thornotes/internal/repository/mysql"
 	"github.com/th0rn0/thornotes/internal/repository/sqlite"
+	"github.com/th0rn0/thornotes/internal/searchtext"
 )
 
 const (
@@ -197,6 +198,16 @@ func seedFixtures(t *testing.T, b *backend) (int64, map[string]int64) {
 		{Title: "Underscore Bait", Slug: "underscore-bait", Tags: []string{},
 			Content: "The identifier axb is in this sentence."},
 
+		// ── stopwords: a word the index cannot hold must not empty a query ────
+		// One note carries every word of InnoDB's default stopword list (and
+		// "ago", for the short-term scan below), so a query containing a
+		// stopword has something to find once the word stops being required.
+		// The title holds none of them, and none of the terms the rest of this
+		// table searches for: this note is reachable only through "marker" and
+		// through the short-term scan for "go" (inside "ago").
+		{Title: "Stopword Prose", Slug: "stopword-prose", Tags: []string{},
+			Content: "About the notes on this page: that is what we were told when we asked where it came from, who will come with us, for how long, und was sonst noch. About are com, for from how, the this that, what when where who will with www - every word of InnoDB's list is in this sentence, written two days ago. Marker: stopmark."},
+
 		// ── snippet fixtures ─────────────────────────────────────────────────
 		{Title: "Snippet Start", Slug: "snippet-start", Tags: []string{}, Content: snippetStartContent},
 		{Title: "Snippet Middle", Slug: "snippet-middle", Tags: []string{}, Content: snippetMiddleContent},
@@ -341,7 +352,7 @@ func contractCases() []contractCase {
 		{
 			name:  "short term: two characters, found in a title and in a content",
 			query: "go",
-			want:  []string{"go-bag", "short-lexicon"},
+			want:  []string{"go-bag", "short-lexicon", "stopword-prose"},
 		},
 		{
 			name:  "short term: three characters is the index's floor, still found",
@@ -380,7 +391,7 @@ func contractCases() []contractCase {
 			// index does, so the case a term is typed in never decides a match.
 			name:  "short term matches whatever case it is typed in",
 			query: "GO",
-			want:  []string{"go-bag", "short-lexicon"},
+			want:  []string{"go-bag", "short-lexicon", "stopword-prose"},
 		},
 		{
 			// '%' in a search term is a character. Unescaped, the pattern
@@ -394,6 +405,72 @@ func contractCases() []contractCase {
 			name:  "underscore in a search term is not a wildcard",
 			query: "a_b",
 			want:  []string{"underscore-token"},
+		},
+
+		// ── stopwords: the word cannot narrow the query, and cannot empty it ──
+		// InnoDB refuses to index a stopword, so requiring one in boolean mode
+		// returned zero rows however many notes contained it. The word is
+		// dropped instead, on both engines, so these five queries are all the
+		// same query as "body" — the row set must not change.
+		{
+			name:  "stopword: a leading stopword narrows nothing",
+			query: "the body",
+			want:  bodyRanked,
+		},
+		{
+			name:  "stopword: a trailing stopword narrows nothing",
+			query: "body the",
+			want:  bodyRanked,
+		},
+		{
+			name:  "stopword: the same word typed in capitals",
+			query: "The Body",
+			want:  bodyRanked,
+		},
+		{
+			name:  "stopword: punctuation around the stopword",
+			query: "the, body",
+			want:  bodyRanked,
+		},
+		{
+			name:  "stopword: two stopwords around a term",
+			query: "who will body",
+			want:  bodyRanked,
+		},
+		{
+			// The stopword is dropped, the term it was ANDed with decides the
+			// rows: "tagged" appears in one note only.
+			name:  "stopword: dropped, the remaining term still decides",
+			query: "when the tagged",
+			want:  []string{"case-tagged"},
+		},
+		{
+			// A stopword is not searchable on either engine, so a query made
+			// only of stopwords finds nothing — not everything, and not one
+			// engine's set. SQLite used to answer this with every note
+			// containing "the" while MySQL answered with none.
+			name:  "stopword: a stopword is not a query on its own",
+			query: "the",
+			want:  nil,
+		},
+		{
+			name:  "stopword: only stopwords find nothing",
+			query: "the what when",
+			want:  nil,
+		},
+		{
+			// 619 is untouched: dropping the stopword leaves "go", which is
+			// still below the index floor and still matched by the LIKE scan
+			// (including inside "ago").
+			name:  "stopword: beside a short term, which still scans",
+			query: "the go",
+			want:  []string{"go-bag", "short-lexicon", "stopword-prose"},
+		},
+		{
+			name:  "stopword: beside a tag filter",
+			query: "the body",
+			tags:  []string{"home"},
+			want:  homeBody,
 		},
 
 		// ── snippets ─────────────────────────────────────────────────────────
@@ -486,6 +563,68 @@ func TestSearchContract_SQLite(t *testing.T) {
 
 func TestSearchContract_MySQL(t *testing.T) {
 	runContract(t, newMySQLBackend(t))
+}
+
+// TestSearchContract_Stopwords is the acceptance test for the stopword defect,
+// stated as the ticket states it: for every word InnoDB refuses to index, a query
+// containing it returns the same rows as the same query with the word removed —
+// on both engines — and a query made only of those words returns nothing on both.
+//
+// It walks searchtext.Stopwords rather than repeating the list, because the point
+// is the list that ships: a word added to it is covered here without this file
+// being edited, and the list's contents are pinned separately by
+// internal/searchtext's TestStopwords_FrozenList.
+func TestSearchContract_Stopwords(t *testing.T) {
+	for _, makeBackend := range []struct {
+		name string
+		new  func(*testing.T) *backend
+	}{
+		{name: "sqlite", new: newSQLiteBackend},
+		{name: "mysql", new: newMySQLBackend},
+	} {
+		t.Run(makeBackend.name, func(t *testing.T) {
+			runStopwordContract(t, makeBackend.new(t))
+		})
+	}
+}
+
+// runStopwordContract is the per-engine half: "marker" finds the one note that
+// carries every stopword, so it is the control every stopword query must reduce
+// to. Before the fix the MySQL leg failed on every one of the 18 with zero rows
+// while the SQLite leg returned the note for each word that appears in it, and a
+// query of a stopword alone returned every SQLite note containing the word and
+// no MySQL row at all.
+func runStopwordContract(t *testing.T, b *backend) {
+	t.Helper()
+	ctx := context.Background()
+	userID, _ := seedFixtures(t, b)
+
+	control, err := b.search.Search(ctx, userID, "marker", nil)
+	require.NoError(t, err)
+	require.Equal(t, []string{"stopword-prose"}, slugsOf(control),
+		"%s: the control query must find the note that holds every stopword", b.name)
+
+	for _, word := range searchtext.Stopwords {
+		t.Run(word, func(t *testing.T) {
+			// The same query, three shapes a person types: the word first, the
+			// word in capitals, and the word with a comma after it.
+			for _, query := range []string{
+				word + " marker",
+				strings.ToUpper(word) + " marker",
+				word + ", marker",
+			} {
+				got, err := b.search.Search(ctx, userID, query, nil)
+				require.NoError(t, err)
+				assert.Equal(t, slugsOf(control), slugsOf(got),
+					"%s: %q must return the rows of the same query without %q", b.name, query, word)
+			}
+
+			// ... and alone it is not a query at all: nothing, not everything.
+			alone, err := b.search.Search(ctx, userID, word, nil)
+			require.NoError(t, err)
+			assert.Empty(t, slugsOf(alone), "%s: %q on its own must find nothing", b.name, word)
+		})
+	}
 }
 
 // TestSearchContract_CrossEngine is the ticket's actual claim: the same

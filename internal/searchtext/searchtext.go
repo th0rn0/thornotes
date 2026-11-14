@@ -54,6 +54,16 @@
 //     and MySQL does not. Closing that needs terms derived in Go and stored in a
 //     table of their own — a migration, tracked separately — and until then a
 //     query that depends on stemming still divides the two backends.
+//
+//  6. A stopword is dropped from the query, not required. InnoDB's FULLTEXT index
+//     refuses to hold the words in its stopword list, so a MATCH for one of them
+//     matches nothing however many notes contain it — and boolean mode makes
+//     every term mandatory, so one such word empties the whole result set (measured
+//     on MariaDB 11.8.9, reproduced through this package's repositories). WithoutStopwords
+//     removes them from the term list on both backends:
+//     dropping a word cannot narrow a query, and dropping it on one engine only
+//     would put the two backends back in disagreement in the other direction. See
+//     Stopwords for the list and for why it must not be edited.
 package searchtext
 
 import (
@@ -83,6 +93,131 @@ const (
 // query is tokenized, so both dialects search for exactly the same words.
 func Terms(query string) []string {
 	return strings.Fields(query)
+}
+
+// Stopwords are the words the query drops instead of searching for: InnoDB's
+// default stopword list, filtered to the entries long enough to reach the
+// full-text index.
+//
+// # What it is
+//
+// InnoDB never stores a stopword in a FULLTEXT index, so `MATCH ... AGAINST` for
+// one matches nothing at all — no error, no row, exactly like a word that appears
+// in no note. MariaDB 11.8.9's INNODB_FT_DEFAULT_STOPWORD holds 36 rows ("the"
+// twice, so 35 distinct words); 18 of them are at least three characters long and
+// therefore above innodb_ft_min_token_size, so they would otherwise be sent to
+// the index as ordinary terms. Those 18 are listed here.
+//
+// That single word is enough to empty a whole query. BooleanAnd prefixes *every*
+// term with "+", which boolean mode reads as "this term is mandatory", so a
+// query of "the quick" asks for notes that contain "the" — a term the index
+// cannot answer for — and returns zero rows however many notes say "the quick
+// brown fox". Measured on MariaDB 11.8.9: `+the +quick` 0 rows, `the quick` 2
+// rows, `+quick` 2 rows. The blast radius is not the word, it is every query a
+// person types: "who owns", "the meeting", "when will they".
+//
+// The entries below the index floor ("a", "of", "to", "in", "is", "at", "an",
+// "as", "be", "by", "de", "en", "i", "it", "la", "on", "or") are deliberately
+// absent. They never reach the index — repository.MinIndexedTerm routes them to
+// the LIKE scan, which finds them as substrings of the caller's notes — so they
+// are not the defect, and dropping them would take away a search that works.
+//
+// # Why it must not be edited to taste
+//
+// This is a fact about someone else's database, not a tuning knob: it is InnoDB's
+// list, on both backends, because the two engines must answer the same query the
+// same way. Shortening it puts the zero-row defect back for whichever word is
+// removed, silently — a query returns nothing, which is indistinguishable from
+// "no such note". Lengthening it takes a word that is findable today and makes it
+// unsearchable, which is a behaviour change, not a fix. Either direction needs
+// the conformance table in internal/repository updated in the same commit, and a
+// note in docs/how-to.md.
+//
+// A deployment that points innodb_ft_server_stopword_table at a list of its own
+// diverges again: no client protocol reports that setting, so the app cannot
+// know. That residual is accepted and stated rather than guessed at, the same
+// shape as MinIndexedTerm's on innodb_ft_min_token_size.
+var Stopwords = []string{
+	"about", "are", "com", "for", "from",
+	"how", "that", "the", "this", "und",
+	"was", "what", "when", "where", "who",
+	"will", "with", "www",
+}
+
+// stopwordSet is Stopwords as a lookup table, built once at start-up.
+var stopwordSet = func() map[string]struct{} {
+	set := make(map[string]struct{}, len(Stopwords))
+	for _, word := range Stopwords {
+		set[word] = struct{}{}
+	}
+	return set
+}()
+
+// WithoutStopwords returns terms with every stopword removed, preserving the
+// order of the terms it keeps. It is applied by both repositories immediately
+// after Terms and before the terms are split by indexability, so the word list
+// the two engines search for is decided here, once.
+//
+// A term is dropped when the only token a tokenizer would index is a stopword,
+// matched case-insensitively: "the", "The", "the," and "(the)" all drop, because
+// the same index that refuses "the" refuses "The" and reads "the," as the word
+// "the". Anything else is kept. "theatre" and "without" are not the refused word,
+// and a phrase such as "the-quick" is two tokens of which only one is a
+// stopword — dropping the whole phrase would widen the query, and keeping it
+// cannot.
+//
+// Dropping is the whole fix. The alternative — sending the term without its "+",
+// so it is optional — would leave MySQL's relevance score depending on a word the
+// index does not hold, and would have meant a second dialect-specific rule in
+// BooleanAnd. Removing the word says what the user meant: a stopword does not
+// narrow a search, so it does not narrow this one.
+func WithoutStopwords(terms []string) []string {
+	kept := make([]string, 0, len(terms))
+	for _, term := range terms {
+		if isStopword(term) {
+			continue
+		}
+		kept = append(kept, term)
+	}
+	return kept
+}
+
+// isStopword reports whether term is a single token that Stopwords holds,
+// compared case-insensitively.
+func isStopword(term string) bool {
+	tokens := TermTokens(term)
+	if len(tokens) != 1 {
+		return false
+	}
+	_, found := stopwordSet[strings.ToLower(tokens[0])]
+	return found
+}
+
+// TermTokens returns the maximal runs of letters and digits in term: the
+// fragments a word tokenizer indexes, with the punctuation it breaks on removed.
+// Lengths are counted in runes, so three multi-byte letters are three characters,
+// which is how both engines count them.
+//
+// It is exported because two rules in two packages must agree on what a token is:
+// isStopword above, and repository.MinIndexedTerm's floor, which measures a term
+// token by token ("go." is three characters but the token is "go").
+func TermTokens(term string) []string {
+	var tokens []string
+	var current []rune
+	for _, r := range term {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			current = append(current, r)
+			continue
+		}
+		if len(current) > 0 {
+			tokens = append(tokens, string(current))
+			current = current[:0]
+		}
+	}
+	if len(current) > 0 {
+		tokens = append(tokens, string(current))
+	}
+	return tokens
 }
 
 // FTSAnd renders terms as an SQLite FTS5 MATCH expression that requires every
