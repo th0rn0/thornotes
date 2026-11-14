@@ -46,7 +46,7 @@ const (
 // and closed when the process exits.
 //
 // It used to be one pool per test — sql.Open, Ping, runMySQLMigrations and
-// Close, ninety-nine times per run and so 297 times under -count=3 — and each
+// Close, ninety-eight times per run and so 291 times under -count=3 — and each
 // pool is allowed 25 connections while each migration run opened another one.
 // The result was measured, not guessed: during `go test -count=3` against a
 // server with max_connections = 151, Threads_connected climbed to exactly 151
@@ -67,7 +67,7 @@ var sharedPool *db.Pool
 //
 // It also owns the pool. Opening it once per process rather than once per test
 // moves migrations from once per test to once per process: under -count=3 that
-// is 297 migration runs becoming one, which is most of the suite's wall clock
+// is 291 migration runs becoming one, which is most of the suite's wall clock
 // as well as most of its connections.
 func TestMain(m *testing.M) {
 	os.Exit(dbtest.Locked(mysqlDSNEnv, func() int {
