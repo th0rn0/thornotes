@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"crypto/sha256"
+	"encoding/hex"
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog/log"
 	"github.com/th0rn0/thornotes/internal/auth"
@@ -217,13 +219,41 @@ func New(
 	return r
 }
 
+// sharePathPrefix is the public share route. The segment after it is a bearer
+// capability: whoever holds it reads the note, with no session and no account.
+const sharePathPrefix = "/s/"
+
+// redactLogPath replaces the token in a share URL with a short, stable hash
+// before it reaches the access log.
+//
+// The access log is the one place a working capability would otherwise be
+// written down in plaintext, and logs are copied, shipped and retained far more
+// casually than the tokens they describe. The hash keeps the log useful — every
+// request for the same link still carries the same handle, so an operator can
+// count and trace a single share — while giving a reader of the log nothing they
+// can replay. Hashing rather than dropping the segment is deliberate: "/s/…" on
+// every line would make a share indistinguishable from a 404 sweep.
+//
+// Only the token is hashed; every other path is returned untouched.
+func redactLogPath(path string) string {
+	if !strings.HasPrefix(path, sharePathPrefix) {
+		return path
+	}
+	token := strings.TrimPrefix(path, sharePathPrefix)
+	if token == "" {
+		return path
+	}
+	sum := sha256.Sum256([]byte(token))
+	return sharePathPrefix + "t_" + hex.EncodeToString(sum[:4])
+}
+
 func zerologAccessMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start := time.Now()
 		c.Next()
 		log.Info().
 			Str("method", c.Request.Method).
-			Str("path", c.Request.URL.Path).
+			Str("path", redactLogPath(c.Request.URL.Path)).
 			Int("status", c.Writer.Status()).
 			Dur("latency", time.Since(start)).
 			Str("ip", c.ClientIP()).

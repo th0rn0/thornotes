@@ -19,6 +19,19 @@ func NewShareHandler(svc *notes.Service, tmpl *template.Template) *ShareHandler 
 }
 
 func (h *ShareHandler) View(c *gin.Context) {
+	// A share URL is a bearer capability: whoever holds it reads the note, with no
+	// session and no account. Two consequences for the response, and they apply to
+	// every outcome of this handler — including the 404, which is the same
+	// capability with a wrong token, so a cacheable 404 is the same disclosure in
+	// the other direction:
+	//
+	//   no-store   nothing between here and the reader may keep a copy. A proxy that
+	//              caches this serves the note to whoever asks for it next.
+	//   noindex    if a share URL is ever pasted somewhere that gets crawled, the
+	//              note must not enter a search index.
+	c.Header("Cache-Control", "no-store")
+	c.Header("X-Robots-Tag", "noindex")
+
 	token := c.Param("token")
 	if token == "" {
 		c.AbortWithStatus(http.StatusNotFound)

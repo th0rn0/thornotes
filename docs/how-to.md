@@ -301,6 +301,19 @@ To stop sharing, open the note and click **Unshare** (it appears only while a li
 
 Clicking **Share** on a note that already has a link asks for confirmation, then replaces the link: the previous URL stops working at that moment. That is why the button warns instead of silently rotating it.
 
+### What a share link is, and what it is not
+
+A share URL is a **bearer capability**: the token in it is the whole authorisation. Anyone who holds the link can read the note, with no account, no session and no record of who they are. Treat it exactly like a password — in a channel you would not put a password in, in a chat with someone you trust, not in a public issue.
+
+What that means for the two ends of it:
+
+- **Nothing caches or indexes it.** The shared view is served with `Cache-Control: no-store` and `X-Robots-Tag: noindex`, so a proxy in front of the instance keeps no copy and a link that leaks into a crawlable page does not enter a search index. The 404 for a link that no longer works carries the same headers, so a cache cannot learn which tokens are live.
+- **The instance does not log it.** Access logs record the share path with the token replaced by a short stable handle (`/s/t_1a2b3c4d`), so a log can still be grouped by link — every request for one link carries the same handle — without the log itself being a list of working capabilities.
+
+**What revokes a link:** unsharing the note, or sharing it again (which rotates the token). Moving or renaming a note does **not** break a share link — the link resolves by token, not by path — and neither does editing it: a share always shows the note as it currently is, not as it looked when you shared it.
+
+**What does not expire it:** there is no expiry today. A link works until it is revoked, which is why losing one is the same problem as losing a credential rather than a temporary one.
+
 ---
 
 ## Journals
