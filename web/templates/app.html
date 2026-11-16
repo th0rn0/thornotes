@@ -233,6 +233,7 @@ body {
 .sidebar-toolbar { display: flex; gap: 4px; padding: 8px; border-bottom: 1px solid var(--border-light); }
 .sidebar-toolbar button { flex: 1; padding: 8px 0; font-size: 11px; border: 1px solid var(--border); background: var(--bg-btn); cursor: pointer; color: var(--text-btn); min-height: 36px; }
 .sidebar-toolbar button:hover { background: var(--bg-hover); }
+.sidebar-toolbar button.active { background: var(--bg-active-folder); border-color: var(--accent); font-weight: 600; }
 .sidebar-search { padding: 6px 8px; border-bottom: 1px solid var(--border-light); }
 .sidebar-search input { width: 100%; border: 1px solid var(--border); background: var(--bg-input); color: var(--text); padding: 6px 8px; font-size: 12px; }
 .tree { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 4px 0; }
@@ -393,6 +394,35 @@ body {
 .fv-tag { font-size: 10px; background: var(--bg-active-folder); color: var(--text-mute); padding: 1px 6px; border-radius: 10px; }
 .fv-snippet { font-size: 11px; color: var(--text-mute); line-height: 1.5; max-height: 66px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
 .folder-view-empty { grid-column: 1/-1; color: var(--text-dim); font-size: 13px; padding: 24px 0; }
+
+/* BOARD VIEW */
+#board-view { display: none; flex: 1; flex-direction: column; overflow: hidden; background: var(--bg-editor); }
+#board-view.active { display: flex; }
+.bv-header { padding: 12px 20px 8px; border-bottom: 1px solid var(--border-light); flex-shrink: 0; display: flex; align-items: baseline; gap: 12px; }
+.bv-title { font-size: 16px; font-weight: 600; color: var(--text); margin: 0; }
+.bv-summary { font-size: 12px; color: var(--text-dim); }
+.bv-body { flex: 1; overflow: auto; padding: 12px 16px; }
+.bv-loading { padding: 24px; text-align: center; color: var(--text-dim); font-size: 13px; }
+.bv-error { padding: 24px; text-align: center; color: var(--color-error); font-size: 13px; }
+.bv-empty { padding: 24px; text-align: center; color: var(--text-dim); font-size: 13px; }
+.bv-lane { margin-bottom: 16px; }
+.bv-lane-header { font-size: 13px; font-weight: 600; color: var(--text); padding: 4px 0 6px; border-bottom: 1px solid var(--border-light); margin-bottom: 8px; }
+.bv-columns { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 8px; }
+.bv-column { min-width: 180px; max-width: 240px; flex-shrink: 0; display: flex; flex-direction: column; }
+.bv-column-header { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px; color: var(--text-dim); padding: 4px 6px; background: var(--bg-hover); border-radius: 3px 3px 0 0; display: flex; justify-content: space-between; align-items: center; }
+.bv-column-count { font-size: 10px; font-weight: 400; color: var(--text-mute); }
+.bv-column-cards { flex: 1; display: flex; flex-direction: column; gap: 4px; padding: 4px 0; min-height: 24px; }
+.bv-card { display: block; padding: 8px 10px; background: var(--bg-modal); border: 1px solid var(--border); border-radius: 3px; cursor: pointer; text-decoration: none; color: var(--text); font-size: 12px; line-height: 1.4; }
+.bv-card:hover, .bv-card:focus { background: var(--bg-hover); border-color: var(--accent); outline: none; }
+.bv-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.bv-card-title { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 4px; }
+.bv-card-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.bv-card-priority { font-size: 10px; font-weight: 600; color: var(--text-on-accent); background: var(--accent); padding: 1px 5px; border-radius: 8px; line-height: 1.4; }
+.bv-card-date { font-size: 10px; color: var(--text-dim); }
+.bv-card-tags { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 4px; }
+.bv-card-tag { font-size: 9px; background: var(--bg-active-folder); color: var(--text-mute); padding: 1px 5px; border-radius: 8px; }
+/* Status label on card — text, never colour alone */
+.bv-card-status { font-size: 9px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px; color: var(--text-dim); }
 
 /* EMPTY STATE */
 .empty-state { display: flex; align-items: center; justify-content: center; flex: 1; color: var(--text-dim); font-size: 13px; }
@@ -663,6 +693,7 @@ body {
         <button id="create-note-btn">+ Note</button>
         <button id="create-folder-btn">+ Folder</button>
         <button id="import-btn" title="Import .md or .zip">↑ Import</button>
+        <button id="board-toggle-btn" title="Board view — show all status-tagged notes as a board" aria-pressed="false">Board</button>
       </div>
       <div class="sidebar-search">
         <input id="search-input" type="search" placeholder="Search notes…" />
@@ -690,6 +721,15 @@ body {
       <div id="folder-view">
         <div class="fv-header"><h2 id="folder-view-title"></h2></div>
         <div class="fv-grid" id="folder-view-grid"></div>
+      </div>
+      <div id="board-view" role="region" aria-label="Board view">
+        <div class="bv-header">
+          <h2 class="bv-title">Board</h2>
+          <span class="bv-summary" id="board-summary"></span>
+        </div>
+        <div class="bv-body" id="board-body">
+          <div class="bv-loading" id="board-loading">Loading notes…</div>
+        </div>
       </div>
       <div id="editor-container" style="display:none; flex:1; flex-direction:column; overflow:hidden;">
         <div class="editor-titlebar">
@@ -995,6 +1035,7 @@ body {
 <script src="/static/js/default-note-view.js?v={{.AssetVersion}}"></script>
 <script src="/static/js/editor-scroll-reset.js?v={{.AssetVersion}}"></script>
 <script src="/static/js/graph-utils.js?v={{.AssetVersion}}"></script>
+<script src="/static/js/board-view.js?v={{.AssetVersion}}"></script>
 <script src="/static/js/zip-download.js?v={{.AssetVersion}}"></script>
 <script src="/static/js/app.js?v={{.AssetVersion}}"></script>
 </body>

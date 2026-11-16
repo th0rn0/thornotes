@@ -13,15 +13,16 @@ Thornotes is a self-hosted markdown notes app. Every note is a real `.md` file o
 5. [The Editor](#the-editor)
 6. [Organizing with Folders](#organizing-with-folders)
 7. [Using Tags](#using-tags)
-8. [Search](#search)
-9. [Sharing Notes](#sharing-notes)
-10. [Journals](#journals)
-11. [Version History](#version-history)
-12. [Import](#import)
-13. [Themes](#themes)
-14. [API Tokens](#api-tokens)
-15. [MCP Server (AI Integration)](#mcp-server-ai-integration)
-16. [Keyboard Shortcuts](#keyboard-shortcuts)
+8. [Board View](#board-view)
+9. [Search](#search)
+10. [Sharing Notes](#sharing-notes)
+11. [Journals](#journals)
+12. [Version History](#version-history)
+13. [Import](#import)
+14. [Themes](#themes)
+15. [API Tokens](#api-tokens)
+16. [MCP Server (AI Integration)](#mcp-server-ai-integration)
+17. [Keyboard Shortcuts](#keyboard-shortcuts)
 
 ---
 
@@ -250,6 +251,25 @@ Tags let you cross-reference notes across folders. A note in `work/projects/` ca
 >
 > - **MCP:** the `list_tags` and `find_notes_by_tag` tools, and `search_notes` with its `tags` argument (AND across tags).
 > - **HTTP:** `GET /api/v1/notes?q=…&tag=one&tag=two`. The `q` parameter is required, so this is a search narrowed by tag rather than a tag listing. Multi-tag filtering is affected by the search-semantics defect tracked as H-02.
+
+---
+
+## Board View
+
+If your notes use `status-*` and `project-*` tags to track work, the **Board** view renders them as a kanban-style board — columns for statuses, swimlanes for projects, all on one screen.
+
+**To open it:** click the **Board** button in the sidebar toolbar. Click it again to return to the normal view. The toggle remembers its last state, so it will be there next time you open Thornotes if you left it on.
+
+**Tag convention:**
+
+- **Columns** are `status-*` tags. The suffix is humanised: `status-in-review` becomes the "In review" column. Fixed column order: Todo, Ready, Running, In review, Blocked, Done, Archived. Any other status you invent appears after those, alphabetically.
+- **Swimlanes** are `project-*` tags. The suffix is shown as-is (title-cased): `project-thornotes` → "Thornotes". A note with several project tags appears under the alphabetically first one, so it is on the board exactly once.
+- **No `status-*` tag** → the note does not appear on the board. The board shows work items, not the whole vault.
+- **Status but no project** → the note appears in a "No project" lane, so work is not hidden.
+
+Cards show the note title, priority (`P<nn>` when a `priority-pNN` tag exists), a relative date, and any other tags as chips. Click a card to open the note.
+
+This is a view, not a schema change — no new fields, no new endpoints, no migration. The board reads the same `/api/v1/notes/all` endpoint the rest of the app uses and groups the results on the client.
 
 ---
 
