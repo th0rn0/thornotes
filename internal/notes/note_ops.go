@@ -2,8 +2,6 @@ package notes
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -101,11 +99,6 @@ func (s *Service) createNoteWithSlug(ctx context.Context, userID int64, userUUID
 // GetNote returns a note by ID, verifying it belongs to userID.
 func (s *Service) GetNote(ctx context.Context, userID, noteID int64) (*model.Note, error) {
 	return s.notes.GetByID(ctx, userID, noteID)
-}
-
-// GetNoteByShareToken returns a note by its public share token.
-func (s *Service) GetNoteByShareToken(ctx context.Context, token string) (*model.Note, error) {
-	return s.notes.GetByShareToken(ctx, token)
 }
 
 // ListNotes returns note metadata for a given folder (nil = root).
@@ -489,24 +482,6 @@ func (s *Service) DeleteNote(ctx context.Context, userID, noteID int64) error {
 		s.fs.RecordDelete(diskPath)
 	}
 	return nil
-}
-
-// SetShareToken generates a new share token or clears it (pass clear=true).
-func (s *Service) SetShareToken(ctx context.Context, userID, noteID int64, clear bool) (*string, error) {
-	if clear {
-		return nil, s.notes.SetShareToken(ctx, userID, noteID, nil)
-	}
-
-	b := make([]byte, 16)
-	if _, err := rand.Read(b); err != nil {
-		return nil, apperror.Internal("generate share token", err)
-	}
-	token := hex.EncodeToString(b)
-
-	if err := s.notes.SetShareToken(ctx, userID, noteID, &token); err != nil {
-		return nil, fmt.Errorf("set share token: %w", err)
-	}
-	return &token, nil
 }
 
 // FindNotesByTag returns all notes that have every tag in the given list (AND semantics).

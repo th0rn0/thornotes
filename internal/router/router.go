@@ -169,6 +169,15 @@ func New(
 		notesGroup.PATCH("/:id/move", csrfMW, notesH.Move)
 		notesGroup.DELETE("/:id", csrfMW, notesH.Delete)
 		notesGroup.POST("/:id/share", csrfMW, notesH.Share)
+		notesGroup.PATCH("/:id/share", csrfMW, notesH.PatchShareExpiry)
+	}
+
+	// The caller's own share links. Read-only and session-scoped; the response
+	// carries a redacted token prefix, never a usable token, so this endpoint
+	// cannot be used to harvest capabilities.
+	shares := r.Group("/api/v1/shares", sessionMW)
+	{
+		shares.GET("", shareH.List)
 	}
 
 	// Note history (git-backed, requires --enable-git-history).

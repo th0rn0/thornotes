@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/th0rn0/thornotes/internal/apperror"
@@ -203,6 +204,11 @@ func (h *NotesHandler) Delete(c *gin.Context) {
 
 type shareRequest struct {
 	Clear bool `json:"clear"`
+	// ExpiresAt is the opt-in deadline for the link, as RFC3339. Omitted or
+	// null means no expiry, which is the documented default and what every link
+	// created before ticket 601 has: the caller must ask for a deadline, and
+	// nothing here invents one.
+	ExpiresAt *time.Time `json:"expires_at"`
 }
 
 func (h *NotesHandler) Share(c *gin.Context) {
@@ -226,7 +232,16 @@ func (h *NotesHandler) Share(c *gin.Context) {
 		return
 	}
 
-	token, err := h.svc.SetShareToken(c.Request.Context(), user.ID, noteID, req.Clear)
+	// A deadline in the past would publish a link that is already dead: the
+	// caller would get a token that answers 404 everywhere, with nothing in the
+	// response saying why. Refusing it is the only answer that cannot be
+	// mistaken for success.
+	if req.ExpiresAt != nil && !req.ExpiresAt.After(time.Now()) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "expires_at must be in the future"})
+		return
+	}
+
+	token, err := h.svc.SetShareToken(c.Request.Context(), user.ID, noteID, req.Clear, req.ExpiresAt)
 	if err != nil {
 		writeError(c, err)
 		return
@@ -237,6 +252,58 @@ func (h *NotesHandler) Share(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"share_token": *token})
+}
+
+type shareExpiryRequest struct {
+	ExpiresAt *time.Time `json:"expires_at"`
+	// Clear removes the deadline instead of setting one. It is explicit rather
+	// than "expires_at absent means clear", because an absent field and an
+	// empty body must not be able to silently make a link immortal.
+	Clear bool `json:"clear"`
+}
+
+// PatchShareExpiry changes the deadline of an existing link without rotating its
+// token, so URLs already handed out keep working.
+//
+// Re-sharing (POST /notes/:id/share) generates a new token, which is what a user
+// wants when a link leaked and the opposite of what they want when they merely
+// need to extend or drop a deadline. Without this route, the only way to change
+// an expiry would revoke every copy of the link in circulation.
+func (h *NotesHandler) PatchShareExpiry(c *gin.Context) {
+	user := ginUser(c)
+	noteID, err := ginParamInt64(c, "id")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "note id must be a positive integer"})
+		return
+	}
+
+	var req shareExpiryRequest
+	if err := readJSON(c, &req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "request body must be a JSON object: " + err.Error()})
+		return
+	}
+
+	var expiresAt *time.Time
+	switch {
+	case req.Clear:
+		expiresAt = nil
+	case req.ExpiresAt != nil:
+		if !req.ExpiresAt.After(time.Now()) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "expires_at must be in the future"})
+			return
+		}
+		expiresAt = req.ExpiresAt
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{"error": "expires_at or clear is required"})
+		return
+	}
+
+	if err := h.svc.SetShareExpiry(c.Request.Context(), user.ID, noteID, expiresAt); err != nil {
+		writeError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"expires_at": expiresAt})
 }
 
 func (h *NotesHandler) ListRoot(c *gin.Context) {

@@ -35,7 +35,7 @@ func TestP0_C01_CreateNote_DuplicateAtRoot_PreservesFileDBTagsShareToken(t *test
 	origHash, err := st.svc.UpdateNoteContent(ctx, st.userID, n1.ID, origContent, n1.ContentHash)
 	require.NoError(t, err)
 
-	shareToken, err := st.svc.SetShareToken(ctx, st.userID, n1.ID, false)
+	shareToken, err := st.svc.SetShareToken(ctx, st.userID, n1.ID, false, nil)
 	require.NoError(t, err)
 	require.NotNil(t, shareToken)
 
@@ -85,7 +85,7 @@ func TestP0_C01_CreateNote_DuplicateInFolder_PreservesFileDBTagsShareToken(t *te
 	origHash, err := st.svc.UpdateNoteContent(ctx, st.userID, n1.ID, origContent, n1.ContentHash)
 	require.NoError(t, err)
 
-	shareToken, err := st.svc.SetShareToken(ctx, st.userID, n1.ID, false)
+	shareToken, err := st.svc.SetShareToken(ctx, st.userID, n1.ID, false, nil)
 	require.NoError(t, err)
 	require.NotNil(t, shareToken)
 
@@ -122,7 +122,7 @@ func TestP0_C01_ImportCollisions_PreserveExistingNotesAndFolderTrees(t *testing.
 	rootContent := "# Original Readme\n\nDo not clobber."
 	rootHash, err := st.svc.UpdateNoteContent(ctx, st.userID, rootNote.ID, rootContent, rootNote.ContentHash)
 	require.NoError(t, err)
-	rootShare, err := st.svc.SetShareToken(ctx, st.userID, rootNote.ID, false)
+	rootShare, err := st.svc.SetShareToken(ctx, st.userID, rootNote.ID, false, nil)
 	require.NoError(t, err)
 
 	workFolder, err := st.svc.CreateFolder(ctx, st.userID, st.user.UUID, nil, "Work")
@@ -135,7 +135,7 @@ func TestP0_C01_ImportCollisions_PreserveExistingNotesAndFolderTrees(t *testing.
 	workContent := "# Original Work Todo\n\nMust survive zip import collision."
 	workHash, err := st.svc.UpdateNoteContent(ctx, st.userID, workNote.ID, workContent, workNote.ContentHash)
 	require.NoError(t, err)
-	workShare, err := st.svc.SetShareToken(ctx, st.userID, workNote.ID, false)
+	workShare, err := st.svc.SetShareToken(ctx, st.userID, workNote.ID, false, nil)
 	require.NoError(t, err)
 
 	subNote, err := st.svc.CreateNote(ctx, st.userID, st.user.UUID, &subFolder.ID, "deep", []string{"sub-tag"})
@@ -480,7 +480,7 @@ func TestP0_C01_UpdateNoteMetadata_RenameCollision_PreservesSourceAndTarget(t *t
 	targetContent := "# Target\n\nExisting target content must survive."
 	targetHash, err := st.svc.UpdateNoteContent(ctx, st.userID, target.ID, targetContent, target.ContentHash)
 	require.NoError(t, err)
-	targetShare, err := st.svc.SetShareToken(ctx, st.userID, target.ID, false)
+	targetShare, err := st.svc.SetShareToken(ctx, st.userID, target.ID, false, nil)
 	require.NoError(t, err)
 	require.NotNil(t, targetShare)
 
@@ -489,7 +489,7 @@ func TestP0_C01_UpdateNoteMetadata_RenameCollision_PreservesSourceAndTarget(t *t
 	sourceContent := "# Source\n\nOriginal source content must survive."
 	sourceHash, err := st.svc.UpdateNoteContent(ctx, st.userID, source.ID, sourceContent, source.ContentHash)
 	require.NoError(t, err)
-	sourceShare, err := st.svc.SetShareToken(ctx, st.userID, source.ID, false)
+	sourceShare, err := st.svc.SetShareToken(ctx, st.userID, source.ID, false, nil)
 	require.NoError(t, err)
 	require.NotNil(t, sourceShare)
 
@@ -547,7 +547,7 @@ func TestP0_C01_MoveNote_DestinationCollision_PreservesSourceAndTarget(t *testin
 	targetContent := "# Target in Destination\n\nMust not be overwritten by MoveNote."
 	targetHash, err := st.svc.UpdateNoteContent(ctx, st.userID, target.ID, targetContent, target.ContentHash)
 	require.NoError(t, err)
-	targetShare, err := st.svc.SetShareToken(ctx, st.userID, target.ID, false)
+	targetShare, err := st.svc.SetShareToken(ctx, st.userID, target.ID, false, nil)
 	require.NoError(t, err)
 	require.NotNil(t, targetShare)
 
@@ -557,7 +557,7 @@ func TestP0_C01_MoveNote_DestinationCollision_PreservesSourceAndTarget(t *testin
 	sourceContent := "# Source at Root\n\nMust stay at root when move conflicts."
 	sourceHash, err := st.svc.UpdateNoteContent(ctx, st.userID, source.ID, sourceContent, source.ContentHash)
 	require.NoError(t, err)
-	sourceShare, err := st.svc.SetShareToken(ctx, st.userID, source.ID, false)
+	sourceShare, err := st.svc.SetShareToken(ctx, st.userID, source.ID, false, nil)
 	require.NoError(t, err)
 	require.NotNil(t, sourceShare)
 

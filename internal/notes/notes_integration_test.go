@@ -228,7 +228,7 @@ func TestService_SetShareToken(t *testing.T) {
 	require.NoError(t, err)
 
 	// Set share token.
-	token, err := svc.SetShareToken(ctx, userID, note.ID, false)
+	token, err := svc.SetShareToken(ctx, userID, note.ID, false, nil)
 	require.NoError(t, err)
 	require.NotNil(t, token)
 	assert.NotEmpty(t, *token)
@@ -239,7 +239,7 @@ func TestService_SetShareToken(t *testing.T) {
 	assert.Equal(t, note.ID, shared.ID)
 
 	// Clear it.
-	cleared, err := svc.SetShareToken(ctx, userID, note.ID, true)
+	cleared, err := svc.SetShareToken(ctx, userID, note.ID, true, nil)
 	require.NoError(t, err)
 	assert.Nil(t, cleared)
 }
@@ -481,7 +481,7 @@ func TestService_SetShareToken_NotFound(t *testing.T) {
 	svc, userID := newTestStack(t)
 	ctx := context.Background()
 
-	_, err := svc.SetShareToken(ctx, userID, 99999, false)
+	_, err := svc.SetShareToken(ctx, userID, 99999, false, nil)
 	// A note that does not exist (or belongs to somebody else) matches no row, so
 	// the repository reports not-found instead of pretending a token was written.
 	require.Error(t, err)
@@ -689,7 +689,7 @@ func TestService_SetShareToken_DbError(t *testing.T) {
 	// SetShareToken uses writeDB (closed) → DB error on SET.
 	st.pool.WriteDB.Close()
 
-	_, err = st.svc.SetShareToken(ctx, st.userID, note.ID, false)
+	_, err = st.svc.SetShareToken(ctx, st.userID, note.ID, false, nil)
 	require.Error(t, err)
 }
 

@@ -229,7 +229,7 @@ func TestRenameFolder_ShareTokenSurvivesSiblingPrefixRename(t *testing.T) {
 	siblingNote, err := st.svc.CreateNote(ctx, st.userID, st.user.UUID, &sibling.ID, "Shared", nil)
 	require.NoError(t, err)
 
-	token, err := st.svc.SetShareToken(ctx, st.userID, siblingNote.ID, false)
+	token, err := st.svc.SetShareToken(ctx, st.userID, siblingNote.ID, false, nil)
 	require.NoError(t, err)
 	require.NotNil(t, token)
 

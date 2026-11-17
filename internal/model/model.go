@@ -37,15 +37,44 @@ type Note struct {
 	Slug     string `json:"slug"`
 	// TitleKey is the normalized lookup key for Title (NFC, entity-decoded,
 	// dash-folded, case-folded). Computed in Go; used for link resolution.
-	TitleKey    string     `json:"-"`
-	DiskPath    string     `json:"disk_path"`
-	Content     string     `json:"content"`
-	ContentHash string     `json:"content_hash"`
-	Tags        []string   `json:"tags"`
-	ShareToken  *string    `json:"share_token,omitempty"`
-	FtsSyncedAt *time.Time `json:"-"`
-	CreatedAt   time.Time  `json:"created_at"`
-	UpdatedAt   time.Time  `json:"updated_at"`
+	TitleKey    string   `json:"-"`
+	DiskPath    string   `json:"disk_path"`
+	Content     string   `json:"content"`
+	ContentHash string   `json:"content_hash"`
+	Tags        []string `json:"tags"`
+	ShareToken  *string  `json:"share_token,omitempty"`
+	// ExpiresAt is the opt-in expiry of the share link; nil means no expiry,
+	// which is the default and the only value the schema can produce for a link
+	// created before ticket 601. It is populated by the share-aware note
+	// queries (GetByID, GetByShareToken, ...) and by ListShares.
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+	// LastViewedAt is the last view recorded for the share link, bounded to at
+	// most one write per link per ShareViewWindow (see notes.ShareViewWindow).
+	// It says nothing about a note that has never been shared.
+	LastViewedAt *time.Time `json:"last_viewed_at,omitempty"`
+	FtsSyncedAt  *time.Time `json:"-"`
+	CreatedAt    time.Time  `json:"created_at"`
+	UpdatedAt    time.Time  `json:"updated_at"`
+}
+
+// ShareLink is one entry of the caller's own share list, as returned by
+// GET /api/v1/shares.
+//
+// The token is deliberately absent: this endpoint exists so a user can find and
+// revoke the links they have handed out, and answering it with a list of live
+// bearer capabilities would turn one authenticated read into a bulk export of
+// every share. TokenPrefix is the first few characters, enough to match a row
+// against a URL the user still has in front of them and useless for replaying
+// it. Anything that returns a usable token must keep returning it to the note
+// that owns it (POST /notes/:id/share), not to an enumeration endpoint.
+type ShareLink struct {
+	NoteID       int64      `json:"note_id"`
+	Title        string     `json:"title"`
+	FolderID     *int64     `json:"folder_id"`
+	TokenPrefix  string     `json:"token_prefix"`
+	ExpiresAt    *time.Time `json:"expires_at"`
+	LastViewedAt *time.Time `json:"last_viewed_at"`
+	UpdatedAt    time.Time  `json:"updated_at"`
 }
 
 type NoteListItem struct {

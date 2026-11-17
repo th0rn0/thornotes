@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/th0rn0/thornotes/internal/apperror"
 	"github.com/th0rn0/thornotes/internal/model"
@@ -48,14 +49,16 @@ func (r *NoteRepo) Create(ctx context.Context, n *model.Note) (*model.Note, erro
 func (r *NoteRepo) GetByID(ctx context.Context, userID, noteID int64) (*model.Note, error) {
 	return r.scanNote(r.db.QueryRowContext(ctx, `
 		SELECT id, user_id, folder_id, title, slug, title_key, disk_path, content, content_hash,
-		       tags, share_token, fts_synced_at, created_at, updated_at
+		       tags, share_token, fts_synced_at, created_at, updated_at,
+		       expires_at, last_viewed_at
 		FROM notes WHERE id = ? AND user_id = ?`, noteID, userID))
 }
 
 func (r *NoteRepo) GetByShareToken(ctx context.Context, token string) (*model.Note, error) {
 	return r.scanNote(r.db.QueryRowContext(ctx, `
 		SELECT id, user_id, folder_id, title, slug, title_key, disk_path, content, content_hash,
-		       tags, share_token, fts_synced_at, created_at, updated_at
+		       tags, share_token, fts_synced_at, created_at, updated_at,
+		       expires_at, last_viewed_at
 		FROM notes WHERE share_token = ?`, token))
 }
 
@@ -63,13 +66,15 @@ func (r *NoteRepo) GetByFolderAndSlug(ctx context.Context, userID int64, folderI
 	if folderID == nil {
 		return r.scanNote(r.db.QueryRowContext(ctx, `
 			SELECT id, user_id, folder_id, title, slug, title_key, disk_path, content, content_hash,
-			       tags, share_token, fts_synced_at, created_at, updated_at
+			       tags, share_token, fts_synced_at, created_at, updated_at,
+			       expires_at, last_viewed_at
 			FROM notes WHERE user_id = ? AND folder_id IS NULL AND slug = ?`,
 			userID, slug))
 	}
 	return r.scanNote(r.db.QueryRowContext(ctx, `
 		SELECT id, user_id, folder_id, title, slug, title_key, disk_path, content, content_hash,
-		       tags, share_token, fts_synced_at, created_at, updated_at
+		       tags, share_token, fts_synced_at, created_at, updated_at,
+		       expires_at, last_viewed_at
 		FROM notes WHERE user_id = ? AND folder_id = ? AND slug = ?`,
 		userID, *folderID, slug))
 }
@@ -394,6 +399,92 @@ func (r *NoteRepo) SetShareToken(ctx context.Context, userID, noteID int64, toke
 	return nil
 }
 
+// SetShareExpiry writes the link's expiry, or clears it when expiresAt is nil.
+//
+// It is separate from SetShareToken because expiry is not part of what revokes a
+// link: a user can shorten or drop a deadline without rotating the token and
+// breaking every URL already handed out.
+func (r *NoteRepo) SetShareExpiry(ctx context.Context, userID, noteID int64, expiresAt *time.Time) error {
+	// updateScoped, not a bare UPDATE: writing the same deadline twice changes
+	// no column, MySQL counts that as zero rows, and the zero would be read as
+	// "not your note". The existence predicate is the tie-breaker — and it also
+	// carries share_token IS NOT NULL, because a deadline on a note that is not
+	// shared is a value nothing reads and must not be reported as success.
+	matched, err := updateScoped(ctx, r.db,
+		`UPDATE notes SET expires_at = ? WHERE id = ? AND user_id = ? AND share_token IS NOT NULL`,
+		[]any{expiresAt, noteID, userID},
+		`SELECT EXISTS(SELECT 1 FROM notes WHERE id = ? AND user_id = ? AND share_token IS NOT NULL)`,
+		[]any{noteID, userID},
+	)
+	if err != nil {
+		return fmt.Errorf("set share expiry: %w", err)
+	}
+	if !matched {
+		return apperror.ErrNotFound
+	}
+	return nil
+}
+
+// ListShares returns the caller's own share links with the token redacted to a
+// prefix. See repository.RedactShareToken for why the token is not in this row.
+func (r *NoteRepo) ListShares(ctx context.Context, userID int64) ([]model.ShareLink, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT id, folder_id, title, share_token, expires_at, last_viewed_at, updated_at
+		FROM notes WHERE user_id = ? AND share_token IS NOT NULL
+		ORDER BY updated_at DESC`, userID)
+	if err != nil {
+		return nil, fmt.Errorf("list shares: %w", err)
+	}
+	defer rows.Close()
+
+	var shares []model.ShareLink
+	for rows.Next() {
+		var (
+			link  model.ShareLink
+			token string
+		)
+		if err := rows.Scan(&link.NoteID, &link.FolderID, &link.Title, &token,
+			&link.ExpiresAt, &link.LastViewedAt, &link.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scan share: %w", err)
+		}
+		link.TokenPrefix = repository.RedactShareToken(token)
+		shares = append(shares, link)
+	}
+	return shares, rows.Err()
+}
+
+// TouchShareView stamps last_viewed_at with now, at most once per window.
+//
+// Deliberately NOT updateScoped: here "zero changed rows" is the answer, not an
+// ambiguity to resolve. A row that matched but already carried a stamp inside
+// the window means another view won the race and this one must not write — the
+// bound is the point, so a tie-breaker that reported success would hide the
+// single case the guard exists to prevent.
+//
+// The Go-side ShareViewDue check keeps a view off the write path entirely inside
+// the window; the SQL predicate repeats the bound so two racing views cannot
+// both stamp, expressed with a bound time so both engines compare the same pair
+// of values.
+func (r *NoteRepo) TouchShareView(ctx context.Context, noteID int64, previous *time.Time, now time.Time, window time.Duration) (bool, error) {
+	if !repository.ShareViewDue(previous, now, window) {
+		return false, nil
+	}
+	res, err := r.db.ExecContext(ctx, `
+		UPDATE notes SET last_viewed_at = ?
+		WHERE id = ? AND share_token IS NOT NULL
+		  AND (last_viewed_at IS NULL OR last_viewed_at <= ?)`,
+		now.UTC(), noteID, now.Add(-window).UTC(),
+	)
+	if err != nil {
+		return false, fmt.Errorf("touch share view: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("touch share view: rows affected: %w", err)
+	}
+	return n > 0, nil
+}
+
 // ensureNoteOwned returns apperror.ErrNotFound unless a note with this id belongs
 // to userID. It is the tie-breaker for a by-(id, user_id) UPDATE that matched no
 // row on a driver that counts changed rows: it separates "the note is not
@@ -421,13 +512,15 @@ func (r *NoteRepo) ListForContext(ctx context.Context, userID int64, folderID *i
 	if folderID == nil {
 		rows, err = r.db.QueryContext(ctx, `
 			SELECT id, user_id, folder_id, title, slug, title_key, disk_path, content, content_hash,
-			       tags, share_token, fts_synced_at, created_at, updated_at
+			       tags, share_token, fts_synced_at, created_at, updated_at,
+			       expires_at, last_viewed_at
 			FROM notes WHERE user_id = ?
 			ORDER BY updated_at DESC`, userID)
 	} else {
 		rows, err = r.db.QueryContext(ctx, `
 			SELECT id, user_id, folder_id, title, slug, title_key, disk_path, content, content_hash,
-			       tags, share_token, fts_synced_at, created_at, updated_at
+			       tags, share_token, fts_synced_at, created_at, updated_at,
+			       expires_at, last_viewed_at
 			FROM notes WHERE user_id = ? AND folder_id = ?
 			ORDER BY updated_at DESC`, userID, *folderID)
 	}
@@ -447,6 +540,7 @@ func scanNotes(rows *sql.Rows) ([]*model.Note, error) {
 			&n.ID, &n.UserID, &n.FolderID, &n.Title, &n.Slug, &n.TitleKey, &n.DiskPath,
 			&n.Content, &n.ContentHash, &tagsJSON, &n.ShareToken,
 			&n.FtsSyncedAt, &n.CreatedAt, &n.UpdatedAt,
+			&n.ExpiresAt, &n.LastViewedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan note: %w", err)
 		}
@@ -466,7 +560,7 @@ func (r *NoteRepo) IterateForContext(ctx context.Context, userID int64, folderID
 	q := `
 		SELECT id, user_id, folder_id, title, slug, title_key, disk_path,
 		       SUBSTR(content, 1, ?), content_hash, tags, share_token, fts_synced_at,
-		       created_at, updated_at
+		       created_at, updated_at, expires_at, last_viewed_at
 		FROM notes WHERE user_id = ?`
 	args := []any{contentChars, userID}
 	if folderID != nil {
@@ -488,6 +582,7 @@ func (r *NoteRepo) IterateForContext(ctx context.Context, userID int64, folderID
 			&n.ID, &n.UserID, &n.FolderID, &n.Title, &n.Slug, &n.TitleKey, &n.DiskPath,
 			&n.Content, &n.ContentHash, &tagsJSON, &n.ShareToken,
 			&n.FtsSyncedAt, &n.CreatedAt, &n.UpdatedAt,
+			&n.ExpiresAt, &n.LastViewedAt,
 		); err != nil {
 			return fmt.Errorf("scan note: %w", err)
 		}
@@ -512,6 +607,7 @@ func (r *NoteRepo) scanNote(row *sql.Row) (*model.Note, error) {
 		&n.ID, &n.UserID, &n.FolderID, &n.Title, &n.Slug, &n.TitleKey, &n.DiskPath,
 		&n.Content, &n.ContentHash, &tagsJSON, &n.ShareToken,
 		&n.FtsSyncedAt, &n.CreatedAt, &n.UpdatedAt,
+		&n.ExpiresAt, &n.LastViewedAt,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {

@@ -312,7 +312,20 @@ What that means for the two ends of it:
 
 **What revokes a link:** unsharing the note, or sharing it again (which rotates the token). Moving or renaming a note does **not** break a share link — the link resolves by token, not by path — and neither does editing it: a share always shows the note as it currently is, not as it looked when you shared it.
 
-**What does not expire it:** there is no expiry today. A link works until it is revoked, which is why losing one is the same problem as losing a credential rather than a temporary one.
+**What does not expire it by default:** a link works until it is revoked. That is still the default — a link with no deadline is the one you get unless you ask for another — but a deadline is now available, because "no expiry is a legitimate answer if it is stated" and an unstated one is not.
+
+### Expiry, and finding the links you have handed out
+
+A share link can be given a deadline. Two ways, and the difference matters:
+
+- **`POST /api/v1/notes/:id/share`** with `{"expires_at": "2026-12-01T09:00:00Z"}` (RFC3339) creates the link with that deadline. Omit it, or send `null`, and the link never expires. A deadline in the past is refused with `400`, because publishing a link that is already dead means handing somebody a URL that answers 404 everywhere with nothing saying why.
+- **`PATCH /api/v1/notes/:id/share`** with `{"expires_at": …}` changes the deadline of the link that already exists, and `{"clear": true}` removes it. This one does **not** rotate the token, which is the point: re-sharing to extend a deadline would revoke every copy of the link already in circulation.
+
+An expired link answers exactly what a token that never existed answers — the same status, the same empty body, the same headers. There is nothing in the response that says "this was a real link once", because that is information the holder of a burned URL should not be able to get.
+
+**Your links, in one place: `GET /api/v1/shares`.** It lists the caller's own share links — note, folder, deadline, and when the link was last opened — with the token itself reduced to its first eight characters plus `…`. That is enough to match a row against a URL you still have and useless for replaying one: an endpoint that answered with every working token would turn one authenticated read into a bulk export of the capabilities themselves. It is what makes bulk revocation possible at all; before it, a link could only be cleared from the note that produced it.
+
+**Last opened** is recorded at most **once per link per ten minutes**. A share link is read-only, unauthenticated and easy to hit in a loop, so a write per view would let anyone holding a URL grow the database; one write per ten minutes caps a link at six an hour however hard it is hit, and still answers the only question the field is for — is this link still in use, and roughly when?
 
 ---
 
