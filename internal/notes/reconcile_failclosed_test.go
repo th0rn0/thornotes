@@ -49,7 +49,7 @@ func TestReconcile_EmptyRootWithPopulatedDB_Aborts(t *testing.T) {
 	for _, title := range []string{"Alpha", "Beta", "Gamma"} {
 		n, err := st.svc.CreateNote(ctx, st.userID, "test-uuid", &folderID, title, []string{"keepme"})
 		require.NoError(t, err)
-		_, err = st.svc.SetShareToken(ctx, st.userID, n.ID, false)
+		_, err = st.svc.SetShareToken(ctx, st.userID, n.ID, false, nil)
 		require.NoError(t, err)
 	}
 

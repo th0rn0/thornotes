@@ -54,8 +54,8 @@ func TestMigration009_FreshDatabaseUsesContentlessDelete(t *testing.T) {
 	defer pool.Close()
 
 	version, maxSupported := pool.SchemaStatus()
-	assert.Equal(t, 10, version)
-	assert.Equal(t, 10, maxSupported)
+	assert.Equal(t, 11, version)
+	assert.Equal(t, 11, maxSupported)
 
 	schema := ftsSchema(t, pool.ReadDB)
 	assert.Contains(t, schema, "contentless_delete=1", "notes_fts must be a contentless-delete table")
@@ -103,7 +103,7 @@ func TestMigration009_ExistingDatabaseDropsStaleTokens(t *testing.T) {
 	defer pool.Close()
 
 	version, _ := pool.SchemaStatus()
-	assert.Equal(t, 10, version)
+	assert.Equal(t, 11, version)
 
 	assert.Equal(t, 0, ftsMatchCount(t, pool.ReadDB, "repainted"),
 		"the migration must drop the tokens of text the note no longer contains")
@@ -142,8 +142,10 @@ func TestMigration009_RollbackRestoresExternalContent(t *testing.T) {
 	m, err := migrate.NewWithInstance("iofs", src, "sqlite", driver)
 	require.NoError(t, err)
 
-	// The database is at 010 by now, so reaching 001's shape takes two steps:
-	// 010 first (the tokenizer, back to `porter ascii`), then 009.
+	// The database is at 011 by now, so reaching 001's shape takes three
+	// steps: 011 (the share columns — no FTS change), then 010 (the
+	// tokenizer, back to `porter ascii`), then 009.
+	require.NoError(t, m.Steps(-1), "011's down migration must run")
 	require.NoError(t, m.Steps(-1), "010's down migration must run")
 
 	tokenizerSchema := ftsSchema(t, pool.ReadDB)

@@ -55,7 +55,7 @@ func TestDeleteNote_DiskFailure_LeavesRowAndFile(t *testing.T) {
 
 	note, err := st.svc.CreateNote(ctx, st.userID, "test-uuid", nil, "Precious", []string{"important"})
 	require.NoError(t, err)
-	shareToken, err := st.svc.SetShareToken(ctx, st.userID, note.ID, false)
+	shareToken, err := st.svc.SetShareToken(ctx, st.userID, note.ID, false, nil)
 	require.NoError(t, err)
 	require.NotNil(t, shareToken)
 

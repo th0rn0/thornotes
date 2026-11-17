@@ -80,8 +80,8 @@ VOLUME /data
 # kept in step with internal/db/migrations/ and internal/db/mysql_migrations/ by
 # TestDockerfile_SchemaLabelsMatchMigrations, so a new migration that forgets to
 # bump them fails CI.
-ARG THORNOTES_SCHEMA_MAX=10
-ARG THORNOTES_SCHEMA_MAX_MYSQL=7
+ARG THORNOTES_SCHEMA_MAX=11
+ARG THORNOTES_SCHEMA_MAX_MYSQL=8
 ARG THORNOTES_VERSION=dev
 
 LABEL co.thornotes.schema.max="${THORNOTES_SCHEMA_MAX}" \

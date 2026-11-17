@@ -34,8 +34,11 @@ func TestMigration010_FreshDatabaseUsesUnicode61(t *testing.T) {
 	defer pool.Close()
 
 	version, maxSupported := pool.SchemaStatus()
-	assert.Equal(t, 10, version)
-	assert.Equal(t, 10, maxSupported)
+	// Bumped deliberately when 011_share_lifecycle was added: the assertion is
+	// that a fresh database is at the newest version this build embeds, and the
+	// tokenizer below must still be the one 010 installed.
+	assert.Equal(t, 11, version)
+	assert.Equal(t, 11, maxSupported)
 
 	schema := ftsSchema(t, pool.ReadDB)
 	assert.Contains(t, schema, "tokenize='porter unicode61'",
@@ -113,7 +116,7 @@ func TestMigration010_PopulatedDatabaseIsReindexed(t *testing.T) {
 	defer pool.Close()
 
 	version, _ := pool.SchemaStatus()
-	require.Equal(t, 10, version)
+	require.Equal(t, 11, version)
 
 	// The repopulate. A migration that recreated the table and forgot this line
 	// would leave the index empty and every assertion below would fail.

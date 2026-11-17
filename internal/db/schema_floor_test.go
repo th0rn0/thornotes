@@ -107,7 +107,7 @@ func TestPreflight_SchemaTooNew_RefusesWithoutTouchingDB(t *testing.T) {
 	require.NoError(t, err)
 
 	before := snapshotDB(t, pool.WriteDB)
-	require.Equal(t, 10, before.version, "this test assumes SQLite is at 010")
+	require.Equal(t, 11, before.version, "this test assumes SQLite is at 011")
 	require.Equal(t, 1, before.users)
 
 	// The same database, opened by a binary whose source stops one version short.
@@ -115,7 +115,7 @@ func TestPreflight_SchemaTooNew_RefusesWithoutTouchingDB(t *testing.T) {
 	require.NoError(t, err)
 	maxSupported, err := maxSupportedVersion(src)
 	require.NoError(t, err)
-	require.Equal(t, 9, maxSupported)
+	require.Equal(t, 10, maxSupported)
 
 	driver, err := migratesqlite.WithInstance(pool.WriteDB, &migratesqlite.Config{})
 	require.NoError(t, err)
@@ -123,18 +123,18 @@ func TestPreflight_SchemaTooNew_RefusesWithoutTouchingDB(t *testing.T) {
 	require.NoError(t, err)
 
 	dbVersion, err := preflightSchema(m, maxSupported)
-	assert.Equal(t, 10, dbVersion, "preflight must report the version stamped in the database")
+	assert.Equal(t, 11, dbVersion, "preflight must report the version stamped in the database")
 
 	var tooNew *ErrSchemaTooNew
 	require.ErrorAs(t, err, &tooNew, "a newer database must produce ErrSchemaTooNew")
-	assert.Equal(t, 10, tooNew.DBVersion)
-	assert.Equal(t, 9, tooNew.MaxSupported)
+	assert.Equal(t, 11, tooNew.DBVersion)
+	assert.Equal(t, 10, tooNew.MaxSupported)
 
 	// Both numbers and the remedy, in the message an operator will see.
 	msg := err.Error()
-	assert.Contains(t, msg, "schema version 10 is newer than this build supports (9)")
-	assert.Contains(t, msg, "deploy a build with migration ≥ 10")
-	assert.Contains(t, msg, "restore the database backup taken before migration 10")
+	assert.Contains(t, msg, "schema version 11 is newer than this build supports (10)")
+	assert.Contains(t, msg, "deploy a build with migration ≥ 11")
+	assert.Contains(t, msg, "restore the database backup taken before migration 11")
 
 	// Untouched: same version, not dirty, same schema, same rows.
 	assert.Equal(t, before, snapshotDB(t, pool.WriteDB))
@@ -160,8 +160,8 @@ func TestOpen_SchemaTooNew_ReturnsTypedError(t *testing.T) {
 	var tooNew *ErrSchemaTooNew
 	require.ErrorAs(t, err, &tooNew)
 	assert.Equal(t, 99, tooNew.DBVersion)
-	assert.Equal(t, 10, tooNew.MaxSupported)
-	assert.Contains(t, err.Error(), "schema version 99 is newer than this build supports (10)")
+	assert.Equal(t, 11, tooNew.MaxSupported)
+	assert.Contains(t, err.Error(), "schema version 99 is newer than this build supports (11)")
 
 	// The failed open left the database where it was.
 	raw, err := sql.Open("sqlite", "file:"+path)
@@ -186,12 +186,12 @@ func TestOpen_DirtySchema_RefusesAndNamesVersion(t *testing.T) {
 	_, err = Open(path)
 	var dirty *ErrSchemaDirty
 	require.ErrorAs(t, err, &dirty, "a dirty database must produce ErrSchemaDirty")
-	assert.Equal(t, 10, dirty.Version)
+	assert.Equal(t, 11, dirty.Version)
 
 	msg := err.Error()
-	assert.Contains(t, msg, "schema version 10 is dirty")
-	assert.Contains(t, msg, "force version 10")
-	assert.Contains(t, msg, "restore the database backup taken before migration 10")
+	assert.Contains(t, msg, "schema version 11 is dirty")
+	assert.Contains(t, msg, "force version 11")
+	assert.Contains(t, msg, "restore the database backup taken before migration 11")
 
 	// Refusing must not "repair" anything: the dirty flag stays put for the
 	// operator to inspect, and no migration is attempted.
@@ -215,8 +215,8 @@ func TestOpen_DatabaseAtMax_IsNoOp(t *testing.T) {
 	defer pool.Close()
 
 	version, maxSupported := pool.SchemaStatus()
-	assert.Equal(t, 10, version)
-	assert.Equal(t, 10, maxSupported)
+	assert.Equal(t, 11, version)
+	assert.Equal(t, 11, maxSupported)
 }
 
 func TestOpen_DatabaseBehind_StillMigrates(t *testing.T) {
@@ -228,8 +228,8 @@ func TestOpen_DatabaseBehind_StillMigrates(t *testing.T) {
 	defer pool.Close()
 
 	version, maxSupported := pool.SchemaStatus()
-	assert.Equal(t, 10, version, "Open must bring the database up to the newest migration")
-	assert.Equal(t, 10, maxSupported)
+	assert.Equal(t, 11, version, "Open must bring the database up to the newest migration")
+	assert.Equal(t, 11, maxSupported)
 }
 
 // TestMaxSupportedVersion_ComesFromSourceDriver pins the trap the ticket calls
@@ -246,8 +246,8 @@ func TestMaxSupportedVersion_ComesFromSourceDriver(t *testing.T) {
 	mysqlMax, err := maxSupportedVersion(mysqlSrc)
 	require.NoError(t, err)
 
-	assert.Equal(t, 10, sqliteMax, "SQLite carries 010_fts_tokenizer_unicode")
-	assert.Equal(t, 7, mysqlMax, "MySQL carries 007_note_links: its sequence has no 004_api_tokens_hash")
+	assert.Equal(t, 11, sqliteMax, "SQLite carries 011_share_lifecycle")
+	assert.Equal(t, 8, mysqlMax, "MySQL carries 008_share_lifecycle: its sequence has no 004_api_tokens_hash")
 	assert.NotEqual(t, sqliteMax, mysqlMax, "the two dialects must not share a floor")
 }
 

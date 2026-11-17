@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"time"
 
 	"github.com/th0rn0/thornotes/internal/model"
 )
@@ -50,7 +51,29 @@ type FolderRepository interface {
 type NoteRepository interface {
 	Create(ctx context.Context, n *model.Note) (*model.Note, error)
 	GetByID(ctx context.Context, userID, noteID int64) (*model.Note, error)
+	// GetByShareToken returns the note carrying this share token, expiry
+	// included, so the caller can decide whether the link is still live. It
+	// deliberately does NOT filter on expires_at in SQL: expiry is one
+	// comparison on a value already being read, and keeping it in Go means both
+	// dialects answer identically without a timestamp comparison that depends on
+	// how each driver serialises a time.
 	GetByShareToken(ctx context.Context, token string) (*model.Note, error)
+	// ListShares returns one row per live share owned by userID, with the token
+	// reduced to a display prefix. It is what makes bulk revocation possible:
+	// before it, the only way to find a link was to already hold it.
+	ListShares(ctx context.Context, userID int64) ([]model.ShareLink, error)
+	// TouchShareView stamps last_viewed_at with now, but only when previous is
+	// older than window — so a read-heavy, unauthenticated route costs at most
+	// one write per link per window instead of one per request.
+	//
+	// previous is the value the caller just read; the write is guarded on it so
+	// two concurrent views inside the same window cannot both stamp. It returns
+	// true only when a row was actually written, which is what the tests count.
+	TouchShareView(ctx context.Context, noteID int64, previous *time.Time, now time.Time, window time.Duration) (bool, error)
+	// SetShareExpiry sets or clears (nil) the expiry of an existing share link
+	// without touching the token, so a deadline can be shortened, dropped or
+	// added without breaking URLs already handed out.
+	SetShareExpiry(ctx context.Context, userID, noteID int64, expiresAt *time.Time) error
 	// GetByFolderAndSlug returns a note by folder + slug, or ErrNotFound.
 	// Pass nil folderID to look up root notes.
 	GetByFolderAndSlug(ctx context.Context, userID int64, folderID *int64, slug string) (*model.Note, error)
