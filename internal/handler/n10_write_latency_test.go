@@ -272,8 +272,14 @@ func TestHandler_Notes_Create_CompletesDuringResync(t *testing.T) {
 	if testing.Short() {
 		t.Skip("seeds a large backlog: skipped under -short")
 	}
+	// 1,000, not 3,000: the per-note cost of the re-sync is what the pass is made of,
+	// and on a slow or `-race` host that cost is ~25x its plain-mode value (measured
+	// 4.4ms/note plain, 112ms/note under -race, on a 4-vCPU box). The property under
+	// test — writes are served while the pass is in flight, and it leaves nothing of
+	// the backlog stale — does not depend on the backlog's size, and the size that
+	// made this test exceed its package's 10-minute timeout added nothing to it.
 	const (
-		backlogNotes = 3000
+		backlogNotes = 1000
 		backlogChars = 200
 		baselineN    = 20
 	)
@@ -301,24 +307,40 @@ func TestHandler_Notes_Create_CompletesDuringResync(t *testing.T) {
 		close(searchDone)
 	}()
 
-	deadline := time.Now().Add(3 * time.Minute)
+	// The write loop is bounded by a COUNT, not a clock. The re-sync re-queries
+	// `fts_synced_at IS NULL` per batch, so every note written while it runs is new
+	// work for it: a time-bounded loop keeps feeding the pass, and on a slow runner
+	// the pass is then left to clear thousands of notes the loop handed it. Build #404
+	// wrote for the full three minutes and was still indexing when the package's
+	// 10-minute timeout fired — a test hang that reads as a broken build.
+	//
+	// Fifty writes are enough for the property under test ("writes are served while
+	// the pass is in flight") and leave the pass a backlog it can finish.
+	const maxWritesDuringPass = 50
+	deadline := time.Now().Add(3 * time.Minute) // outer guard; the count normally ends the loop
 	var during []time.Duration
-	for running := true; running && time.Now().Before(deadline); {
+	for len(during) < maxWritesDuringPass && time.Now().Before(deadline) {
 		select {
 		case <-searchDone:
-			running = false
 		default:
+			// postNote requires 201: a write rejected or failed during the pass
+			// fails the test here.
+			lat, err := postNote(c)
+			require.NoError(t, err)
+			during = append(during, lat)
+			continue
 		}
-		if !running {
-			break
-		}
-		// postNote requires 201: a write rejected or failed during the pass
-		// fails the test here.
-		lat, err := postNote(c)
-		require.NoError(t, err)
-		during = append(during, lat)
+		break
 	}
-	<-searchDone
+
+	// Bounded wait. Without it the package hangs until the 10-minute test panic and
+	// the failure is reported as a timeout in the whole binary rather than as this
+	// pass being slower than the budget — which is the fact worth reporting.
+	select {
+	case <-searchDone:
+	case <-time.After(6 * time.Minute):
+		t.Fatalf("the re-index pass did not finish within 6m (backlog %d stale notes, %d writes issued while it ran): the pass re-queries stale notes per batch, so writes during it extend the work", backlogNotes, len(during))
+	}
 	require.NoError(t, searchErr)
 
 	// The pass was in flight long enough for writes to land inside it. Without
