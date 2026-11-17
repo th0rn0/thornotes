@@ -319,7 +319,8 @@ What that means for the two ends of it:
 A share link can be given a deadline. Two ways, and the difference matters:
 
 - **`POST /api/v1/notes/:id/share`** with `{"expires_at": "2026-12-01T09:00:00Z"}` (RFC3339) creates the link with that deadline. Omit it, or send `null`, and the link never expires. A deadline in the past is refused with `400`, because publishing a link that is already dead means handing somebody a URL that answers 404 everywhere with nothing saying why.
-- **`PATCH /api/v1/notes/:id/share`** with `{"expires_at": …}` changes the deadline of the link that already exists, and `{"clear": true}` removes it. This one does **not** rotate the token, which is the point: re-sharing to extend a deadline would revoke every copy of the link already in circulation.
+- **`PATCH /api/v1/notes/:id/share`** with `{"expires_at": …}` changes the deadline of the link that already exists, and `{"clear_expiry": true}` removes it — which revives an expired link instead of killing it. This one does **not** rotate the token, which is the point: re-sharing to extend a deadline would revoke every copy of the link already in circulation.
+  The field is `clear_expiry` and not `clear` on purpose: on the POST route above, `{"clear": true}` **revokes** the link. Expiry is not revocation — removing a deadline makes a link immortal, and only unsharing or sharing again (which rotates the token) takes a URL away. The PATCH route refuses `{"clear": true}`, so the word that kills a link next door cannot silently make one permanent here.
 
 An expired link answers exactly what a token that never existed answers — the same status, the same empty body, the same headers. There is nothing in the response that says "this was a real link once", because that is information the holder of a burned URL should not be able to get.
 

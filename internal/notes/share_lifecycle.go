@@ -29,6 +29,50 @@ import (
 // on Tuesday is still told apart from one nobody ever opened.
 const ShareViewWindow = 10 * time.Minute
 
+// Bounds on a share deadline, in years.
+//
+// The point is representability, not policy: a deadline reaches the driver as a
+// time.Time, and a value the column cannot hold comes back as a driver error
+// rather than an answer. MySQL's DATETIME stops at 1000-01-01; RFC3339 carries a
+// four-digit year, so 9999 is the top of the JSON door, and 10000 or a year like
+// 0500 would otherwise be accepted here and fail later, at the database, on a
+// row somebody already owns.
+const (
+	shareExpiryMinYear = 1000
+	shareExpiryMaxYear = 9999
+)
+
+// normalizeShareExpiry returns the deadline expressed in UTC, or a 400 when it
+// falls outside what the column can hold. A nil deadline stays nil: no expiry is
+// the default and must not be rewritten into anything.
+//
+// Why UTC and not the caller's offset: the SQLite driver stores a time.Time as
+// its String() form — "2026-11-19 00:48:54 +0000 UTC" scans back into a
+// time.Time, "2026-11-19 05:48:54 +0500 +0500" does not. A deadline carrying
+// "+05:00" was therefore accepted with 200 and then poisoned the row: every read
+// of that note AND the whole GET /api/v1/shares list failed with
+// `sql: Scan error ... unsupported Scan, storing driver.Value type string into
+// type *time.Time`, the link answered 404 for ever, and the startup reconcile
+// stopped converging for that user. MariaDB round-trips the offset correctly, so
+// this is a SQLite defect — but SQLite is the default driver, and normalising
+// here makes both engines store the same instant regardless of what the client
+// sent. That is the property worth having: the value the API accepted is the
+// value that reads back, on either engine.
+//
+// The instant is preserved, only its representation changes: 05:48:54+05:00
+// becomes 00:48:54Z, which is the same moment and the one the link expires at.
+func normalizeShareExpiry(expiresAt *time.Time) (*time.Time, error) {
+	if expiresAt == nil {
+		return nil, nil
+	}
+	utc := expiresAt.UTC()
+	if year := utc.Year(); year < shareExpiryMinYear || year > shareExpiryMaxYear {
+		return nil, apperror.BadRequest(fmt.Sprintf("expires_at must be between %d-01-01 and %d-12-31",
+			shareExpiryMinYear, shareExpiryMaxYear))
+	}
+	return &utc, nil
+}
+
 // GetNoteByShareToken returns the note behind a public share token, or
 // apperror.ErrNotFound when there is no link or the link has expired.
 //
@@ -90,6 +134,16 @@ func (s *Service) SetShareToken(ctx context.Context, userID, noteID int64, clear
 	}
 	token := hex.EncodeToString(b)
 
+	// Normalised before either write: a deadline the column cannot hold is
+	// refused while the row is still untouched, rather than after a token has
+	// been issued for a link that can never be read. The clear path above is
+	// deliberately not subject to this — revoking a link must not depend on a
+	// field it ignores.
+	expiry, err := normalizeShareExpiry(expiresAt)
+	if err != nil {
+		return nil, err
+	}
+
 	if err := s.notes.SetShareToken(ctx, userID, noteID, &token); err != nil {
 		return nil, fmt.Errorf("set share token: %w", err)
 	}
@@ -97,7 +151,7 @@ func (s *Service) SetShareToken(ctx context.Context, userID, noteID int64, clear
 	// that was just created, so leaving a previous deadline on the row would
 	// make a re-shared link without an expiry silently die at the old one's
 	// deadline.
-	if err := s.notes.SetShareExpiry(ctx, userID, noteID, expiresAt); err != nil {
+	if err := s.notes.SetShareExpiry(ctx, userID, noteID, expiry); err != nil {
 		// The token landed but the deadline did not. Reporting success would
 		// claim an expiry the row does not have, so this is an error — the
 		// caller can clear the share and retry.
@@ -108,8 +162,16 @@ func (s *Service) SetShareToken(ctx context.Context, userID, noteID int64, clear
 
 // SetShareExpiry changes the deadline on an existing link (nil = no expiry)
 // without rotating the token, so URLs already handed out keep working.
+//
+// The deadline is normalised to UTC here for the same reason SetShareToken does
+// it: PATCH is the other door into expires_at, and leaving one of them
+// un-normalised would leave the SQLite poisoning reachable.
 func (s *Service) SetShareExpiry(ctx context.Context, userID, noteID int64, expiresAt *time.Time) error {
-	return s.notes.SetShareExpiry(ctx, userID, noteID, expiresAt)
+	expiry, err := normalizeShareExpiry(expiresAt)
+	if err != nil {
+		return err
+	}
+	return s.notes.SetShareExpiry(ctx, userID, noteID, expiry)
 }
 
 // ListShares returns the caller's own share links, token redacted to a prefix.

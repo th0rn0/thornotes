@@ -256,10 +256,17 @@ func (h *NotesHandler) Share(c *gin.Context) {
 
 type shareExpiryRequest struct {
 	ExpiresAt *time.Time `json:"expires_at"`
-	// Clear removes the deadline instead of setting one. It is explicit rather
-	// than "expires_at absent means clear", because an absent field and an
-	// empty body must not be able to silently make a link immortal.
-	Clear bool `json:"clear"`
+	// ClearExpiry removes the deadline instead of setting one, which makes the
+	// link immortal again. It is explicit rather than "expires_at absent means
+	// clear", because an absent field and an empty body must not be able to
+	// silently make a link immortal.
+	//
+	// The field is deliberately NOT called "clear", which the sibling route
+	// POST /notes/:id/share uses to REVOKE the token. Two routes ten lines apart
+	// where the same word means opposite things on a security-relevant field is
+	// how an operator trying to kill a leaked link makes it permanent instead.
+	// Expiry is not revocation: only clearing the token revokes.
+	ClearExpiry bool `json:"clear_expiry"`
 }
 
 // PatchShareExpiry changes the deadline of an existing link without rotating its
@@ -285,7 +292,7 @@ func (h *NotesHandler) PatchShareExpiry(c *gin.Context) {
 
 	var expiresAt *time.Time
 	switch {
-	case req.Clear:
+	case req.ClearExpiry:
 		expiresAt = nil
 	case req.ExpiresAt != nil:
 		if !req.ExpiresAt.After(time.Now()) {
@@ -294,7 +301,7 @@ func (h *NotesHandler) PatchShareExpiry(c *gin.Context) {
 		}
 		expiresAt = req.ExpiresAt
 	default:
-		c.JSON(http.StatusBadRequest, gin.H{"error": "expires_at or clear is required"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "expires_at or clear_expiry is required"})
 		return
 	}
 

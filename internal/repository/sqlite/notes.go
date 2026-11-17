@@ -357,8 +357,14 @@ func (r *NoteRepo) Delete(ctx context.Context, userID, noteID int64) error {
 }
 
 func (r *NoteRepo) SetShareToken(ctx context.Context, userID, noteID int64, token *string) error {
+	// last_viewed_at goes with the token, in both directions. A view belongs to
+	// the link it was made through: keeping the old stamp on a re-share told the
+	// owner that a URL created seconds ago had already been read, and the
+	// ten-minute bound then suppressed the new link's genuine first view. On a
+	// clear there is no link left to have views, so the stamp goes too — a note
+	// that is not shared must not carry a history that the next link inherits.
 	res, err := r.writeDB.ExecContext(ctx,
-		`UPDATE notes SET share_token = ? WHERE id = ? AND user_id = ?`,
+		`UPDATE notes SET share_token = ?, last_viewed_at = NULL WHERE id = ? AND user_id = ?`,
 		token, noteID, userID,
 	)
 	if err != nil {

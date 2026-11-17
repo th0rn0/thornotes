@@ -179,3 +179,67 @@ func TestMySQL_NoteRepo_SetShareExpiry_UnsharedNoteIsNotFound(t *testing.T) {
 	require.Error(t, err)
 	assert.ErrorIs(t, err, apperror.ErrNotFound)
 }
+
+// TestMySQL_NoteRepo_SetShareToken_ResetsLastViewedAt is the MariaDB leg of the
+// rotation rule. It is separate from the SQLite test on purpose: the two
+// repositories reach "zero rows affected" differently (updateScoped's existence
+// predicate versus a matched-row count), and the reset rides on that statement.
+func TestMySQL_NoteRepo_SetShareToken_ResetsLastViewedAt(t *testing.T) {
+	pool := openTestMySQL(t)
+	user := createMySQLUser(t, pool)
+	repo := NewNoteRepo(pool.WriteDB)
+	ctx := context.Background()
+
+	first := "rotated0000000000000000000000001"
+	note := mysqlLinkNote(t, repo, user.ID, "Rotated Views", "rotated-views", &first)
+
+	viewed := time.Now().UTC().Truncate(time.Second)
+	wrote, err := repo.TouchShareView(ctx, note.ID, nil, viewed, 10*time.Minute)
+	require.NoError(t, err)
+	require.True(t, wrote)
+	require.NotNil(t, mysqlStoredView(t, pool, note.ID), "the fixture must have recorded a view")
+
+	second := "rotated0000000000000000000000002"
+	require.NoError(t, repo.SetShareToken(ctx, user.ID, note.ID, &second))
+
+	assert.Nil(t, mysqlStoredView(t, pool, note.ID),
+		"a re-shared link must start with no view time rather than inherit the previous one")
+
+	wrote, err = repo.TouchShareView(ctx, note.ID, nil, viewed.Add(time.Minute), 10*time.Minute)
+	require.NoError(t, err)
+	assert.True(t, wrote, "the new link's first view must be recorded")
+
+	// Revoking drops it too.
+	require.NoError(t, repo.SetShareToken(ctx, user.ID, note.ID, nil))
+	assert.Nil(t, mysqlStoredView(t, pool, note.ID))
+}
+
+// TestMySQL_NoteRepo_ShareExpiryOffsetRoundTrips records why the UTC
+// normalisation lives in the service: MariaDB stores a DATETIME and reads the
+// same instant back whatever offset the caller used, so the poisoning security
+// review measured is a SQLite-driver defect — and SQLite is the default driver.
+// Asserting it here keeps that claim checkable instead of remembered.
+func TestMySQL_NoteRepo_ShareExpiryOffsetRoundTrips(t *testing.T) {
+	pool := openTestMySQL(t)
+	user := createMySQLUser(t, pool)
+	repo := NewNoteRepo(pool.WriteDB)
+	ctx := context.Background()
+
+	token := "offsets0000000000000000000000001"
+	note := mysqlLinkNote(t, repo, user.ID, "Offset Deadline", "offset-deadline", &token)
+
+	sent := time.Date(2026, 11, 19, 5, 48, 54, 0, time.FixedZone("+05:00", 5*60*60))
+	require.NoError(t, repo.SetShareExpiry(ctx, user.ID, note.ID, &sent))
+
+	read, err := repo.GetByShareToken(ctx, token)
+	require.NoError(t, err, "a deadline with an offset must not break reading the note")
+	require.NotNil(t, read.ExpiresAt)
+	assert.True(t, read.ExpiresAt.Equal(sent),
+		"stored instant %s must be the instant that was written %s", read.ExpiresAt, sent)
+
+	shares, err := repo.ListShares(ctx, user.ID)
+	require.NoError(t, err)
+	require.Len(t, shares, 1)
+	require.NotNil(t, shares[0].ExpiresAt)
+	assert.True(t, shares[0].ExpiresAt.Equal(sent), "the list must report the same instant")
+}

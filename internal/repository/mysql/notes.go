@@ -382,10 +382,16 @@ func (r *NoteRepo) SetShareToken(ctx context.Context, userID, noteID int64, toke
 	// The predicate comparison uses MySQL's NULL-safe `<=>`, so the existence
 	// check matches a NULL share_token as well as a set one.
 	//
+	// Both branches also clear last_viewed_at, in the same statement that moves
+	// the token: a view belongs to the link it was made through, so a re-shared
+	// link must not inherit the previous link's view time (which would tell the
+	// owner a URL created seconds ago had been read, and would make the
+	// ten-minute bound suppress its genuine first view).
+	//
 	// Returning nil on an unmatched row would be the bug: a token handed to the
 	// caller that was never written.
 	matched, err := updateScoped(ctx, r.db,
-		`UPDATE notes SET share_token = ? WHERE id = ? AND user_id = ?`,
+		`UPDATE notes SET share_token = ?, last_viewed_at = NULL WHERE id = ? AND user_id = ?`,
 		[]any{token, noteID, userID},
 		`SELECT EXISTS(SELECT 1 FROM notes WHERE id = ? AND user_id = ? AND share_token <=> ?)`,
 		[]any{noteID, userID, token},

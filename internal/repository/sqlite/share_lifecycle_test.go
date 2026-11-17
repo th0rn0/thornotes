@@ -249,3 +249,38 @@ func TestNoteRepo_SetShareExpiry_UnsharedNoteIsNotFound(t *testing.T) {
 	require.Error(t, err)
 	assert.ErrorIs(t, err, apperror.ErrNotFound)
 }
+
+// TestNoteRepo_SetShareToken_ResetsLastViewedAt is the SQLite leg of the
+// rotation rule: last_viewed_at belongs to the token that was current when the
+// view happened, so the statement that moves the token must drop it.
+func TestNoteRepo_SetShareToken_ResetsLastViewedAt(t *testing.T) {
+	pool := openTestDB(t)
+	user := createUser(t, pool)
+	repo := NewNoteRepo(pool.ReadDB, pool.WriteDB)
+	ctx := context.Background()
+
+	first := "rotated0000000000000000000000001"
+	note := linkNote(t, repo, user.ID, "Rotated Views", "rotated-views", &first)
+
+	viewed := time.Now().UTC()
+	wrote, err := repo.TouchShareView(ctx, note.ID, nil, viewed, 10*time.Minute)
+	require.NoError(t, err)
+	require.True(t, wrote)
+	require.True(t, storedView(t, pool, note.ID).Valid, "the fixture must have recorded a view")
+
+	second := "rotated0000000000000000000000002"
+	require.NoError(t, repo.SetShareToken(ctx, user.ID, note.ID, &second))
+
+	assert.False(t, storedView(t, pool, note.ID).Valid,
+		"a re-shared link must start with no view time rather than inherit the previous one")
+
+	// And the new link's first genuine view is written, not suppressed by a stale
+	// stamp inside the window.
+	wrote, err = repo.TouchShareView(ctx, note.ID, nil, viewed.Add(time.Minute), 10*time.Minute)
+	require.NoError(t, err)
+	assert.True(t, wrote)
+
+	// Revoking drops it too: a note that is not shared has no link to have views.
+	require.NoError(t, repo.SetShareToken(ctx, user.ID, note.ID, nil))
+	assert.False(t, storedView(t, pool, note.ID).Valid)
+}
