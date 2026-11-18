@@ -198,7 +198,13 @@ type appShellData struct {
 func (idx *assetIndex) serveAppShell(tmpl *template.Template) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Header("Content-Type", "text/html; charset=utf-8")
-		c.Header("Cache-Control", cacheControlNoCache)
+		// A caller may have decided this URL must not be cached at all — the
+		// share-URL branch in NoRoute does, because /f//<token> and /F/<token>
+		// reach the shell and "no-store on every share outcome" has to be true
+		// of URLs, not just of routes. Only default when nobody has spoken.
+		if c.Writer.Header().Get("Cache-Control") == "" {
+			c.Header("Cache-Control", cacheControlNoCache)
+		}
 		// Gin pre-sets 404 on the NoRoute path (deep links serve the shell from
 		// there); the shell is a 200 either way.
 		c.Status(http.StatusOK)

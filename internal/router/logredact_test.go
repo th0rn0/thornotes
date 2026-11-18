@@ -180,3 +180,97 @@ func TestRedactLogPath_FolderShare(t *testing.T) {
 		}
 	}
 }
+
+// TestRedactLogPath_FailsClosedOnNonCanonicalShareURLs pins the shapes that got
+// past the first version of this function.
+//
+// The original redaction keyed on "the first segment after a case-sensitive /f/
+// prefix" and returned the path untouched when that segment was empty. A
+// security review drove a live token through each shape below and found it in
+// the access log verbatim — while the test that was supposed to guard this,
+// which used canonical URLs only, stayed green. Redaction has to hold for URLs a
+// mail scanner, a proxy or a double-paste produces, not just for the ones the
+// application emits.
+func TestRedactLogPath_FailsClosedOnNonCanonicalShareURLs(t *testing.T) {
+	const token = "05a3d3bd60ff91db301fc77057ca07e7"
+
+	shapes := map[string]string{
+		"canonical folder listing":   "/f/" + token,
+		"uppercase prefix":           "/F/" + token,
+		"double slash after prefix":  "/f//" + token,
+		"token twice via dot-dot":    "/f/" + token + "/../" + token,
+		"token as a second segment":  "/f/" + token + "/n/" + token,
+		"uppercase hex token":        "/f/" + strings.ToUpper(token),
+		"canonical note share":       "/s/" + token,
+		"uppercase share prefix":     "/S/" + token,
+		"double slash on note share": "/s//" + token,
+		"percent-encoded slash":      "/f/%2F" + token,
+	}
+	for name, in := range shapes {
+		t.Run(name, func(t *testing.T) {
+			got := redactLogPath(in)
+			if strings.Contains(strings.ToLower(got), strings.ToLower(token)) {
+				t.Fatalf("token survived redaction: redactLogPath(%q) = %q", in, got)
+			}
+		})
+	}
+
+	// The other half of the rule: a 32-hex segment on a non-share path is a note
+	// or token id in an authenticated route and stays readable in the log.
+	plain := "/api/v1/notes/" + token
+	if got := redactLogPath(plain); got != plain {
+		t.Fatalf("non-share path was redacted: redactLogPath(%q) = %q", plain, got)
+	}
+
+	// And the shape rule is stable: the same token hashes to the same handle
+	// whichever way the URL arrived. Compared case-insensitively because the
+	// prefix itself is the visitor's URL (/F/ is their typo, not ours) and is
+	// deliberately left as it arrived — only the token must be the same handle.
+	a := redactLogPath("/f/" + token)
+	b := redactLogPath("/F/" + token)
+	if strings.ToLower(a) != strings.ToLower(b) {
+		t.Fatalf("same token produced different handles: %q vs %q", a, b)
+	}
+}
+
+// TestAccessLog_FailsClosedOnNonCanonicalShareURLs drives the real middleware
+// rather than the helper, because the defect was in what the middleware chose to
+// log: a helper that redacts correctly while the middleware passes the raw path
+// proves nothing.
+//
+// Unmatched routes are the realistic case here — /F/<token> and /f//<token> do
+// not match a gin route, so they fall through to NoRoute and are still logged.
+func TestAccessLog_FailsClosedOnNonCanonicalShareURLs(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	const tok = "05a3d3bd60ff91db301fc77057ca07e7"
+
+	var buf bytes.Buffer
+	previous := log.Logger
+	log.Logger = zerolog.New(&buf)
+	t.Cleanup(func() { log.Logger = previous })
+
+	engine := gin.New()
+	engine.Use(zerologAccessMiddleware())
+	engine.GET("/f/:token", func(c *gin.Context) { c.Status(http.StatusOK) })
+
+	for _, path := range []string{
+		"/f/" + tok,
+		"/F/" + tok,
+		"/f//" + tok,
+		"/f/" + tok + "/../" + tok,
+		"/f/" + tok + "/n/" + tok,
+		"/f/%2F" + tok,
+		"/s/" + tok,
+		"/S/" + tok,
+	} {
+		engine.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, path, nil))
+	}
+
+	out := buf.String()
+	if out == "" {
+		t.Fatal("the middleware logged nothing; the capture is broken, not the code")
+	}
+	if strings.Contains(strings.ToLower(out), tok) {
+		t.Fatalf("the access log contains the live token:\n%s", out)
+	}
+}

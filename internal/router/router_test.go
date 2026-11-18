@@ -182,3 +182,31 @@ func TestRouter_ServesManifest(t *testing.T) {
 	assert.Contains(t, rr.Header().Get("Content-Type"), "json")
 	assert.Contains(t, rr.Body.String(), "thornotes")
 }
+
+// A share URL that matches no route still reaches the client, and it has to
+// carry the same two headers every matched share outcome carries. Otherwise
+// "no-store and noindex on every outcome" is a claim about routes rather than
+// about the surface, and the shapes that fall through — /f/ with no token,
+// /F/<token>, /f//<token> — are the ones a rewritten link arrives as.
+func TestRouter_UnmatchedShareURL_IsNotCachedOrIndexed(t *testing.T) {
+	h := buildHandler(t)
+	tok := "05a3d3bd60ff91db301fc77057ca07e7"
+
+	for _, path := range []string{"/f/", "/f", "/F/" + tok, "/f//" + tok, "/s/" + tok} {
+		t.Run(path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			rr := httptest.NewRecorder()
+			h.ServeHTTP(rr, req)
+
+			assert.Equal(t, "no-store", rr.Header().Get("Cache-Control"))
+			assert.Equal(t, "noindex", rr.Header().Get("X-Robots-Tag"))
+		})
+	}
+
+	// An ordinary deep link keeps the shell's own caching: this is a change to
+	// share URLs only, not to the app.
+	req := httptest.NewRequest(http.MethodGet, "/my-folder/my-note", nil)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	assert.NotEqual(t, "noindex", rr.Header().Get("X-Robots-Tag"))
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"html/template"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -61,6 +62,16 @@ func New(
 		if strings.HasPrefix(p, "/api/") || strings.HasPrefix(p, "/mcp") {
 			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
 			return
+		}
+		// A share URL that does not match a route — /f/ with no token, /F/<token>,
+		// /f//<token> — used to fall through to the shell with the shell's own
+		// cache headers and no robots header, so "no-store and noindex on every
+		// outcome" was true of routes rather than of URLs. The shell is not
+		// secret, but the promise in the changelog is about the surface, and
+		// these are exactly the shapes a rewritten link arrives as.
+		if isSharePath(p) {
+			c.Header("Cache-Control", "no-store")
+			c.Header("X-Robots-Tag", "noindex")
 		}
 		shell(c)
 	})
@@ -275,32 +286,67 @@ const (
 // lost that was not already public in the address bar. Everything that is not a
 // share URL is returned untouched.
 func redactLogPath(path string) string {
-	prefix, ok := shareLogPrefix(path)
-	if !ok {
+	if !isSharePath(path) {
 		return path
 	}
-	rest := path[len(prefix):]
-	token, sub, hasSub := strings.Cut(rest, "/")
-	if token == "" {
+	// Redact by shape, not by position.
+	//
+	// The previous version keyed on "the first segment after a case-sensitive
+	// /f/ prefix" and returned the path untouched when that segment was empty.
+	// So /F/<token>, /f//<token>, /f/<token>/../<token> and /f/<token>/n/<token>
+	// all reached the access log with the live token in cleartext — while the
+	// shipped test, which drove only canonical URLs, stayed green. A redaction
+	// that fails open on a mangled URL is worse than none, because the log is
+	// where a recursive folder capability ends up when a mail scanner or a
+	// double-paste rewrites the link.
+	//
+	// Matching the token's shape anywhere under a share prefix closes every
+	// current and future shape in one rule. The cost: a note legitimately named
+	// as 32 hex characters under a share path is hashed in the log too —
+	// cosmetic, log output only, no behaviour change.
+	segments := strings.Split(path, "/")
+	changed := false
+	for i, seg := range segments {
+		if seg == "" || !strings.Contains(seg, "%") && !shareTokenSegment.MatchString(seg) {
+			continue
+		}
+		// A percent-encoded separator (/f/%2F<token>) keeps the token in the
+		// same segment as the encoding, so matching the whole segment is not
+		// enough — replace every 32-hex run inside it.
+		redacted := shareTokenRun.ReplaceAllStringFunc(seg, func(run string) string {
+			sum := sha256.Sum256([]byte(strings.ToLower(run)))
+			return "t_" + hex.EncodeToString(sum[:4])
+		})
+		if redacted != seg {
+			segments[i] = redacted
+			changed = true
+		}
+	}
+	if !changed {
 		return path
 	}
-	sum := sha256.Sum256([]byte(token))
-	redacted := prefix + "t_" + hex.EncodeToString(sum[:4])
-	if hasSub {
-		redacted += "/" + sub
-	}
-	return redacted
+	return strings.Join(segments, "/")
 }
 
-// shareLogPrefix reports which public share prefix path starts with, if any.
-func shareLogPrefix(path string) (string, bool) {
-	switch {
-	case strings.HasPrefix(path, sharePathPrefix):
-		return sharePathPrefix, true
-	case strings.HasPrefix(path, folderSharePathPrefix):
-		return folderSharePathPrefix, true
+// shareTokenSegment matches the shape of a public share token or its uppercase
+// form: 32 hex characters and nothing else.
+var shareTokenSegment = regexp.MustCompile(`^[0-9a-fA-F]{32}$`)
+
+// shareTokenRun matches a token-shaped run anywhere inside a path segment, which
+// is what percent-encoded separators produce.
+var shareTokenRun = regexp.MustCompile(`[0-9a-fA-F]{32}`)
+
+// isSharePath reports whether path is under a public share prefix, matched
+// case-insensitively and including the bare prefix itself — /F/<token> and /f
+// are share URLs too, and they were the shapes that escaped redaction.
+func isSharePath(path string) bool {
+	lower := strings.ToLower(path)
+	for _, prefix := range []string{sharePathPrefix, folderSharePathPrefix} {
+		if lower == strings.TrimSuffix(prefix, "/") || strings.HasPrefix(lower, prefix) {
+			return true
+		}
 	}
-	return "", false
+	return false
 }
 
 func zerologAccessMiddleware() gin.HandlerFunc {
