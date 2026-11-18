@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!-- noindex is also sent as a header (the handler sets it before the first
+     branch, so the 404 carries it too); this is the belt-and-braces copy for
+     anything that renders the head before honouring headers. -->
+<meta name="robots" content="noindex, nofollow">
+<title>{{.FolderName}} — thornotes</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: system-ui, -apple-system, sans-serif; font-size: 15px; line-height: 1.7; color: #222; background: #fff; }
+.container { max-width: 700px; margin: 60px auto; padding: 0 24px; }
+.crumbs { font-size: 12px; color: #888; margin-bottom: 8px; }
+.crumbs a { color: #888; text-decoration: none; }
+.crumbs a:hover { text-decoration: underline; }
+.crumbs .sep { margin: 0 6px; color: #ccc; }
+h1.folder-title { font-size: 26px; margin-bottom: 6px; letter-spacing: -0.5px; word-break: break-word; }
+.meta { font-size: 12px; color: #999; margin-bottom: 32px; }
+h2.section { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: #999; margin: 28px 0 8px; font-weight: 600; }
+ul.entries { list-style: none; }
+ul.entries li { border-bottom: 1px solid #f0f0f0; }
+ul.entries li:last-child { border-bottom: 0; }
+ul.entries a { display: block; padding: 9px 2px; color: #222; text-decoration: none; }
+ul.entries a:hover { color: #000; text-decoration: underline; }
+ul.entries .folder::before { content: "▸ "; color: #bbb; }
+.more { display: inline-block; margin-top: 10px; font-size: 12px; color: #666; }
+.empty { color: #999; font-size: 14px; padding: 9px 2px; }
+.footer { margin-top: 48px; padding-top: 16px; border-top: 1px solid #eee; font-size: 11px; color: #bbb; }
+@media (prefers-color-scheme: dark) {
+  body { color: #e0e0e0; background: #1a1a1a; }
+  .crumbs, .crumbs a { color: #999; }
+  .crumbs .sep { color: #444; }
+  h1.folder-title { color: #f0f0f0; }
+  ul.entries li { border-bottom-color: #2a2a2a; }
+  ul.entries a { color: #e0e0e0; }
+  ul.entries a:hover { color: #fff; }
+  .more { color: #aaa; }
+  .footer { border-top-color: #333; }
+}
+</style>
+</head>
+<body>
+<div class="container">
+  <nav class="crumbs" aria-label="Breadcrumb">
+    {{- range $i, $c := .Breadcrumb -}}
+      {{- if $i}}<span class="sep">/</span>{{end -}}
+      {{- if $c.Href}}<a href="{{$c.Href}}">{{$c.Name}}</a>{{ else }}<span>{{$c.Name}}</span>{{ end -}}
+    {{- end -}}
+  </nav>
+
+  <h1 class="folder-title">{{.FolderName}}</h1>
+  <p class="meta">Shared folder · read only</p>
+
+  {{if .Folders}}
+  <h2 class="section">Folders</h2>
+  <ul class="entries">
+    {{range .Folders}}<li><a class="folder" href="{{.Href}}">{{.Name}}</a></li>{{end}}
+  </ul>
+  {{end}}
+  {{if .MoreFolders}}<a class="more" href="{{.MoreFolders}}">More folders →</a>{{end}}
+
+  {{if .Notes}}
+  <h2 class="section">Notes</h2>
+  <ul class="entries">
+    {{range .Notes}}<li><a href="{{.Href}}">{{.Name}}</a></li>{{end}}
+  </ul>
+  {{end}}
+  {{if .MoreNotes}}<a class="more" href="{{.MoreNotes}}">More notes →</a>{{end}}
+
+  {{if and (not .Folders) (not .Notes)}}<p class="empty">This folder is empty.</p>{{end}}
+
+  <div class="footer">Powered by <a href="https://github.com/th0rn0/thornotes">thornotes</a> — self-hosted markdown notes</div>
+</div>
+</body>
+</html>

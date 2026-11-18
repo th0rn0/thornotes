@@ -77,6 +77,7 @@ func main() {
 		apiTokenRepo repository.APITokenRepository
 		journalRepo  repository.JournalRepository
 		linkRepo     repository.LinkRepository
+		folderShares repository.FolderShareRepository
 	)
 
 	switch strings.ToLower(cfg.DBDriver) {
@@ -89,6 +90,7 @@ func main() {
 		apiTokenRepo = mysqlrepo.NewAPITokenRepo(pool.WriteDB)
 		journalRepo = mysqlrepo.NewJournalRepo(pool.WriteDB)
 		linkRepo = mysqlrepo.NewLinkRepo(pool.WriteDB)
+		folderShares = mysqlrepo.NewFolderShareRepo(pool.WriteDB)
 	default:
 		userRepo = sqlite.NewUserRepo(pool.WriteDB)
 		sessionRepo = sqlite.NewSessionRepo(pool.WriteDB)
@@ -98,6 +100,7 @@ func main() {
 		apiTokenRepo = sqlite.NewAPITokenRepo(pool.ReadDB, pool.WriteDB)
 		journalRepo = sqlite.NewJournalRepo(pool.ReadDB, pool.WriteDB)
 		linkRepo = sqlite.NewLinkRepo(pool.ReadDB, pool.WriteDB)
+		folderShares = sqlite.NewFolderShareRepo(pool.ReadDB, pool.WriteDB)
 	}
 
 	// Backfill UUIDs for any users created before v1.4.0.0.
@@ -131,7 +134,7 @@ func main() {
 
 	// Build services.
 	authSvc := auth.NewService(userRepo, sessionRepo, cfg.AllowRegistration)
-	notesSvc := notes.NewService(noteRepo, folderRepo, searchRepo, journalRepo, linkRepo, fs)
+	notesSvc := notes.NewService(noteRepo, folderRepo, searchRepo, journalRepo, linkRepo, folderShares, fs)
 	applyReconcileGuardFromEnv(notesSvc)
 
 	// Open the startup window before anything can serve a request. The listener

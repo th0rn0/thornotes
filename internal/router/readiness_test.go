@@ -65,7 +65,8 @@ func newStartupStack(t *testing.T, noteFiles int) *startupStack {
 	authSvc := auth.NewServiceForTest(userRepo, sessionRepo, true)
 	svc := notes.NewService(noteRepo, folderRepo, searchRepo,
 		sqlite.NewJournalRepo(pool.ReadDB, pool.WriteDB),
-		sqlite.NewLinkRepo(pool.ReadDB, pool.WriteDB), fs)
+		sqlite.NewLinkRepo(pool.ReadDB, pool.WriteDB),
+		sqlite.NewFolderShareRepo(pool.ReadDB, pool.WriteDB), fs)
 
 	rateLimiter := security.NewAuthRateLimiter(nil)
 	t.Cleanup(rateLimiter.Stop)
@@ -265,6 +266,28 @@ func TestStartupReadiness_PublicShareViewIsGated(t *testing.T) {
 	resp, _ := getRaw(t, st.client, st.server.URL+"/s/some-token")
 	assert.Equal(t, http.StatusServiceUnavailable, resp.StatusCode,
 		"a share link must not answer 404 while the index is being reconciled")
+
+	st.svc.EndStartup()
+}
+
+// TestStartupReadiness_PublicFolderViewIsGated: the folder listing is read
+// entirely from the index, so mid-reconcile it would render a folder that is
+// missing notes it actually has — and a recipient of the link has no way to know
+// the page is wrong. A 503 with Retry-After is the honest answer (ticket 616).
+func TestStartupReadiness_PublicFolderViewIsGated(t *testing.T) {
+	st := newStartupStack(t, 4)
+	st.svc.BeginStartup()
+
+	for _, path := range []string{
+		"/f/some-token",
+		"/f/some-token/d/projects",
+		"/f/some-token/n/projects/plan",
+	} {
+		resp, _ := getRaw(t, st.client, st.server.URL+path)
+		assert.Equal(t, http.StatusServiceUnavailable, resp.StatusCode,
+			"a shared folder must not answer from a half-built index: %s", path)
+		assert.Equal(t, "1", resp.Header.Get("Retry-After"))
+	}
 
 	st.svc.EndStartup()
 }

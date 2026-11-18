@@ -416,8 +416,8 @@ func TestP0_C02_CreateFolder_DeterministicInterleaving_CallerAWinsDiskCallerBWin
 	// thornotes processes over one notes root and one database), so model that
 	// honestly: two Services, each with its own locks, over the shared repos.
 	linkRepo := sqlite_repo.NewLinkRepo(st.pool.ReadDB, st.pool.WriteDB)
-	svc := notes.NewService(noteRepo, hookRepo, searchRepo, journalRepo, linkRepo, st.svc.FileStore())
-	svcB := notes.NewService(noteRepo, hookRepo, searchRepo, journalRepo, linkRepo, st.svc.FileStore())
+	svc := notes.NewService(noteRepo, hookRepo, searchRepo, journalRepo, linkRepo, nil, st.svc.FileStore())
+	svcB := notes.NewService(noteRepo, hookRepo, searchRepo, journalRepo, linkRepo, nil, st.svc.FileStore())
 
 	var (
 		folderA, folderB *model.Folder

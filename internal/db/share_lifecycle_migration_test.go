@@ -103,7 +103,7 @@ func TestMigration011_ShareLifecycle_PopulatedUpgrade(t *testing.T) {
 	require.NoError(t, m.Up())
 	version, _, err = m.Version()
 	require.NoError(t, err)
-	require.Equal(t, uint(11), version)
+	require.Equal(t, uint(latestSQLiteVersion(t)), version)
 
 	// The rows resolve through the query the app actually runs on /s/<token>,
 	// not through a hand-written SELECT: that is what "still resolves" means.
@@ -149,8 +149,13 @@ func TestMigration011_ShareLifecycle_Down(t *testing.T) {
 	require.True(t, columnExists(t, conn, "expires_at"))
 	require.True(t, columnExists(t, conn, "last_viewed_at"))
 
-	// One step down: 011 -> 010.
-	require.NoError(t, m.Steps(-1))
+	// Step down to 010, through whatever landed above 011 first (012 adds a
+	// table of its own and leaves these columns alone). The target is what
+	// matters, not the number of steps.
+	applied, _, err := m.Version()
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, int(applied), 11, "011 must be applied for its down half to be exercised")
+	require.NoError(t, m.Steps(-(int(applied) - 10)))
 	version, _, err := m.Version()
 	require.NoError(t, err)
 	require.Equal(t, uint(10), version)

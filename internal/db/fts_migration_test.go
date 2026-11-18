@@ -54,8 +54,8 @@ func TestMigration009_FreshDatabaseUsesContentlessDelete(t *testing.T) {
 	defer pool.Close()
 
 	version, maxSupported := pool.SchemaStatus()
-	assert.Equal(t, 11, version)
-	assert.Equal(t, 11, maxSupported)
+	assert.Equal(t, latestSQLiteVersion(t), version)
+	assert.Equal(t, latestSQLiteVersion(t), maxSupported)
 
 	schema := ftsSchema(t, pool.ReadDB)
 	assert.Contains(t, schema, "contentless_delete=1", "notes_fts must be a contentless-delete table")
@@ -103,7 +103,7 @@ func TestMigration009_ExistingDatabaseDropsStaleTokens(t *testing.T) {
 	defer pool.Close()
 
 	version, _ := pool.SchemaStatus()
-	assert.Equal(t, 11, version)
+	assert.Equal(t, latestSQLiteVersion(t), version)
 
 	assert.Equal(t, 0, ftsMatchCount(t, pool.ReadDB, "repainted"),
 		"the migration must drop the tokens of text the note no longer contains")
@@ -142,11 +142,17 @@ func TestMigration009_RollbackRestoresExternalContent(t *testing.T) {
 	m, err := migrate.NewWithInstance("iofs", src, "sqlite", driver)
 	require.NoError(t, err)
 
-	// The database is at 011 by now, so reaching 001's shape takes three
-	// steps: 011 (the share columns — no FTS change), then 010 (the
-	// tokenizer, back to `porter ascii`), then 009.
-	require.NoError(t, m.Steps(-1), "011's down migration must run")
-	require.NoError(t, m.Steps(-1), "010's down migration must run")
+	// The database is at the newest version by now, so reach 009's shape by
+	// stepping down through everything newer than 010: the folder-shares and
+	// share-lifecycle down migrations (no FTS change), then 010 (the tokenizer,
+	// back to `porter ascii`). Derived from the applied version rather than
+	// hard-coded, so the next migration does not silently land this test on the
+	// wrong schema.
+	applied, _, err := m.Version()
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, int(applied), 10, "010 must be applied for its down half to be exercised")
+	require.NoError(t, m.Steps(-(int(applied) - 9)),
+		"every down migration above 009 must run")
 
 	tokenizerSchema := ftsSchema(t, pool.ReadDB)
 	assert.Contains(t, tokenizerSchema, "tokenize='porter ascii'",

@@ -128,11 +128,10 @@ func (s *Service) SetShareToken(ctx context.Context, userID, noteID int64, clear
 		return nil, s.notes.SetShareToken(ctx, userID, noteID, nil)
 	}
 
-	b := make([]byte, 16)
-	if _, err := rand.Read(b); err != nil {
-		return nil, apperror.Internal("generate share token", err)
+	token, err := newShareToken()
+	if err != nil {
+		return nil, err
 	}
-	token := hex.EncodeToString(b)
 
 	// Normalised before either write: a deadline the column cannot hold is
 	// refused while the row is still untouched, rather than after a token has
@@ -158,6 +157,22 @@ func (s *Service) SetShareToken(ctx context.Context, userID, noteID int64, clear
 		return nil, fmt.Errorf("set share expiry: %w", err)
 	}
 	return &token, nil
+}
+
+// newShareToken mints a share token: 16 bytes from crypto/rand as 32 hex
+// characters, so 128 bits.
+//
+// One generator for both surfaces (note shares and folder shares), because the
+// enumeration question — "can the token be guessed?" — has one answer, and a
+// second generator is a second place for it to become a UUID-shaped or
+// time-seeded one. The token is only ever compared for equality against an
+// indexed column.
+func newShareToken() (string, error) {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", apperror.Internal("generate share token", err)
+	}
+	return hex.EncodeToString(b), nil
 }
 
 // SetShareExpiry changes the deadline on an existing link (nil = no expiry)

@@ -128,6 +128,51 @@ type NoteRepository interface {
 	SetShareToken(ctx context.Context, userID, noteID int64, token *string) error
 }
 
+// FolderShareRepository persists the bearer tokens that expose a folder
+// anonymously (GET /f/<token>).
+//
+// It is a separate repository from NoteRepository/NoteShare because a folder
+// share is a separate row: a note share lives in notes.share_token, and the two
+// surfaces share the *rule* (notes.ShareLinkExpired, ShareViewWindow) rather
+// than a table. Keeping the read routes and the writes in one place is also what
+// makes the anonymous surface auditable — there is one file to read to answer
+// "what can a folder token touch?".
+type FolderShareRepository interface {
+	// GetByToken returns the share carrying this token, expiry included, so the
+	// caller can decide whether the link is still live. It deliberately does
+	// NOT filter on expires_at in SQL, for the same reason GetByShareToken does
+	// not: expiry is one comparison in Go, so both dialects answer identically
+	// without a timestamp comparison that depends on driver serialisation.
+	GetByToken(ctx context.Context, token string) (*model.FolderShare, error)
+	// UpsertToken issues or rotates the folder's link: one row per folder, and
+	// a new token resets expires_at and last_viewed_at, because the deadline
+	// and the view stamp belong to the link that was just created. It answers
+	// ErrNotFound when the folder is not the caller's, so a share can never be
+	// created for somebody else's folder (the #40 class of bug).
+	UpsertToken(ctx context.Context, userID, folderID int64, token string) error
+	// Clear revokes the folder's link. Revoking is a DELETE, not a NULLed
+	// column: a revoked link and a folder that was never shared must be the
+	// same state. Clearing a folder that has no link is success, not not-found
+	// — the ownership question is answered by the caller's folder lookup, and a
+	// revoke button that 404s on the second click is a bug of its own.
+	Clear(ctx context.Context, userID, folderID int64) error
+	// TouchView stamps last_viewed_at with now, at most once per window. It is
+	// the same bound as TouchShareView: a public link is read-heavy and
+	// unauthenticated, so a write per request would let anyone holding a URL
+	// grow the table.
+	TouchView(ctx context.Context, folderID int64, previous *time.Time, now time.Time, window time.Duration) (bool, error)
+
+	// ListChildFolders returns one level of a folder's subfolders, ordered by
+	// name and keyset-paged on it (names are unique within a parent on both
+	// engines), starting strictly after `after` when it is non-empty.
+	ListChildFolders(ctx context.Context, userID, parentID int64, after string, limit int) ([]*model.Folder, error)
+	// ListChildNotes returns one level of a folder's notes, ordered by slug and
+	// keyset-paged on it (slugs are unique within a folder). It is not
+	// ListByFolder: that one orders by updated_at and returns the whole folder,
+	// which an anonymous route cannot afford uncapped.
+	ListChildNotes(ctx context.Context, userID, folderID int64, after string, limit int) ([]*model.NoteListItem, error)
+}
+
 type APITokenRepository interface {
 	Create(ctx context.Context, userID int64, name, token, scope string) (*model.APIToken, error)
 	GetByToken(ctx context.Context, token string) (*model.APIToken, error)

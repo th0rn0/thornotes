@@ -113,7 +113,7 @@ func newMySQLTitleStack(t *testing.T) *titleStack {
 		mysql.NewFolderRepo(pool.WriteDB),
 		mysql.NewSearchRepo(pool.WriteDB),
 		mysql.NewJournalRepo(pool.WriteDB),
-		mysql.NewLinkRepo(pool.WriteDB),
+		mysql.NewLinkRepo(pool.WriteDB), nil,
 		fs,
 	)
 	return &titleStack{

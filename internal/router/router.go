@@ -113,6 +113,19 @@ func New(
 	// Public shared note view.
 	r.GET("/s/:token", shareH.View)
 
+	// Public shared folder views. Same capability model as /s/:token — the
+	// segment after the prefix is the credential, read with no session — and
+	// the same two constraints follow: these are HTML only (no anonymous JSON,
+	// which would be a second public API to keep stable) and every failure is
+	// one 404 at the handler.
+	//
+	// Two path prefixes, d/ and n/, rather than one route that guesses: a folder
+	// called "design" and a note "design.md" can sit in the same parent, and one
+	// route that tries both is one route that can render the wrong thing.
+	r.GET("/f/:token", shareH.ViewFolder)
+	r.GET("/f/:token/d/*path", shareH.ViewFolder)
+	r.GET("/f/:token/n/*path", shareH.ViewFolderNote)
+
 	// Auth endpoints.
 	authGroup := r.Group("/api/v1/auth")
 	{
@@ -146,6 +159,11 @@ func New(
 		folders.PATCH("/:id/move", csrfMW, foldersH.Move)
 		folders.DELETE("/:id", csrfMW, foldersH.Delete)
 		folders.GET("/:id/notes", foldersH.ListNotes)
+		// Folder shares (ticket 616, slice 1): issue, rotate and revoke the
+		// anonymous link for one folder. CSRF-protected like every other write in
+		// this group, because a link that publishes a folder must not be issuable
+		// from another origin.
+		folders.POST("/:id/share", csrfMW, foldersH.Share)
 		folders.GET("/:id/zip", exportH.Folder)
 		// HEAD is the UI's cheap preflight; Gin does not answer HEAD for a GET
 		// route, and without it the preflight 404s on rows that exist.
@@ -228,9 +246,13 @@ func New(
 	return r
 }
 
-// sharePathPrefix is the public share route. The segment after it is a bearer
-// capability: whoever holds it reads the note, with no session and no account.
-const sharePathPrefix = "/s/"
+// The public share routes. The segment after each prefix is a bearer
+// capability: whoever holds it reads the note (or the folder), with no session
+// and no account.
+const (
+	sharePathPrefix       = "/s/"
+	folderSharePathPrefix = "/f/"
+)
 
 // redactLogPath replaces the token in a share URL with a short, stable hash
 // before it reaches the access log.
@@ -243,17 +265,42 @@ const sharePathPrefix = "/s/"
 // can replay. Hashing rather than dropping the segment is deliberate: "/s/…" on
 // every line would make a share indistinguishable from a 404 sweep.
 //
-// Only the token is hashed; every other path is returned untouched.
+// Both public share surfaces are covered (/s/ for a note, /f/ for a folder),
+// because a second prefix added later without this branch would be a token
+// written to the log in full — which is exactly how ticket 616 found it.
+//
+// Only the token segment is hashed. A deeper path is kept, so
+// /f/<token>/n/projects/plan logs as /f/t_ab12cd34/n/projects/plan: a note read
+// stays attributable to the link it happened on, and to a log reader nothing is
+// lost that was not already public in the address bar. Everything that is not a
+// share URL is returned untouched.
 func redactLogPath(path string) string {
-	if !strings.HasPrefix(path, sharePathPrefix) {
+	prefix, ok := shareLogPrefix(path)
+	if !ok {
 		return path
 	}
-	token := strings.TrimPrefix(path, sharePathPrefix)
+	rest := path[len(prefix):]
+	token, sub, hasSub := strings.Cut(rest, "/")
 	if token == "" {
 		return path
 	}
 	sum := sha256.Sum256([]byte(token))
-	return sharePathPrefix + "t_" + hex.EncodeToString(sum[:4])
+	redacted := prefix + "t_" + hex.EncodeToString(sum[:4])
+	if hasSub {
+		redacted += "/" + sub
+	}
+	return redacted
+}
+
+// shareLogPrefix reports which public share prefix path starts with, if any.
+func shareLogPrefix(path string) (string, bool) {
+	switch {
+	case strings.HasPrefix(path, sharePathPrefix):
+		return sharePathPrefix, true
+	case strings.HasPrefix(path, folderSharePathPrefix):
+		return folderSharePathPrefix, true
+	}
+	return "", false
 }
 
 func zerologAccessMiddleware() gin.HandlerFunc {
@@ -312,19 +359,22 @@ func readinessGate(svc *notes.Service) gin.HandlerFunc {
 //     users and sessions only. Blocking login for the length of the pass would be
 //     a worse outage than the one being fixed, and it is the one window in which
 //     nobody can act on the notes anyway.
-//   - everything outside /api, /mcp and /s is the app shell, a static asset or
-//     the service worker: embedded bytes or a template render, no index. Serving
-//     the shell is what lets a browser sitting on a booting instance (including
-//     one arriving on a deep link to /folder/note-slug) show the app and retry,
-//     instead of a bare JSON error. /s/:token is the one HTML view that does read
-//     a note, which is why it is named here.
+//   - everything outside /api, /mcp, /s and /f is the app shell, a static asset
+//     or the service worker: embedded bytes or a template render, no index.
+//     Serving the shell is what lets a browser sitting on a booting instance
+//     (including one arriving on a deep link to /folder/note-slug) show the app
+//     and retry, instead of a bare JSON error. /s/:token is the one HTML view
+//     that reads a note and /f/:token the one that reads a folder listing, which
+//     is why both are named here: a listing answered mid-reconcile would be
+//     short, and a wrong answer on an anonymous link is worse than a 503.
 func indexDerivedPath(path string) bool {
 	switch {
 	case path == "/api/v1/csrf", strings.HasPrefix(path, "/api/v1/auth/"):
 		return false
 	case strings.HasPrefix(path, "/api/"),
 		strings.HasPrefix(path, "/mcp"),
-		strings.HasPrefix(path, "/s/"):
+		strings.HasPrefix(path, sharePathPrefix),
+		strings.HasPrefix(path, folderSharePathPrefix):
 		return true
 	}
 	return false
