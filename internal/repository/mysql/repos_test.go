@@ -13,6 +13,7 @@ import (
 
 	"github.com/th0rn0/thornotes/internal/apperror"
 	"github.com/th0rn0/thornotes/internal/db"
+	"github.com/th0rn0/thornotes/internal/dbtest"
 	"github.com/th0rn0/thornotes/internal/model"
 )
 
@@ -54,40 +55,13 @@ func openTestMySQL(t *testing.T) *db.Pool {
 }
 
 // truncateAll deletes every row from the application tables, leaving the
-// golang-migrate bookkeeping table (schema_migrations) untouched. Foreign key
-// checks are disabled on the same connection for the duration of the deletes so
-// table order does not matter, then restored.
+// golang-migrate bookkeeping table (schema_migrations) untouched. The table list
+// and the "does this process hold the schema's advisory lock?" check live in
+// dbtest.TruncateAll, so this package, internal/repository, internal/notes and
+// internal/db are all guarded by the same rule instead of by four copies of it.
 func truncateAll(t *testing.T, pool *db.Pool) {
 	t.Helper()
-	ctx := context.Background()
-
-	conn, err := pool.WriteDB.Conn(ctx)
-	require.NoError(t, err)
-	defer func() { _ = conn.Close() }()
-
-	_, err = conn.ExecContext(ctx, "SET FOREIGN_KEY_CHECKS = 0")
-	require.NoError(t, err)
-	defer func() {
-		_, _ = conn.ExecContext(context.Background(), "SET FOREIGN_KEY_CHECKS = 1")
-	}()
-
-	// Children before parents is not strictly required while FK checks are off,
-	// but keeps the statement order readable.
-	tables := []string{
-		"api_token_folder_permissions",
-		"api_tokens",
-		"journals",
-		"note_links",
-		"notes",
-		"sessions",
-		"folders",
-		"users",
-	}
-	for _, table := range tables {
-		if _, err := conn.ExecContext(ctx, "DELETE FROM "+table); err != nil {
-			t.Fatalf("reset table %s: %v", table, err)
-		}
-	}
+	require.NoError(t, dbtest.TruncateAll(context.Background(), pool.WriteDB))
 }
 
 func createMySQLUser(t *testing.T, pool *db.Pool) *model.User {
