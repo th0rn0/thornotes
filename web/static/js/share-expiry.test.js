@@ -47,11 +47,16 @@ function makeHarness(note) {
     for (let i = 0; i < h.responders.length; i++) {
       const r = h.responders[i];
       if (r.method === method && r.path === urlPath) {
-        h.responders.splice(i, 1);
+        if (!r.repeat) h.responders.splice(i, 1);
         return typeof r.response === 'function' ? r.response(body) : r.response;
       }
     }
     throw new Error(`unstubbed api call: ${method} ${urlPath}`);
+  };
+  h.isExpired = function (iso) {
+    if (!iso) return false;
+    const t = Date.parse(iso);
+    return Number.isFinite(t) && t <= Date.now();
   };
   h.showNotification = function (msg) { h.notifications.push(msg); };
   h.syncShareControls = function () { h.syncCalls++; };
@@ -74,6 +79,7 @@ function compile(h, name) {
       const currentNote = __h.currentNote;
       const showNotification = __h.showNotification;
       const syncShareControls = __h.syncShareControls;
+      const isExpired = __h.isExpired;
       ${body}
     });
   `;
@@ -118,17 +124,50 @@ describe('share expiry — PATCH body carries clear_expiry, not clear', () => {
   });
 
   it('setShareExpiry sends PATCH with {expires_at: ISO}', async () => {
+    // The guard re-reads the share list first, so a live row has to be there.
+    h.responders.push({ method: 'GET', path: '/api/v1/shares', repeat: true,
+      response: [{ note_id: NOTE_ID, expires_at: '2099-01-01T00:00:00Z' }] });
     h.responders.push({ method: 'PATCH', path: PATCH_PATH, response: { expires_at: '2099-06-01T00:00:00Z' } });
 
     const fn = compile(h, 'setShareExpiry');
     await fn(24);
 
-    assert.equal(h.apiCalls.length, 1);
-    assert.equal(h.apiCalls[0].method, 'PATCH');
-    assert.ok(h.apiCalls[0].body.expires_at, 'body must carry expires_at');
-    assert.equal(typeof h.apiCalls[0].body.expires_at, 'string', 'expires_at must be an ISO string');
-    assert.equal(h.apiCalls[0].body.clear_expiry, undefined, 'set must not carry clear_expiry');
+    const patched = h.apiCalls.filter(c => c.method === 'PATCH');
+    assert.equal(h.apiCalls[0].method, 'GET', 'the live-state check comes first');
+    assert.equal(patched.length, 1, 'exactly one PATCH');
+    assert.ok(patched[0].body.expires_at, 'body must carry expires_at');
+    assert.equal(typeof patched[0].body.expires_at, 'string', 'expires_at must be an ISO string');
+    assert.equal(patched[0].body.clear_expiry, undefined, 'set must not carry clear_expiry');
     assert.equal(h.currentNote.expires_at, '2099-06-01T00:00:00Z');
+  });
+
+  // QA found this on PR #88: hiding the controls on an expired link did not stop
+  // the write, and the server accepts it (SetShareExpiry only checks that a token
+  // exists), so a tab or panel opened before the deadline passed could take the
+  // URL from 404 back to 200. The refusal has to be on the state, not the DOM.
+  it('setShareExpiry refuses to revive a link that has already expired', async () => {
+    h.responders.push({ method: 'GET', path: '/api/v1/shares', repeat: true,
+      response: [{ note_id: NOTE_ID, expires_at: '2020-01-01T00:00:00Z' }] });
+
+    const fn = compile(h, 'setShareExpiry');
+    await fn(24);
+
+    const patched = h.apiCalls.filter(c => c.method === 'PATCH');
+    assert.equal(patched.length, 0, 'an expired link must not be given a new deadline');
+    assert.match(h.notifications.join(' '), /expired/i, 'the refusal must be explained');
+    assert.equal(h.currentNote.expires_at, '2099-01-01T00:00:00Z',
+      'local state must not pretend the dead link was extended');
+  });
+
+  it('setShareExpiry stays usable when the share list cannot be fetched', async () => {
+    // No GET responder: api('GET', ...) throws. A failed refresh must not lock
+    // the owner out of their own live link.
+    h.responders.push({ method: 'PATCH', path: PATCH_PATH, response: { expires_at: '2099-06-01T00:00:00Z' } });
+
+    const fn = compile(h, 'setShareExpiry');
+    await fn(24);
+
+    assert.equal(h.apiCalls.filter(c => c.method === 'PATCH').length, 1);
   });
 
   it('setShareExpiry rejects non-positive hours without calling the API', async () => {
@@ -173,7 +212,8 @@ describe('panel controls delegate to the FromPanel functions', () => {
   it('setShareExpiryFromPanel sends PATCH with {expires_at: ISO} and refreshes', async () => {
     h.responders.push({ method: 'PATCH', path: PATCH_PATH, response: { expires_at: '2099-06-01T00:00:00Z' } });
     // showSharedLinksModal calls api('GET', '/api/v1/shares'); stub it.
-    h.responders.push({ method: 'GET', path: '/api/v1/shares', response: [] });
+    h.responders.push({ method: 'GET', path: '/api/v1/shares', repeat: true,
+      response: [{ note_id: NOTE_ID, expires_at: '2099-01-01T00:00:00Z' }] });
 
     const src = fs.readFileSync(APP_JS_PATH, 'utf8');
     const fnSrc = extractFunction(src, 'setShareExpiryFromPanel');
@@ -188,6 +228,7 @@ describe('panel controls delegate to the FromPanel functions', () => {
         const currentNote = __h.currentNote;
         const showNotification = __h.showNotification;
         const syncShareControls = __h.syncShareControls;
+        const isExpired = __h.isExpired;
         const formatExpiry = (iso) => iso;
         const showSharedLinksModal = async () => { await api('GET', '/api/v1/shares'); };
         ${body}
@@ -196,16 +237,19 @@ describe('panel controls delegate to the FromPanel functions', () => {
     const fn = new Function('__h', wrapper)(h);
     await fn(NOTE_ID, 24);
 
-    assert.equal(h.apiCalls.length, 2, 'PATCH then GET /api/v1/shares to refresh');
-    assert.equal(h.apiCalls[0].method, 'PATCH');
-    assert.ok(h.apiCalls[0].body.expires_at, 'body must carry expires_at');
-    assert.equal(h.apiCalls[1].method, 'GET');
-    assert.equal(h.apiCalls[1].path, '/api/v1/shares', 'panel must refresh after set');
+    assert.equal(h.apiCalls.length, 3, 'GET guard, PATCH, then GET to refresh');
+    assert.equal(h.apiCalls[0].method, 'GET', 'the live-state check comes first');
+    const patched = h.apiCalls.filter(c => c.method === 'PATCH');
+    assert.equal(patched.length, 1);
+    assert.ok(patched[0].body.expires_at, 'body must carry expires_at');
+    assert.equal(h.apiCalls[2].method, 'GET');
+    assert.equal(h.apiCalls[2].path, '/api/v1/shares', 'panel must refresh after set');
   });
 
   it('clearShareExpiryFromPanel sends PATCH with {clear_expiry: true} and refreshes', async () => {
     h.responders.push({ method: 'PATCH', path: PATCH_PATH, response: { expires_at: null } });
-    h.responders.push({ method: 'GET', path: '/api/v1/shares', response: [] });
+    h.responders.push({ method: 'GET', path: '/api/v1/shares', repeat: true,
+      response: [{ note_id: NOTE_ID, expires_at: '2099-01-01T00:00:00Z' }] });
 
     const src = fs.readFileSync(APP_JS_PATH, 'utf8');
     const fnSrc = extractFunction(src, 'clearShareExpiryFromPanel');
@@ -219,6 +263,7 @@ describe('panel controls delegate to the FromPanel functions', () => {
         const currentNote = __h.currentNote;
         const showNotification = __h.showNotification;
         const syncShareControls = __h.syncShareControls;
+        const isExpired = __h.isExpired;
         const showSharedLinksModal = async () => { await api('GET', '/api/v1/shares'); };
         ${body}
       });

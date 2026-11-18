@@ -1982,10 +1982,10 @@ async function revokeShare() {
 
 // The share control reflects whether the open note has a live link: Unshare is
 // only useful when there is something to revoke, and showing it otherwise would
-// invite a click that cannot do anything. Expired links are surfaced as such —
-// the Unshare button is hidden (revoking a dead link is noise) and the
-// deadline controls are hidden too (a new deadline on an expired link would
-// not resurrect it; the user must create a fresh share).
+// invite a click that cannot do anything. On an expired link both controls are
+// hidden as well — but hiding them is presentation, not enforcement: a tab or
+// panel opened before the deadline passed keeps its buttons, so every write path
+// below re-reads the share state first and refuses to edit a dead link.
 function syncShareControls() {
   const btn = document.getElementById('unshare-btn');
   const expired = currentNote && currentNote.share_token && isExpired(currentNote.expires_at);
@@ -2026,6 +2026,26 @@ async function setShareExpiry(hours) {
   if (!currentNote || !currentNote.share_token) return;
   if (!Number.isFinite(hours) || hours <= 0) {
     showNotification('Deadline must be a positive number of hours.');
+    return;
+  }
+  // A deadline edit must never revive a link that has already expired. The
+  // server would allow it (SetShareExpiry only checks that a token exists), and
+  // internal/notes' test calls that revival intended, so the refusal belongs
+  // here: ask the server for the link's current state rather than trusting the
+  // page, which may have been open since before the deadline passed.
+  let live = true;
+  try {
+    const shares = await api('GET', '/api/v1/shares');
+    if (Array.isArray(shares)) {
+      const row = shares.filter(s => Number(s.note_id) === Number(currentNote.id))[0];
+      live = !!row && !isExpired(row.expires_at);
+    }
+  } catch (e) {
+    live = true; // a failed refresh must not lock the user out of their own link
+  }
+  if (!live) {
+    showNotification('This link has expired. Share the note again for a new link — the expired URL stays dead.');
+    syncShareControls();
     return;
   }
   const expiresAt = new Date(Date.now() + hours * 3600 * 1000).toISOString();
@@ -2150,6 +2170,24 @@ async function revokeShareFromPanel(noteId) {
 async function setShareExpiryFromPanel(noteId, hours) {
   if (!Number.isFinite(hours) || hours <= 0) {
     showNotification('Deadline must be a positive number of hours.');
+    return;
+  }
+  // Same refusal as the editor: a panel opened before the deadline passed still
+  // renders a live button, and setting a deadline on an expired link revives a
+  // URL its recipients have already seen 404.
+  let live = true;
+  try {
+    const shares = await api('GET', '/api/v1/shares');
+    if (Array.isArray(shares)) {
+      const row = shares.filter(s => Number(s.note_id) === Number(noteId))[0];
+      live = !!row && !isExpired(row.expires_at);
+    }
+  } catch (e) {
+    live = true;
+  }
+  if (!live) {
+    showNotification('That link has expired. Share the note again for a new link — the expired URL stays dead.');
+    await showSharedLinksModal();
     return;
   }
   const expiresAt = new Date(Date.now() + hours * 3600 * 1000).toISOString();
