@@ -228,7 +228,7 @@ func TestRedactLogPath_FailsClosedOnNonCanonicalShareURLs(t *testing.T) {
 	// deliberately left as it arrived — only the token must be the same handle.
 	a := redactLogPath("/f/" + token)
 	b := redactLogPath("/F/" + token)
-	if strings.ToLower(a) != strings.ToLower(b) {
+	if !strings.EqualFold(a, b) {
 		t.Fatalf("same token produced different handles: %q vs %q", a, b)
 	}
 }

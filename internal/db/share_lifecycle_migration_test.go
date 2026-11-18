@@ -269,7 +269,13 @@ func TestMigration008_MySQL_ShareLifecycle_PopulatedUpgrade(t *testing.T) {
 		userID, "MySQL Shared "+strconv.FormatInt(suffix, 10)+".md", token)
 	require.NoError(t, err)
 
-	require.NoError(t, m.Up())
+	// 008 is not the newest migration any more: 009 adds folder_shares, and this
+	// test used to assert `Up()` lands on 8. That made every later migration
+	// break this test — order-dependent, because the shared MariaDB has already
+	// been taken to 009 by another package in the same run, and migrations do not
+	// move backwards. Name the step instead of the newest version: 008 is what is
+	// under test, and the column assertions below are the claim about it.
+	require.NoError(t, m.Migrate(8))
 	version, _, err = m.Version()
 	require.NoError(t, err)
 	require.Equal(t, uint(8), version)
