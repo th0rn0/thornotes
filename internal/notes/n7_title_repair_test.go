@@ -127,27 +127,13 @@ func newMySQLTitleStack(t *testing.T) *titleStack {
 }
 
 // truncateTitleRepairMySQL empties every application table so each subtest
-// starts from a known-empty schema (the repository packages' helper, which this
-// package cannot import).
+// starts from a known-empty schema. The shared helper owns the table list and
+// refuses unless this process holds the advisory lock TestMain took — the same
+// lock internal/repository and internal/db take, which is what keeps
+// `go test ./...` from truncating underneath them.
 func truncateTitleRepairMySQL(t *testing.T, pool *db.Pool) {
 	t.Helper()
-	ctx := context.Background()
-	conn, err := pool.WriteDB.Conn(ctx)
-	require.NoError(t, err)
-	defer func() { _ = conn.Close() }()
-
-	_, err = conn.ExecContext(ctx, "SET FOREIGN_KEY_CHECKS = 0")
-	require.NoError(t, err)
-	defer func() {
-		_, _ = conn.ExecContext(context.Background(), "SET FOREIGN_KEY_CHECKS = 1")
-	}()
-	for _, table := range []string{
-		"api_token_folder_permissions", "api_tokens", "journals", "note_links",
-		"notes", "sessions", "folders", "users",
-	} {
-		_, err := conn.ExecContext(ctx, "DELETE FROM "+table)
-		require.NoError(t, err, "reset table %s", table)
-	}
+	require.NoError(t, dbtest.TruncateAll(context.Background(), pool.WriteDB))
 }
 
 // writeNoteFile replaces a note's file on disk, the way an external editor

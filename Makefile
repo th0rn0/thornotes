@@ -74,8 +74,22 @@ test-db-up:
 test-db-down:
 	docker compose down
 
+# The MySQL legs share one schema (`thornotes_test`) between packages, so every
+# package that touches it takes a MariaDB advisory lock for the length of its run
+# and they take turns (internal/dbtest, and the README's Testing section). Do NOT
+# add `-p 1` here: serialising the whole suite would hide that mechanism instead
+# of using it, and leave the collision in place for anyone who runs
+# `go test ./...` by hand.
+#
+# -timeout 2400s, not the 120s this used to pass. The timeout is per test binary
+# and it covers the time a package spends queued for that lock, which is allowed
+# up to 1800s; at 120s this command could not produce a green run at all on a
+# 4-core box — `internal/notes` alone takes 153s without -race, so it panicked
+# with "test timed out after 2m0s" and reported a product failure that was only
+# the clock. The value has to stay above dbtest's lock timeout, or a package that
+# is waiting its turn panics instead of saying it could not get the lock.
 test-with-db:
-	THORNOTES_TEST_MYSQL_DSN="$(TEST_DSN)" go test -race ./... -count=1 -timeout 120s
+	THORNOTES_TEST_MYSQL_DSN="$(TEST_DSN)" go test -race ./... -count=1 -timeout 2400s
 
 clean:
 	rm -f $(BINARY)

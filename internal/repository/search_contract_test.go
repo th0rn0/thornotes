@@ -104,29 +104,13 @@ func newMySQLBackend(t *testing.T) *backend {
 }
 
 // truncateMySQL empties every application table so each test starts from a
-// known-empty schema. Foreign key checks are off for the duration so table
-// order does not matter; schema_migrations is left alone.
+// known-empty schema. The list and the "am I allowed to do this at all?" check
+// live in dbtest.TruncateAll: it refuses unless this process holds the advisory
+// lock TestMain took, which is what stops a parallel package's rows being
+// deleted from under it.
 func truncateMySQL(t *testing.T, pool *db.Pool) {
 	t.Helper()
-	ctx := context.Background()
-
-	conn, err := pool.WriteDB.Conn(ctx)
-	require.NoError(t, err)
-	defer func() { _ = conn.Close() }()
-
-	_, err = conn.ExecContext(ctx, "SET FOREIGN_KEY_CHECKS = 0")
-	require.NoError(t, err)
-	defer func() {
-		_, _ = conn.ExecContext(context.Background(), "SET FOREIGN_KEY_CHECKS = 1")
-	}()
-
-	for _, table := range []string{
-		"api_token_folder_permissions", "api_tokens", "journals", "note_links",
-		"notes", "sessions", "folders", "users",
-	} {
-		_, err := conn.ExecContext(ctx, "DELETE FROM "+table)
-		require.NoError(t, err, "reset table %s", table)
-	}
+	require.NoError(t, dbtest.TruncateAll(context.Background(), pool.WriteDB))
 }
 
 // Snippet fixtures, shared with internal/searchtext's unit tests by intent: the

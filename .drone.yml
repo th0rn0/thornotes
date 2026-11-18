@@ -151,6 +151,19 @@ steps:
     # html/template, x/net HTTP/2). The floating golang:1.26 tag can stay
     # cached at 1.26.2 on Drone runners with GOTOOLCHAIN=local, which
     # refuses to auto-fetch a newer toolchain.
+    #
+    # The `mariadb` service below is one container per build, created empty and
+    # thrown away with the pipeline, so builds cannot collide with each other.
+    # Inside this build the packages share that one schema, and the four that
+    # touch it take a MariaDB advisory lock for the length of their run
+    # (internal/dbtest) — which is why there is no `-p 1` here: it would hide
+    # the lock rather than use it, and leave the collision for whoever runs
+    # `go test ./...` by hand.
+    #
+    # -timeout 900s is per test binary and must stay above dbtest's 600s lock
+    # timeout: a package queued behind another one spends that wait on
+    # GET_LOCK, and Go's default 10m cap would otherwise panic ("test timed out")
+    # at the same instant the lock wait would have reported itself.
     image: golang:1.26.3
     environment:
       THORNOTES_TEST_MYSQL_DSN: "thornotes:thornotes@tcp(mariadb:3306)/thornotes_test?parseTime=true"
@@ -168,7 +181,7 @@ steps:
       # // indirect and imported nowhere). A blanket `go test ... || go test`
       # would be wrong — it hides genuine test failures.
       - go mod download all || go mod download all
-      - go test -race -coverprofile=coverage.out -covermode=atomic ./...
+      - go test -race -timeout 2400s -coverprofile=coverage.out -covermode=atomic ./...
       - go tool cover -func=coverage.out | tail -1
 
   - name: discord-test-success

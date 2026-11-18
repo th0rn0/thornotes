@@ -582,8 +582,83 @@ Or with `make dev` for development defaults (separate dev database, registration
 ## Testing
 
 ```sh
-make test
+make test              # SQLite legs only, default package parallelism
+make test-db-up        # start the MariaDB 11 the MySQL legs expect (once)
+make test-with-db      # the same suite with the MariaDB/MySQL legs enabled
+make test-db-down      # stop it
 ```
+
+`make test-with-db` points `THORNOTES_TEST_MYSQL_DSN` at the Compose database,
+whose credentials are the same ones CI's service container gets. Set
+`THORNOTES_REQUIRE_MYSQL=1` alongside a DSN to turn "no DSN, so the MySQL legs
+skipped" into a failure — CI sets it, so a renamed variable cannot silently
+reduce the suite to SQLite.
+
+**One database, several packages, no `-p 1`.** `thornotes_test` is a single
+schema, and four packages (`internal/repository`, `internal/repository/mysql`,
+`internal/notes`, `internal/db`) migrate, seed and empty it. `go test ./...` runs
+packages in parallel processes, so each of those packages takes a MariaDB
+advisory lock (`thornotes_test_db`, `internal/dbtest`) for the length of its run
+and they take turns. That lock is what makes the parallel run reproducible: skip
+it in one package and the other's rows are deleted mid-assertion, which surfaces
+as a search failure with a foreign-key error underneath it —
+
+```
+--- FAIL: TestSearchAccents_MySQL
+    create note: Error 1452: Cannot add or update a child row: a foreign key
+    constraint fails (`thornotes_test`.`notes`, CONSTRAINT `fk_notes_user`
+    FOREIGN KEY (`user_id`) REFERENCES `users` (`id`))
+```
+
+Two guards keep a package from quietly rejoining that state:
+
+- the shared truncation helper (`dbtest.TruncateAll`, one table list instead of
+  the three copies that were drifting apart) refuses to delete anything unless
+  the calling process holds the lock, so an unguarded package fails at its first
+  truncate with the rule and the one-line fix in the message;
+- `TestEveryMySQLPackageTakesTheLock` fails when a package touches the test DSN
+  or `db.OpenMySQL` without taking the lock, which catches the package that only
+  reads and would never reach the runtime check.
+
+**`-timeout` must outlast the lock.** The per-binary test timeout covers the time
+a package spends queued on that lock, which is bounded at 1800s, so
+`make test-with-db` passes `-timeout 2400s` rather than the 120s it used to.
+At 120s the command could not produce a green run at all on a 4-core machine —
+`internal/notes` alone takes ~153s without `-race` — and reported
+`panic: test timed out after 2m0s`, which reads as a product failure and is only
+the clock. The lock bound itself grew from 600s for the same class of reason: with
+five packages taking turns, the last one waits for the sum of the others, and on a
+loaded host `internal/notes` alone ran 916s, so the two cheapest packages behind it
+failed with `could not acquire "thornotes_test_db" within 600s`. The queue is now
+given room to drain, and the lock wait still reports itself before the test
+timeout would.
+
+**The trade:** the MySQL-touching packages run one at a time — the database is
+serialised, the rest of the suite is not — and the lock is held on the server, so
+two checkouts pointed at the same schema serialise too (that is the intent). Do
+not "fix" a slow or noisy run by adding `-p 1`: it hides the mechanism rather
+than using it, and the collision comes back the moment somebody runs the suite
+without the flag. A package cannot be given its own database instead: the test
+user has `GRANT ALL` on `thornotes_test` only and no `CREATE`, so a schema per
+package is refused — measured, not assumed:
+
+```
+$ mysql -u thornotes -p thornotes -e "CREATE DATABASE thornotes_test_notes"
+ERROR 1044 (42000): Access denied for user 'thornotes'@'%' to database 'thornotes_test_notes'
+```
+
+That is also how CI's `mariadb` service container is created (same image, same
+env), so the privilege is the same in both places. Each build gets its own
+container, so builds never collide; within a build the lock serialises the
+packages.
+
+Repeating a run with `-count>1` is a different story and still costs connections:
+`internal/notes` opens a pool and runs migrations per subtest (unlike
+`internal/repository/mysql`, which opens one pool in `TestMain`), so
+`go test ./internal/notes -count=10` drives the server to its
+`max_connections = 151` ceiling and fails with
+`Error 1040 (08004): Too many connections`. That is not a parallel-package
+collision and is tracked separately.
 
 ## Release process
 
