@@ -1982,19 +1982,40 @@ async function revokeShare() {
 
 // The share control reflects whether the open note has a live link: Unshare is
 // only useful when there is something to revoke, and showing it otherwise would
-// invite a click that cannot do anything.
+// invite a click that cannot do anything. Expired links are surfaced as such —
+// the Unshare button is hidden (revoking a dead link is noise) and the
+// deadline controls are hidden too (a new deadline on an expired link would
+// not resurrect it; the user must create a fresh share).
 function syncShareControls() {
   const btn = document.getElementById('unshare-btn');
-  if (!btn) return;
-  btn.hidden = !(currentNote && currentNote.share_token);
-  // Show expiry info if the note has a share with a deadline.
+  const expired = currentNote && currentNote.share_token && isExpired(currentNote.expires_at);
+  if (btn) {
+    btn.hidden = !(currentNote && currentNote.share_token) || expired;
+  }
+  // Show expiry info if the note has a share link.
   const expiryEl = document.getElementById('share-expiry-info');
+  const controlsEl = document.getElementById('share-expiry-controls');
+  const clearBtn = document.getElementById('share-clear-deadline-btn');
   if (expiryEl) {
-    if (currentNote && currentNote.share_token && currentNote.expires_at) {
-      expiryEl.textContent = `Expires: ${formatExpiry(currentNote.expires_at)}`;
-      expiryEl.hidden = false;
+    if (currentNote && currentNote.share_token) {
+      if (currentNote.expires_at) {
+        if (isExpired(currentNote.expires_at)) {
+          expiryEl.textContent = `Expired: ${formatExpiry(currentNote.expires_at)}`;
+        } else {
+          expiryEl.textContent = `Expires: ${formatExpiry(currentNote.expires_at)}`;
+        }
+        expiryEl.hidden = false;
+      } else {
+        expiryEl.textContent = 'No expiry';
+        expiryEl.hidden = false;
+      }
+      // Deadline controls are reachable from the editor only when the link is live.
+      if (controlsEl) controlsEl.hidden = isExpired(currentNote.expires_at);
+      // "No expiry" is a no-op when there is nothing to clear.
+      if (clearBtn) clearBtn.disabled = !currentNote.expires_at;
     } else {
       expiryEl.hidden = true;
+      if (controlsEl) controlsEl.hidden = true;
     }
   }
 }
@@ -2057,18 +2078,32 @@ async function showSharedLinksModal() {
       return;
     }
     list.innerHTML = shares.map(s => {
+      const expired = isExpired(s.expires_at);
       const expiry = s.expires_at ? formatExpiry(s.expires_at) : 'never';
       const viewed = s.last_viewed_at ? formatExpiry(s.last_viewed_at) : 'never';
-      return `<div class="shared-link-row" data-note-id="${s.note_id}">
+      const rowClass = expired ? 'shared-link-row expired' : 'shared-link-row';
+      // Expired rows show an "EXPIRED" badge and no actions — the link no
+      // longer resolves, so Set deadline / Clear / Revoke would be noise.
+      const metaLine = expired
+        ? `<span>Expired: ${esc(expiry)}</span>`
+        : `<span>Expires: ${esc(expiry)}</span>`;
+      const actions = expired
+        ? `<span class="shared-link-expired-badge" aria-label="Share link expired">Expired</span>`
+        : `<div class="shared-link-actions">
+            <button class="shared-link-deadline-btn" data-note-id="${s.note_id}" data-action="set-deadline" aria-label="Set deadline for ${esc(s.title)}">Deadline</button>
+            ${s.expires_at ? `<button class="shared-link-clear-deadline-btn" data-note-id="${s.note_id}" data-action="clear-deadline" aria-label="Remove deadline for ${esc(s.title)}">No expiry</button>` : ''}
+            <button class="shared-link-revoke-btn" data-note-id="${s.note_id}" data-action="revoke" aria-label="Revoke share for ${esc(s.title)}">Revoke</button>
+          </div>`;
+      return `<div class="${rowClass}" data-note-id="${s.note_id}">
         <div class="shared-link-info">
           <span class="shared-link-title">${esc(s.title)}</span>
           <span class="shared-link-prefix">${esc(s.token_prefix)}</span>
         </div>
         <div class="shared-link-meta">
-          <span>Expires: ${esc(expiry)}</span>
+          ${metaLine}
           <span>Last viewed: ${esc(viewed)}</span>
         </div>
-        <button class="shared-link-revoke-btn" data-note-id="${s.note_id}" aria-label="Revoke share for ${esc(s.title)}">Revoke</button>
+        ${actions}
       </div>`;
     }).join('');
   } catch (e) {
@@ -2108,6 +2143,51 @@ async function revokeShareFromPanel(noteId) {
   }
 }
 
+// setShareExpiryFromPanel sets a deadline for a share identified by noteId
+// (which may or may not be the currently open note). Delegates to the same
+// PATCH endpoint the editor uses; the token is preserved, so existing URLs
+// keep working. Refreshes the panel so the row reflects the new deadline.
+async function setShareExpiryFromPanel(noteId, hours) {
+  if (!Number.isFinite(hours) || hours <= 0) {
+    showNotification('Deadline must be a positive number of hours.');
+    return;
+  }
+  const expiresAt = new Date(Date.now() + hours * 3600 * 1000).toISOString();
+  try {
+    const res = await api('PATCH', `/api/v1/notes/${noteId}/share`, { expires_at: expiresAt });
+    if (res && res.expires_at) {
+      if (currentNote && currentNote.id === noteId) {
+        currentNote.expires_at = res.expires_at;
+        syncShareControls();
+      }
+      showNotification(`Share deadline set to ${formatExpiry(res.expires_at)}.`);
+      await showSharedLinksModal();
+    }
+  } catch (e) {
+    showNotification(`Could not set deadline: ${e.message || 'request failed'}`);
+  }
+}
+
+// clearShareExpiryFromPanel removes the deadline from a share by noteId,
+// keeping the same token. Uses PATCH with {clear_expiry: true} — NOT
+// {clear:true}, which on POST revokes. Refreshes the panel so the row
+// switches from "Expires: ..." to "never".
+async function clearShareExpiryFromPanel(noteId) {
+  try {
+    const res = await api('PATCH', `/api/v1/notes/${noteId}/share`, { clear_expiry: true });
+    if (res && res.expires_at === null) {
+      if (currentNote && currentNote.id === noteId) {
+        currentNote.expires_at = null;
+        syncShareControls();
+      }
+      showNotification('Share deadline removed; link has no expiry.');
+      await showSharedLinksModal();
+    }
+  } catch (e) {
+    showNotification(`Could not clear deadline: ${e.message || 'request failed'}`);
+  }
+}
+
 // formatExpiry renders an ISO timestamp as a human-readable string.
 function formatExpiry(iso) {
   try {
@@ -2116,6 +2196,15 @@ function formatExpiry(iso) {
   } catch {
     return iso;
   }
+}
+
+// isExpired returns true when the ISO deadline is in the past. Used by both
+// the editor controls and the shared-links panel to hide actions that imply
+// the link still works (Revoke, Set deadline) and surface an "expired" state.
+function isExpired(iso) {
+  if (!iso) return false;
+  const d = new Date(iso);
+  return Number.isFinite(d.getTime()) && d.getTime() < Date.now();
 }
 
 // ── Note deletion ───────────────────────────────────────────────────────────
@@ -2870,14 +2959,27 @@ document.querySelector('.unshare-btn').addEventListener('click', revokeShare);
   if (btn) btn.addEventListener('click', showSharedLinksModal);
   const closeBtn = document.getElementById('shared-links-close-btn');
   if (closeBtn) closeBtn.addEventListener('click', closeSharedLinksModal);
-  // Delegate revoke clicks inside the modal.
+  // Delegate action clicks inside the modal. Each button carries
+  // data-action="set-deadline" | "clear-deadline" | "revoke" and data-note-id.
   const list = document.getElementById('shared-links-list');
   if (list) {
     list.addEventListener('click', function(e) {
-      const btn = e.target.closest('.shared-link-revoke-btn');
-      if (btn) {
-        const noteId = Number(btn.dataset.noteId);
-        if (noteId) revokeShareFromPanel(noteId);
+      const actionBtn = e.target.closest('[data-action]');
+      if (!actionBtn) return;
+      const noteId = Number(actionBtn.dataset.noteId);
+      if (!noteId) return;
+      const action = actionBtn.dataset.action;
+      if (action === 'revoke') {
+        revokeShareFromPanel(noteId);
+      } else if (action === 'set-deadline') {
+        // prompt() is the same shape as the one shareNote uses at share time;
+        // keeps the UI consistent and avoids a new modal for a one-shot input.
+        const input = prompt('Deadline in hours from now (e.g. 24, 168 for a week):');
+        if (input === null) return; // cancelled
+        const hours = Number(input);
+        setShareExpiryFromPanel(noteId, hours);
+      } else if (action === 'clear-deadline') {
+        clearShareExpiryFromPanel(noteId);
       }
     });
   }
@@ -2886,6 +2988,27 @@ document.querySelector('.unshare-btn').addEventListener('click', revokeShare);
   if (modal) {
     modal.addEventListener('click', function(e) {
       if (e.target === this) closeSharedLinksModal();
+    });
+  }
+})();
+
+// Editor share-expiry controls: Deadline sets/changes the deadline, No expiry
+// clears it. Both delegate to the existing setShareExpiry/clearShareExpiry
+// functions rather than re-implementing the request bodies.
+(function() {
+  const setBtn = document.getElementById('share-set-deadline-btn');
+  if (setBtn) {
+    setBtn.addEventListener('click', function() {
+      const input = prompt('Deadline in hours from now (e.g. 24, 168 for a week):');
+      if (input === null) return;
+      const hours = Number(input);
+      setShareExpiry(hours);
+    });
+  }
+  const clearBtn = document.getElementById('share-clear-deadline-btn');
+  if (clearBtn) {
+    clearBtn.addEventListener('click', function() {
+      clearShareExpiry();
     });
   }
 })();
