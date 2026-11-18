@@ -48,6 +48,7 @@ function makeHarness(note) {
     apiCalls: [],
     responders: [],
     confirmResults: [],
+    promptResults: [],
     notifications: [],
     copiedUrls: [],
     syncCalls: 0,
@@ -67,6 +68,7 @@ function makeHarness(note) {
   h.copyToClipboard = async function (text) { h.copiedUrls.push(text); };
   h.showNotification = function (msg) { h.notifications.push(msg); };
   h.confirm = function () { return h.confirmResults.shift() !== false; };
+  h.prompt = function () { return h.promptResults.length > 0 ? h.promptResults.shift() : ''; };
   h.syncShareControls = function () { h.syncCalls++; };
   h.location = { origin: h.locationOrigin };
   return h;
@@ -83,6 +85,7 @@ function compile(h, name) {
       const copyToClipboard = __h.copyToClipboard;
       const showNotification = __h.showNotification;
       const confirm = __h.confirm;
+      const prompt = __h.prompt;
       const location = __h.location;
       const syncShareControls = __h.syncShareControls;
       ${body}

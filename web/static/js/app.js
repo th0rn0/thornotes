@@ -1913,9 +1913,26 @@ async function shareNote() {
     );
     if (!confirmed) return;
   }
+  // Offer an optional deadline. The prompt accepts a number of hours or empty
+  // for no expiry. A non-positive or non-numeric value (other than empty) is
+  // rejected so a typo cannot produce a link that is already dead.
+  const expiryInput = prompt(
+    'Set a deadline for this link (hours from now), or leave empty for no expiry:',
+    ''
+  );
+  if (expiryInput === null) return; // cancelled
+  const body = {};
+  if (expiryInput.trim() !== '') {
+    const hours = Number(expiryInput);
+    if (!Number.isFinite(hours) || hours <= 0) {
+      showNotification('Deadline must be a positive number of hours.');
+      return;
+    }
+    body.expires_at = new Date(Date.now() + hours * 3600 * 1000).toISOString();
+  }
   let res;
   try {
-    res = await api('POST', `/api/v1/notes/${currentNote.id}/share`, {});
+    res = await api('POST', `/api/v1/notes/${currentNote.id}/share`, body);
   } catch (e) {
     showNotification(`Could not create share link: ${e.message || 'request failed'}`);
     return;
@@ -1927,6 +1944,11 @@ async function shareNote() {
     return;
   }
   currentNote.share_token = res.share_token;
+  if (body.expires_at) {
+    currentNote.expires_at = body.expires_at;
+  } else {
+    currentNote.expires_at = null;
+  }
   syncShareControls();
   const url = `${location.origin}/s/${res.share_token}`;
   await copyToClipboard(url).catch(() => {});
@@ -1953,6 +1975,7 @@ async function revokeShare() {
     return;
   }
   currentNote.share_token = null;
+  currentNote.expires_at = null;
   syncShareControls();
   showNotification('Share link revoked.');
 }
@@ -1964,6 +1987,135 @@ function syncShareControls() {
   const btn = document.getElementById('unshare-btn');
   if (!btn) return;
   btn.hidden = !(currentNote && currentNote.share_token);
+  // Show expiry info if the note has a share with a deadline.
+  const expiryEl = document.getElementById('share-expiry-info');
+  if (expiryEl) {
+    if (currentNote && currentNote.share_token && currentNote.expires_at) {
+      expiryEl.textContent = `Expires: ${formatExpiry(currentNote.expires_at)}`;
+      expiryEl.hidden = false;
+    } else {
+      expiryEl.hidden = true;
+    }
+  }
+}
+
+// setShareExpiry changes the deadline of the current note's share link without
+// rotating its token, so URLs already handed out keep working.
+async function setShareExpiry(hours) {
+  if (!currentNote || !currentNote.share_token) return;
+  if (!Number.isFinite(hours) || hours <= 0) {
+    showNotification('Deadline must be a positive number of hours.');
+    return;
+  }
+  const expiresAt = new Date(Date.now() + hours * 3600 * 1000).toISOString();
+  try {
+    const res = await api('PATCH', `/api/v1/notes/${currentNote.id}/share`, { expires_at: expiresAt });
+    if (res && res.expires_at) {
+      currentNote.expires_at = res.expires_at;
+      syncShareControls();
+      showNotification(`Share deadline set to ${formatExpiry(res.expires_at)}.`);
+    }
+  } catch (e) {
+    showNotification(`Could not set deadline: ${e.message || 'request failed'}`);
+  }
+}
+
+// clearShareExpiry removes the deadline from the current note's share link,
+// making it immortal again. Uses PATCH with clear_expiry: true — NOT {clear:true},
+// which on POST means revoke.
+async function clearShareExpiry() {
+  if (!currentNote || !currentNote.share_token) return;
+  try {
+    const res = await api('PATCH', `/api/v1/notes/${currentNote.id}/share`, { clear_expiry: true });
+    if (res && res.expires_at === null) {
+      currentNote.expires_at = null;
+      syncShareControls();
+      showNotification('Share deadline removed; link has no expiry.');
+    }
+  } catch (e) {
+    showNotification(`Could not clear deadline: ${e.message || 'request failed'}`);
+  }
+}
+
+// showSharedLinksModal fetches the caller's own share links and renders them
+// in a modal. Only token_prefix is shown — never the full token.
+async function showSharedLinksModal() {
+  const modal = document.getElementById('shared-links-modal');
+  const list = document.getElementById('shared-links-list');
+  const loading = document.getElementById('shared-links-loading');
+  const error = document.getElementById('shared-links-error');
+  if (!modal) return;
+  modal.style.display = 'flex';
+  list.innerHTML = '';
+  loading.style.display = 'block';
+  error.textContent = '';
+  try {
+    const shares = await api('GET', '/api/v1/shares');
+    loading.style.display = 'none';
+    if (!Array.isArray(shares) || shares.length === 0) {
+      list.innerHTML = '<p class="shared-links-empty">No shared links.</p>';
+      return;
+    }
+    list.innerHTML = shares.map(s => {
+      const expiry = s.expires_at ? formatExpiry(s.expires_at) : 'never';
+      const viewed = s.last_viewed_at ? formatExpiry(s.last_viewed_at) : 'never';
+      return `<div class="shared-link-row" data-note-id="${s.note_id}">
+        <div class="shared-link-info">
+          <span class="shared-link-title">${esc(s.title)}</span>
+          <span class="shared-link-prefix">${esc(s.token_prefix)}</span>
+        </div>
+        <div class="shared-link-meta">
+          <span>Expires: ${esc(expiry)}</span>
+          <span>Last viewed: ${esc(viewed)}</span>
+        </div>
+        <button class="shared-link-revoke-btn" data-note-id="${s.note_id}" aria-label="Revoke share for ${esc(s.title)}">Revoke</button>
+      </div>`;
+    }).join('');
+  } catch (e) {
+    loading.style.display = 'none';
+    error.textContent = e.message || 'Failed to load shared links.';
+  }
+}
+
+function closeSharedLinksModal() {
+  const modal = document.getElementById('shared-links-modal');
+  if (modal) modal.style.display = 'none';
+}
+
+// revokeShareFromPanel revokes a share by note_id. It proves the revoke by
+// verifying the URL no longer resolves — but since we cannot fetch the public
+// URL from the client (CORS, auth), we rely on the server response: a 200 with
+// share_token: null proves the token is gone.
+async function revokeShareFromPanel(noteId) {
+  if (!confirm('Revoke this share link? The URL will stop working immediately.')) return;
+  try {
+    const res = await api('POST', `/api/v1/notes/${noteId}/share`, { clear: true });
+    if (!res || res.share_token !== null) {
+      showNotification('Revoke did not take effect; the share link is still live.');
+      return;
+    }
+    showNotification('Share link revoked.');
+    // If the revoked note is currently open, clear its share state.
+    if (currentNote && currentNote.id === noteId) {
+      currentNote.share_token = null;
+      currentNote.expires_at = null;
+      syncShareControls();
+    }
+    // Refresh the panel.
+    await showSharedLinksModal();
+  } catch (e) {
+    showNotification(`Could not revoke share link: ${e.message || 'request failed'}`);
+  }
+}
+
+// formatExpiry renders an ISO timestamp as a human-readable string.
+function formatExpiry(iso) {
+  try {
+    const d = new Date(iso);
+    return d.toLocaleString();
+  } catch {
+    return iso;
+  }
 }
 
 // ── Note deletion ───────────────────────────────────────────────────────────
@@ -2711,6 +2863,32 @@ document.getElementById('note-title').addEventListener('change', onTitleChange);
 document.getElementById('note-tags').addEventListener('change', onTagsChange);
 document.querySelector('.share-btn').addEventListener('click', shareNote);
 document.querySelector('.unshare-btn').addEventListener('click', revokeShare);
+
+// Shared links panel: button in sidebar toolbar opens the modal.
+(function() {
+  const btn = document.getElementById('shared-links-btn');
+  if (btn) btn.addEventListener('click', showSharedLinksModal);
+  const closeBtn = document.getElementById('shared-links-close-btn');
+  if (closeBtn) closeBtn.addEventListener('click', closeSharedLinksModal);
+  // Delegate revoke clicks inside the modal.
+  const list = document.getElementById('shared-links-list');
+  if (list) {
+    list.addEventListener('click', function(e) {
+      const btn = e.target.closest('.shared-link-revoke-btn');
+      if (btn) {
+        const noteId = Number(btn.dataset.noteId);
+        if (noteId) revokeShareFromPanel(noteId);
+      }
+    });
+  }
+  // Close modal on overlay click.
+  const modal = document.getElementById('shared-links-modal');
+  if (modal) {
+    modal.addEventListener('click', function(e) {
+      if (e.target === this) closeSharedLinksModal();
+    });
+  }
+})();
 
 // Conflict modal
 document.getElementById('conflict-discard-btn').addEventListener('click', function() { resolveConflict('discard'); });
