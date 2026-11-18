@@ -282,12 +282,31 @@ body {
 .shared-links-empty { font-size: 12px; color: var(--text-dim); padding: 8px 0; font-style: italic; }
 .shared-link-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--border-light); }
 .shared-link-row:last-child { border-bottom: none; }
-.shared-link-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.shared-link-info { flex: 1 1 180px; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .shared-link-title { font-size: 12px; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .shared-link-prefix { font-size: 10px; color: var(--text-dim); font-family: monospace; }
-.shared-link-meta { font-size: 10px; color: var(--text-dim); display: flex; gap: 12px; flex-shrink: 0; }
+.shared-link-meta { font-size: 10px; color: var(--text-dim); display: flex; gap: 12px; flex-shrink: 1; flex-wrap: wrap; min-width: 0; }
 .shared-link-revoke-btn { font-size: 11px; border: 1px solid var(--color-error); background: transparent; color: var(--color-error); padding: 4px 10px; cursor: pointer; border-radius: 3px; min-height: 26px; flex-shrink: 0; }
 .shared-link-revoke-btn:hover { background: var(--color-error); color: #fff; }
+.shared-link-deadline-btn { font-size: 11px; border: 1px solid var(--accent); background: transparent; color: var(--accent); padding: 4px 10px; cursor: pointer; border-radius: 3px; min-height: 26px; flex-shrink: 0; }
+.shared-link-deadline-btn:hover { background: var(--accent); color: var(--text-on-accent); }
+.shared-link-clear-deadline-btn { font-size: 11px; border: 1px solid var(--border); background: transparent; color: var(--text-dim); padding: 4px 10px; cursor: pointer; border-radius: 3px; min-height: 26px; flex-shrink: 0; }
+.shared-link-clear-deadline-btn:hover { background: var(--bg-hover); color: var(--text); }
+.shared-link-actions { display: flex; gap: 6px; flex-shrink: 0; align-items: center; }
+/* Expired row: muted text, no actionable buttons. */
+.shared-link-row.expired .shared-link-title { color: var(--text-dim); text-decoration: line-through; }
+.shared-link-row.expired .shared-link-meta span:first-child { color: var(--color-error); font-weight: 600; }
+.shared-link-expired-badge { font-size: 10px; color: var(--color-error); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; flex-shrink: 0; }
+/* Editor share controls next to the expiry info. */
+.share-expiry-controls { display: inline-flex; gap: 4px; align-items: center; margin-left: 4px; }
+/* The UA sheet's [hidden] { display: none } loses to any author display rule, so
+   this element's own `display: inline-flex` kept it on screen after
+   syncShareControls() set hidden — on an expired link that meant a visible
+   Deadline button that resurrected the dead link. Any future `display` on this
+   class needs the matching [hidden] rule. */
+.share-expiry-controls[hidden] { display: none; }
+.share-expiry-controls button { font-size: 10px; border: 1px solid var(--border); background: transparent; color: var(--text-dim); padding: 2px 6px; cursor: pointer; border-radius: 2px; }
+.share-expiry-controls button:hover { background: var(--bg-hover); color: var(--text); }
 .tags-input { font-size: 10px; border: none; background: transparent; color: var(--text-dim); padding: 0; width: 100%; outline: none; }
 .tags-input::placeholder { color: var(--text-dim); }
 .editor-area { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
@@ -455,6 +474,10 @@ body {
 /* MODALS */
 .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 500; display: none; align-items: center; justify-content: center; }
 .modal { background: var(--bg-modal); border: 1px solid var(--border); padding: 24px; max-width: 400px; width: 90%; }
+/* Source-order override: .modal above (max-width:400px) was winning over
+   .shared-links-modal at line 278 because it came later in the stylesheet.
+   The extra class raises specificity so 560px actually applies. */
+.modal.shared-links-modal { max-width: 560px; }
 .modal h2 { font-size: 14px; margin-bottom: 16px; color: var(--text); }
 .modal p { font-size: 12px; color: var(--text-mute); margin-bottom: 16px; }
 .modal label { display: block; font-size: 11px; color: var(--text-mute); margin-bottom: 4px; }
@@ -756,6 +779,10 @@ body {
               <button class="share-btn">Share ↗</button>
                 <button class="unshare-btn" id="unshare-btn" hidden>Unshare</button>
                 <span class="share-expiry-info" id="share-expiry-info" hidden></span>
+                <span class="share-expiry-controls" id="share-expiry-controls" hidden>
+                  <button type="button" id="share-set-deadline-btn" title="Set or change the deadline">Deadline</button>
+                  <button type="button" id="share-clear-deadline-btn" title="Remove the deadline (link keeps working)">No expiry</button>
+                </span>
               <button class="history-btn" id="history-btn">History</button>
               <button class="delete-note-btn" id="delete-note-btn">Delete</button>
             </div>
