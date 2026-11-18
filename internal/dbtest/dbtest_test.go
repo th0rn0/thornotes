@@ -24,10 +24,13 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	appdb "github.com/th0rn0/thornotes/internal/db"
 )
 
 const testDSNEnv = "THORNOTES_TEST_MYSQL_DSN"
@@ -61,8 +64,41 @@ func withLockName(t *testing.T, name string) {
 	t.Cleanup(func() { lockName = previous })
 }
 
+// ensureSchemaOnce runs the application's migrations against the shared test
+// database, at most once per process.
+//
+// Nothing else does it for this package. The suites that share this schema
+// (internal/db, internal/repository, internal/repository/mysql, internal/notes)
+// each migrate it in their own TestMain, so this package's tests opened a bare
+// connection to a database nobody had created tables in and the first INSERT
+// failed with `Table 'thornotes_test.users' doesn't exist`. That is how build
+// 414 went red against the very branch that added this file: locally it passed
+// because an earlier run of another package had already migrated the schema, and
+// in CI this package was the first thing to touch an empty server.
+//
+// It is safe against the other packages because this package's TestMain takes
+// the same advisory lock before any test runs, so no other suite can be midway
+// through a migration while these tables are created.
+var (
+	ensureSchemaOnce sync.Once
+	ensureSchemaErr  error
+)
+
+func ensureSchema(dsn string) error {
+	ensureSchemaOnce.Do(func() {
+		pool, err := appdb.OpenMySQL(dsn)
+		if err != nil {
+			ensureSchemaErr = err
+			return
+		}
+		pool.Close()
+	})
+	return ensureSchemaErr
+}
+
 func openTestDB(t *testing.T, dsn string) *sql.DB {
 	t.Helper()
+	require.NoError(t, ensureSchema(dsn), "migrating the shared test schema")
 	db, err := sql.Open("mysql", dsn)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
