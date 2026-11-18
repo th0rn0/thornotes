@@ -51,13 +51,6 @@ const (
 	titleRepairRequireEnv = "THORNOTES_REQUIRE_MYSQL"
 )
 
-// TestMain takes the shared-schema advisory lock whenever the MySQL DSN is set:
-// this package truncates the same database the repository packages use, and
-// `go test ./...` runs packages in parallel processes.
-func TestMain(m *testing.M) {
-	os.Exit(dbtest.Locked(titleRepairDSNEnv, m.Run))
-}
-
 // titleStack is the one service plus the two handles the tests need: the notes
 // root on disk, and the write connection for seeding a divergence that the
 // service itself would refuse to create.
@@ -85,17 +78,18 @@ func newSQLiteTitleStack(t *testing.T) *titleStack {
 
 func newMySQLTitleStack(t *testing.T) *titleStack {
 	t.Helper()
-	dsn := os.Getenv(titleRepairDSNEnv)
-	if dsn == "" {
+	if os.Getenv(titleRepairDSNEnv) == "" {
 		msg := titleRepairDSNEnv + " not set — skipping MariaDB/MySQL title-repair leg"
 		if os.Getenv(titleRepairRequireEnv) == "1" {
 			t.Fatalf("%s (%s=1, MySQL must not be skipped)", msg, titleRepairRequireEnv)
 		}
 		t.Skip(msg)
 	}
-	pool, err := db.OpenMySQL(dsn)
-	require.NoError(t, err)
-	t.Cleanup(func() { pool.Close() })
+	// One pool for the whole process (main_test.go). Opening one per subtest is
+	// what made -count=10 die with "Too many connections": the pools and the
+	// per-open migration connections outlived every test that opened them.
+	pool := sharedMySQLPool
+	require.NotNil(t, pool, "TestMain must open the shared pool when %s is set", titleRepairDSNEnv)
 	truncateTitleRepairMySQL(t, pool)
 
 	dir := t.TempDir()
