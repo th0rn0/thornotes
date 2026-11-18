@@ -38,13 +38,14 @@ const (
 
 // Service coordinates note and folder operations across the FileStore and repositories.
 type Service struct {
-	notes     repository.NoteRepository
-	folders   repository.FolderRepository
-	search    repository.SearchRepository
-	journals  repository.JournalRepository
-	links     repository.LinkRepository
-	fs        *FileStore
-	noteLocks [noteLockStripes]sync.Mutex
+	notes        repository.NoteRepository
+	folders      repository.FolderRepository
+	search       repository.SearchRepository
+	journals     repository.JournalRepository
+	links        repository.LinkRepository
+	folderShares repository.FolderShareRepository
+	fs           *FileStore
+	noteLocks    [noteLockStripes]sync.Mutex
 
 	// reconcileMaxDeleteRatio / reconcileMinDeleteTrips configure the
 	// deletion circuit breaker (see guardReconcileDeletions).
@@ -86,15 +87,17 @@ func NewService(
 	search repository.SearchRepository,
 	journals repository.JournalRepository,
 	links repository.LinkRepository,
+	folderShares repository.FolderShareRepository,
 	fs *FileStore,
 ) *Service {
 	return &Service{
-		notes:    notes,
-		folders:  folders,
-		search:   search,
-		journals: journals,
-		links:    links,
-		fs:       fs,
+		notes:        notes,
+		folders:      folders,
+		search:       search,
+		journals:     journals,
+		links:        links,
+		folderShares: folderShares,
+		fs:           fs,
 
 		reconcileMaxDeleteRatio: DefaultReconcileMaxDeleteRatio,
 		reconcileMinDeleteTrips: DefaultReconcileMinDeleteTrips,

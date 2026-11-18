@@ -42,7 +42,7 @@ func buildHandler(t *testing.T) http.Handler {
 	apiTokenRepo := sqlite.NewAPITokenRepo(pool.ReadDB, pool.WriteDB)
 
 	authSvc := auth.NewServiceForTest(userRepo, sessionRepo, true)
-	notesSvc := notes.NewService(noteRepo, folderRepo, searchRepo, sqlite.NewJournalRepo(pool.ReadDB, pool.WriteDB), sqlite.NewLinkRepo(pool.ReadDB, pool.WriteDB), fs)
+	notesSvc := notes.NewService(noteRepo, folderRepo, searchRepo, sqlite.NewJournalRepo(pool.ReadDB, pool.WriteDB), sqlite.NewLinkRepo(pool.ReadDB, pool.WriteDB), sqlite.NewFolderShareRepo(pool.ReadDB, pool.WriteDB), fs)
 	rateLimiter := security.NewAuthRateLimiter(nil)
 	t.Cleanup(rateLimiter.Stop)
 
@@ -52,7 +52,17 @@ func buildHandler(t *testing.T) http.Handler {
 	staticSub, err := iofs.Sub(thornotes.StaticFS, "web/static")
 	require.NoError(t, err)
 
-	return router.New(authSvc, notesSvc, apiTokenRepo, userRepo, rateLimiter, tmpl, http.FS(staticSub), hub.New(), false, false, &stubDBHealth{}, context.Background(), "test")
+	return router.New(authSvc, notesSvc, apiTokenRepo, userRepo, rateLimiter, testShareLimiter(t), tmpl, http.FS(staticSub), hub.New(), false, false, &stubDBHealth{}, context.Background(), "test")
+}
+
+// testShareLimiter is a share limiter whose budget no test in this package can
+// exhaust: these tests are about routing, not throttling. The throttle itself is
+// covered end to end in internal/handler/share_ratelimit_test.go.
+func testShareLimiter(t *testing.T) *security.ShareRateLimiter {
+	t.Helper()
+	rl := security.NewShareRateLimiter(nil, security.ShareRateLimits{PerMinute: 100000, PerHour: 100000})
+	t.Cleanup(rl.Stop)
+	return rl
 }
 
 // stubDBHealth satisfies handler.DBHealthChecker for router tests.
@@ -153,14 +163,14 @@ func TestRouter_Healthz_DBError(t *testing.T) {
 	authSvc := auth.NewService(userRepo, sessionRepo, false)
 	fs, err := notes.NewFileStore(t.TempDir())
 	require.NoError(t, err)
-	notesSvc := notes.NewService(noteRepo, folderRepo, searchRepo, journalRepo, linkRepo, fs)
+	notesSvc := notes.NewService(noteRepo, folderRepo, searchRepo, journalRepo, linkRepo, sqlite.NewFolderShareRepo(pool.ReadDB, pool.WriteDB), fs)
 	tmpl, err := template.ParseFS(thornotes.TemplatesFS, "web/templates/*.html")
 	require.NoError(t, err)
 	rateLimiter := security.NewAuthRateLimiter(nil)
 	staticSub, err := iofs.Sub(thornotes.StaticFS, "web/static")
 	require.NoError(t, err)
 
-	h := router.New(authSvc, notesSvc, apiTokenRepo, userRepo, rateLimiter, tmpl, http.FS(staticSub), hub.New(), false, false,
+	h := router.New(authSvc, notesSvc, apiTokenRepo, userRepo, rateLimiter, testShareLimiter(t), tmpl, http.FS(staticSub), hub.New(), false, false,
 		&stubDBHealth{err: "connection refused"}, context.Background(), "test")
 
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
@@ -181,4 +191,32 @@ func TestRouter_ServesManifest(t *testing.T) {
 	require.Equal(t, http.StatusOK, rr.Code)
 	assert.Contains(t, rr.Header().Get("Content-Type"), "json")
 	assert.Contains(t, rr.Body.String(), "thornotes")
+}
+
+// A share URL that matches no route still reaches the client, and it has to
+// carry the same two headers every matched share outcome carries. Otherwise
+// "no-store and noindex on every outcome" is a claim about routes rather than
+// about the surface, and the shapes that fall through — /f/ with no token,
+// /F/<token>, /f//<token> — are the ones a rewritten link arrives as.
+func TestRouter_UnmatchedShareURL_IsNotCachedOrIndexed(t *testing.T) {
+	h := buildHandler(t)
+	tok := "05a3d3bd60ff91db301fc77057ca07e7"
+
+	for _, path := range []string{"/f/", "/f", "/F/" + tok, "/f//" + tok, "/s/" + tok} {
+		t.Run(path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			rr := httptest.NewRecorder()
+			h.ServeHTTP(rr, req)
+
+			assert.Equal(t, "no-store", rr.Header().Get("Cache-Control"))
+			assert.Equal(t, "noindex", rr.Header().Get("X-Robots-Tag"))
+		})
+	}
+
+	// An ordinary deep link keeps the shell's own caching: this is a change to
+	// share URLs only, not to the app.
+	req := httptest.NewRequest(http.MethodGet, "/my-folder/my-note", nil)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	assert.NotEqual(t, "noindex", rr.Header().Get("X-Robots-Tag"))
 }

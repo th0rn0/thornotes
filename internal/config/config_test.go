@@ -153,3 +153,76 @@ func TestEnvDuration_Zero(t *testing.T) {
 	d := envDuration("TEST_DURATION_ZERO", 30*time.Second)
 	assert.Equal(t, time.Duration(0), d)
 }
+
+func TestEnvInt_Unset_ReturnsDefault(t *testing.T) {
+	os.Unsetenv("TEST_INT_UNSET")
+	assert.Equal(t, 7, envInt("TEST_INT_UNSET", 7))
+}
+
+func TestEnvInt_Invalid_ReturnsDefault(t *testing.T) {
+	t.Setenv("TEST_INT_BAD", "not-a-number")
+	assert.Equal(t, 7, envInt("TEST_INT_BAD", 7))
+}
+
+func TestEnvInt_ValidValue(t *testing.T) {
+	t.Setenv("TEST_INT", " 42 ")
+	assert.Equal(t, 42, envInt("TEST_INT", 7))
+}
+
+// TestParse_ShareRateDefaults pins the default budgets the anonymous share
+// surfaces ship with: generous enough for a human browsing a folder, bounded for
+// someone looping one.
+func TestParse_ShareRateDefaults(t *testing.T) {
+	resetFlags()
+	os.Unsetenv("THORNOTES_ADDR")
+	os.Unsetenv("THORNOTES_TRUSTED_PROXY")
+	os.Unsetenv("THORNOTES_SHARE_RATE_PER_MINUTE")
+	os.Unsetenv("THORNOTES_SHARE_RATE_PER_HOUR")
+
+	cfg, err := Parse()
+	require.NoError(t, err)
+	assert.Equal(t, 60, cfg.ShareRatePerMinute)
+	assert.Equal(t, 600, cfg.ShareRatePerHour)
+}
+
+func TestParse_ShareRate_EnvOverrides(t *testing.T) {
+	resetFlags()
+	os.Unsetenv("THORNOTES_ADDR")
+	os.Unsetenv("THORNOTES_TRUSTED_PROXY")
+	t.Setenv("THORNOTES_SHARE_RATE_PER_MINUTE", "30")
+	t.Setenv("THORNOTES_SHARE_RATE_PER_HOUR", "300")
+
+	cfg, err := Parse()
+	require.NoError(t, err)
+	assert.Equal(t, 30, cfg.ShareRatePerMinute)
+	assert.Equal(t, 300, cfg.ShareRatePerHour)
+}
+
+// TestParse_ShareRate_ZeroDisables is the documented opt-out: 0 turns one window
+// off rather than refusing every read.
+func TestParse_ShareRate_ZeroDisables(t *testing.T) {
+	resetFlags()
+	os.Unsetenv("THORNOTES_ADDR")
+	os.Unsetenv("THORNOTES_TRUSTED_PROXY")
+	t.Setenv("THORNOTES_SHARE_RATE_PER_MINUTE", "0")
+	t.Setenv("THORNOTES_SHARE_RATE_PER_HOUR", "0")
+
+	cfg, err := Parse()
+	require.NoError(t, err)
+	assert.Equal(t, 0, cfg.ShareRatePerMinute)
+	assert.Equal(t, 0, cfg.ShareRatePerHour)
+}
+
+// TestParse_NegativeShareRate_ReturnsError: a negative budget is a typo, not a
+// request to disable, and it must fail at startup rather than quietly leave the
+// public share surface unbounded.
+func TestParse_NegativeShareRate_ReturnsError(t *testing.T) {
+	resetFlags()
+	os.Unsetenv("THORNOTES_ADDR")
+	os.Unsetenv("THORNOTES_TRUSTED_PROXY")
+	t.Setenv("THORNOTES_SHARE_RATE_PER_MINUTE", "-1")
+
+	_, err := Parse()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid --share-rate-per-minute")
+}

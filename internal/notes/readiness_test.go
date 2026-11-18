@@ -15,14 +15,14 @@ import (
 // other default would turn a forgotten EndStartup into a permanently dead
 // instance, which is the failure mode this bit is most likely to be broken by.
 func TestStartupWindow_ZeroValueIsReady(t *testing.T) {
-	svc := notes.NewService(nil, nil, nil, nil, nil, nil)
+	svc := notes.NewService(nil, nil, nil, nil, nil, nil, nil)
 	assert.False(t, svc.StartupReconciling(), "a Service with no startup pass in flight must be ready")
 }
 
 // TestStartupWindow_RoundTrip covers the two transitions the router and /healthz
 // read: closed until BeginStartup, and closed again from EndStartup.
 func TestStartupWindow_RoundTrip(t *testing.T) {
-	svc := notes.NewService(nil, nil, nil, nil, nil, nil)
+	svc := notes.NewService(nil, nil, nil, nil, nil, nil, nil)
 
 	svc.BeginStartup()
 	assert.True(t, svc.StartupReconciling())
@@ -35,7 +35,7 @@ func TestStartupWindow_RoundTrip(t *testing.T) {
 // not an error. The startup pass has several exit paths and more than one of them
 // may reasonably be defensive about ending it.
 func TestStartupWindow_EndIsIdempotent(t *testing.T) {
-	svc := notes.NewService(nil, nil, nil, nil, nil, nil)
+	svc := notes.NewService(nil, nil, nil, nil, nil, nil, nil)
 
 	svc.EndStartup()
 	assert.False(t, svc.StartupReconciling())
@@ -50,7 +50,7 @@ func TestStartupWindow_EndIsIdempotent(t *testing.T) {
 // every request on the instance reads it while the startup pass writes it, and
 // -race is the assertion.
 func TestStartupWindow_ReadAndWriteConcurrently(t *testing.T) {
-	svc := notes.NewService(nil, nil, nil, nil, nil, nil)
+	svc := notes.NewService(nil, nil, nil, nil, nil, nil, nil)
 
 	var wg sync.WaitGroup
 	wg.Add(2)

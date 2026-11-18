@@ -313,8 +313,8 @@ steps:
       # MySQL floors and are checked against the migration sources by
       # TestDockerfile_SchemaLabelsMatchMigrations.
       build_args:
-        - THORNOTES_SCHEMA_MAX=11
-        - THORNOTES_SCHEMA_MAX_MYSQL=8
+        - THORNOTES_SCHEMA_MAX=12
+        - THORNOTES_SCHEMA_MAX_MYSQL=9
         - THORNOTES_VERSION=${DRONE_COMMIT_SHA}
     when:
       branch:
@@ -334,8 +334,8 @@ steps:
         - latest
         - ${DRONE_TAG}
       build_args:
-        - THORNOTES_SCHEMA_MAX=11
-        - THORNOTES_SCHEMA_MAX_MYSQL=8
+        - THORNOTES_SCHEMA_MAX=12
+        - THORNOTES_SCHEMA_MAX_MYSQL=9
         - THORNOTES_VERSION=${DRONE_TAG}
     when:
       event:

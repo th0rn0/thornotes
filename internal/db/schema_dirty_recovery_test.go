@@ -86,7 +86,7 @@ func TestOpen_DirtyMidSequence_RefusesThenDocumentedRepairRecovers(t *testing.T)
 	pool, err := Open(path)
 	require.NoError(t, err, "a cleared dirty flag must let startup migrate the rest")
 	version, maxSupported := pool.SchemaStatus()
-	assert.Equal(t, 11, version, "startup must bring the schema to the newest migration")
+	assert.Equal(t, latestSQLiteVersion(t), version, "startup must bring the schema to the newest migration")
 	assert.Equal(t, maxSupported, version)
 
 	// Usable, not merely open: a row can be written and the index the FTS
@@ -104,7 +104,7 @@ func TestOpen_DirtyMidSequence_RefusesThenDocumentedRepairRecovers(t *testing.T)
 		"the FTS migrations must have rebuilt notes_fts as a usable contentless-delete table")
 
 	after := snapshotDB(t, openRawSQLite(t, path))
-	assert.Equal(t, 11, after.version)
+	assert.Equal(t, latestSQLiteVersion(t), after.version)
 	assert.False(t, after.dirty, "a completed migration must clear the dirty flag")
 	assert.Equal(t, 1, after.users)
 
@@ -114,5 +114,5 @@ func TestOpen_DirtyMidSequence_RefusesThenDocumentedRepairRecovers(t *testing.T)
 	require.NoError(t, err, "re-opening a recovered database must succeed")
 	defer again.Close()
 	version, _ = again.SchemaStatus()
-	assert.Equal(t, 11, version)
+	assert.Equal(t, latestSQLiteVersion(t), version)
 }

@@ -95,6 +95,16 @@ func idRoutes() []idRoute {
 			path:        func(id string) string { return "/api/v1/folders/" + id },
 			ownerStatus: http.StatusNoContent,
 		},
+		{
+			// Ticket 616: publishing a folder is the same ownership question as
+			// deleting it, and the #40 bug was exactly this route's note-share
+			// twin answering 200 for somebody else's resource.
+			name:        "POST /api/v1/folders/:id/share",
+			method:      http.MethodPost,
+			path:        func(id string) string { return "/api/v1/folders/" + id + "/share" },
+			body:        map[string]any{},
+			ownerStatus: http.StatusOK,
+		},
 
 		// ── Notes (the behaviour folders must match) ─────────────────────────
 		{

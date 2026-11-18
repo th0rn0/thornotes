@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	iofs "io/fs"
+	"net"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
@@ -53,6 +54,29 @@ func newTestClient(t testing.TB) *testClient {
 // exercise the closed-instance gate on the register endpoint; existing
 // tests keep using newTestClient (registration open) unchanged.
 func newTestClientWithRegistration(t testing.TB, allowRegistration bool) *testClient {
+	return newTestClientWithShareLimits(t, allowRegistration, shareLimitsForTests)
+}
+
+// shareLimitsForTests is the budget every share suite that is not about
+// throttling runs with: effectively unbounded, because a fixture that reads
+// thirty pages of one folder is testing the share surface itself, not the
+// limiter. The throttle suite passes its own, small budgets.
+var shareLimitsForTests = security.ShareRateLimits{PerMinute: 100000, PerHour: 100000}
+
+// newTestClientWithShareLimits spins up the full router with the given anonymous
+// share read budgets, so the throttle tests can drive a real burst into a real
+// limiter on the real routes. No trusted proxy is configured, so every request is
+// attributed to its peer address.
+func newTestClientWithShareLimits(t testing.TB, allowRegistration bool, shareLimits security.ShareRateLimits) *testClient {
+	return newTestClientWithOptions(t, allowRegistration, shareLimits, nil)
+}
+
+// newTestClientWithOptions is the full harness: the share budgets and the
+// trusted-proxy CIDR both feed the limiters. Passing a proxy CIDR lets a test
+// present several client addresses through X-Forwarded-For — the only way to
+// exercise the per-IP half of the share key from a loopback test server, where
+// every real peer is 127.0.0.1.
+func newTestClientWithOptions(t testing.TB, allowRegistration bool, shareLimits security.ShareRateLimits, trustedProxy *net.IPNet) *testClient {
 	t.Helper()
 	dir := t.TempDir()
 	pool, err := db.Open(filepath.Join(dir, "test.db"))
@@ -71,9 +95,11 @@ func newTestClientWithRegistration(t testing.TB, allowRegistration bool) *testCl
 	apiTokenRepo := sqlite.NewAPITokenRepo(pool.ReadDB, pool.WriteDB)
 
 	authSvc := auth.NewServiceForTest(userRepo, sessionRepo, allowRegistration)
-	notesSvc := notes.NewService(noteRepo, folderRepo, searchRepo, sqlite.NewJournalRepo(pool.ReadDB, pool.WriteDB), sqlite.NewLinkRepo(pool.ReadDB, pool.WriteDB), fs)
+	notesSvc := notes.NewService(noteRepo, folderRepo, searchRepo, sqlite.NewJournalRepo(pool.ReadDB, pool.WriteDB), sqlite.NewLinkRepo(pool.ReadDB, pool.WriteDB), sqlite.NewFolderShareRepo(pool.ReadDB, pool.WriteDB), fs)
 	rateLimiter := security.NewAuthRateLimiter(nil)
 	t.Cleanup(rateLimiter.Stop)
+	shareLimiter := security.NewShareRateLimiter(trustedProxy, shareLimits)
+	t.Cleanup(shareLimiter.Stop)
 
 	tmpl, err := template.ParseFS(thornotes.TemplatesFS, "web/templates/*.html")
 	require.NoError(t, err)
@@ -81,7 +107,7 @@ func newTestClientWithRegistration(t testing.TB, allowRegistration bool) *testCl
 	staticSub, err := iofs.Sub(thornotes.StaticFS, "web/static")
 	require.NoError(t, err)
 
-	h := router.New(authSvc, notesSvc, apiTokenRepo, userRepo, rateLimiter, tmpl, http.FS(staticSub), hub.New(), false, false, &stubDBHealth{}, context.Background(), "test")
+	h := router.New(authSvc, notesSvc, apiTokenRepo, userRepo, rateLimiter, shareLimiter, tmpl, http.FS(staticSub), hub.New(), false, false, &stubDBHealth{}, context.Background(), "test")
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
 
@@ -1640,9 +1666,11 @@ func newTestClientGit(t *testing.T) *testClient {
 	apiTokenRepo := sqlite.NewAPITokenRepo(pool.ReadDB, pool.WriteDB)
 
 	authSvc := auth.NewServiceForTest(userRepo, sessionRepo, true)
-	notesSvc := notes.NewService(noteRepo, folderRepo, searchRepo, sqlite.NewJournalRepo(pool.ReadDB, pool.WriteDB), sqlite.NewLinkRepo(pool.ReadDB, pool.WriteDB), fs)
+	notesSvc := notes.NewService(noteRepo, folderRepo, searchRepo, sqlite.NewJournalRepo(pool.ReadDB, pool.WriteDB), sqlite.NewLinkRepo(pool.ReadDB, pool.WriteDB), sqlite.NewFolderShareRepo(pool.ReadDB, pool.WriteDB), fs)
 	rateLimiter := security.NewAuthRateLimiter(nil)
 	t.Cleanup(rateLimiter.Stop)
+	shareLimiter := security.NewShareRateLimiter(nil, shareLimitsForTests)
+	t.Cleanup(shareLimiter.Stop)
 
 	tmpl, err := template.ParseFS(thornotes.TemplatesFS, "web/templates/*.html")
 	require.NoError(t, err)
@@ -1650,7 +1678,7 @@ func newTestClientGit(t *testing.T) *testClient {
 	staticSub, err := iofs.Sub(thornotes.StaticFS, "web/static")
 	require.NoError(t, err)
 
-	h := router.New(authSvc, notesSvc, apiTokenRepo, userRepo, rateLimiter, tmpl, http.FS(staticSub), hub.New(), false, true, &stubDBHealth{}, context.Background(), "test")
+	h := router.New(authSvc, notesSvc, apiTokenRepo, userRepo, rateLimiter, shareLimiter, tmpl, http.FS(staticSub), hub.New(), false, true, &stubDBHealth{}, context.Background(), "test")
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
 

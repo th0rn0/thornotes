@@ -86,6 +86,35 @@ type NoteListItem struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+// FolderShare is one live folder share: a bearer token pointed at a folder
+// rather than at a single note, rendered anonymously at /f/<token>.
+//
+// It is a separate row and a separate table from a note share on purpose (see
+// the 012/009 migration comment): what the two share is the *rule* — when a link
+// is dead (notes.ShareLinkExpired) and how a view is bounded
+// (ShareViewWindow) — not a table.
+//
+// There is no revoked_at: revoking deletes the row, so a revoked link and a
+// folder that was never shared are the same state, which is what makes the
+// anonymous 404 identical for both.
+//
+// Every field is json:"-" except the timestamps: this row is only ever a
+// service-layer value, and the token is a working capability that must not be
+// serialised by a future handler that happens to pass it through.
+type FolderShare struct {
+	ID       int64  `json:"-"`
+	UserID   int64  `json:"-"`
+	FolderID int64  `json:"-"`
+	Token    string `json:"-"`
+	// ExpiresAt is the link's deadline; nil means no expiry, which is the
+	// default and the only value slice 1 can produce.
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+	// LastViewedAt is the last view recorded for the link, at most one write
+	// per link per ShareViewWindow.
+	LastViewedAt *time.Time `json:"last_viewed_at,omitempty"`
+	CreatedAt    time.Time  `json:"created_at"`
+}
+
 type FolderTreeItem struct {
 	ID         int64  `json:"id"`
 	ParentID   *int64 `json:"parent_id"`

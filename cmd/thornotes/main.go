@@ -77,6 +77,7 @@ func main() {
 		apiTokenRepo repository.APITokenRepository
 		journalRepo  repository.JournalRepository
 		linkRepo     repository.LinkRepository
+		folderShares repository.FolderShareRepository
 	)
 
 	switch strings.ToLower(cfg.DBDriver) {
@@ -89,6 +90,7 @@ func main() {
 		apiTokenRepo = mysqlrepo.NewAPITokenRepo(pool.WriteDB)
 		journalRepo = mysqlrepo.NewJournalRepo(pool.WriteDB)
 		linkRepo = mysqlrepo.NewLinkRepo(pool.WriteDB)
+		folderShares = mysqlrepo.NewFolderShareRepo(pool.WriteDB)
 	default:
 		userRepo = sqlite.NewUserRepo(pool.WriteDB)
 		sessionRepo = sqlite.NewSessionRepo(pool.WriteDB)
@@ -98,6 +100,7 @@ func main() {
 		apiTokenRepo = sqlite.NewAPITokenRepo(pool.ReadDB, pool.WriteDB)
 		journalRepo = sqlite.NewJournalRepo(pool.ReadDB, pool.WriteDB)
 		linkRepo = sqlite.NewLinkRepo(pool.ReadDB, pool.WriteDB)
+		folderShares = sqlite.NewFolderShareRepo(pool.ReadDB, pool.WriteDB)
 	}
 
 	// Backfill UUIDs for any users created before v1.4.0.0.
@@ -131,7 +134,7 @@ func main() {
 
 	// Build services.
 	authSvc := auth.NewService(userRepo, sessionRepo, cfg.AllowRegistration)
-	notesSvc := notes.NewService(noteRepo, folderRepo, searchRepo, journalRepo, linkRepo, fs)
+	notesSvc := notes.NewService(noteRepo, folderRepo, searchRepo, journalRepo, linkRepo, folderShares, fs)
 	applyReconcileGuardFromEnv(notesSvc)
 
 	// Open the startup window before anything can serve a request. The listener
@@ -179,8 +182,24 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Rate limiter.
+	// Rate limiters. The auth bucket guards credential endpoints; the share
+	// limiter is a separate read budget per (client IP, token) for the anonymous
+	// share surfaces, because a folder link is a page a human browses and the
+	// auth bucket would close it on the first visit.
 	rateLimiter := security.NewAuthRateLimiter(cfg.TrustedProxy)
+	shareLimiter := security.NewShareRateLimiter(cfg.TrustedProxy, security.ShareRateLimits{
+		PerMinute: cfg.ShareRatePerMinute,
+		PerHour:   cfg.ShareRatePerHour,
+	})
+	defer shareLimiter.Stop()
+	if shareLimiter.Enabled() {
+		log.Info().
+			Int("per_minute", cfg.ShareRatePerMinute).
+			Int("per_hour", cfg.ShareRatePerHour).
+			Msg("anonymous share read budgets (per client IP and link)")
+	} else {
+		log.Warn().Msg("anonymous share rate limiting is disabled: --share-rate-per-minute and --share-rate-per-hour are 0")
+	}
 
 	// Sub the embedded FS to "web/static" so FileServer sees it as the root.
 	staticSub, err := iofs.Sub(thornotes.StaticFS, "web/static")
@@ -188,7 +207,7 @@ func main() {
 		log.Error().Err(err).Msg("sub static fs")
 		os.Exit(1)
 	}
-	h := router.New(authSvc, notesSvc, apiTokenRepo, userRepo, rateLimiter, tmpl, http.FS(staticSub), notifyHub, cfg.SecureCookies, cfg.EnableGitHistory, pool, sseShutdown, Version)
+	h := router.New(authSvc, notesSvc, apiTokenRepo, userRepo, rateLimiter, shareLimiter, tmpl, http.FS(staticSub), notifyHub, cfg.SecureCookies, cfg.EnableGitHistory, pool, sseShutdown, Version)
 
 	srv := &http.Server{
 		Addr:         cfg.Addr,

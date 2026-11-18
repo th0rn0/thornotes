@@ -97,14 +97,25 @@ func (rl *AuthRateLimiter) getLimiter(ip string) *rate.Limiter {
 // extractIP returns the real client IP, respecting X-Forwarded-For when a
 // trusted proxy CIDR is configured.
 func (rl *AuthRateLimiter) extractIP(r *http.Request) string {
+	return clientIP(r, rl.trustedProxy)
+}
+
+// clientIP returns the address a request should be attributed to: its peer
+// address, or — only when that peer is inside trustedProxy — the leftmost
+// non-trusted address in X-Forwarded-For.
+//
+// Shared by both limiters so there is one answer to "whose request is this".
+// Two implementations would drift, and the drift would be a bucket a client can
+// choose by inventing a header.
+func clientIP(r *http.Request, trustedProxy *net.IPNet) string {
 	remoteIP, _, _ := net.SplitHostPort(r.RemoteAddr)
 
-	if rl.trustedProxy == nil {
+	if trustedProxy == nil {
 		return remoteIP
 	}
 
 	parsedRemote := net.ParseIP(remoteIP)
-	if parsedRemote == nil || !rl.trustedProxy.Contains(parsedRemote) {
+	if parsedRemote == nil || !trustedProxy.Contains(parsedRemote) {
 		return remoteIP
 	}
 
@@ -121,7 +132,7 @@ func (rl *AuthRateLimiter) extractIP(r *http.Request) string {
 		if ip == nil {
 			continue
 		}
-		if !rl.trustedProxy.Contains(ip) {
+		if !trustedProxy.Contains(ip) {
 			return candidate
 		}
 	}

@@ -86,7 +86,7 @@ func newDepthStack(t *testing.T) *depthStack {
 		noteRepo, folders,
 		sqlite_repo.NewSearchRepo(pool.ReadDB, pool.WriteDB),
 		sqlite_repo.NewJournalRepo(pool.ReadDB, pool.WriteDB),
-		sqlite_repo.NewLinkRepo(pool.ReadDB, pool.WriteDB),
+		sqlite_repo.NewLinkRepo(pool.ReadDB, pool.WriteDB), nil,
 		fs,
 	)
 	return &depthStack{

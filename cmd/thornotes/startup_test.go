@@ -44,7 +44,7 @@ func newStartupFixture(t *testing.T) *startupFixture {
 		sqlite.NewFolderRepo(pool.ReadDB, pool.WriteDB),
 		sqlite.NewSearchRepo(pool.ReadDB, pool.WriteDB),
 		sqlite.NewJournalRepo(pool.ReadDB, pool.WriteDB),
-		sqlite.NewLinkRepo(pool.ReadDB, pool.WriteDB),
+		sqlite.NewLinkRepo(pool.ReadDB, pool.WriteDB), nil,
 		fs,
 	)
 
