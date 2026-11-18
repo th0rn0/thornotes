@@ -621,12 +621,17 @@ Two guards keep a package from quietly rejoining that state:
   reads and would never reach the runtime check.
 
 **`-timeout` must outlast the lock.** The per-binary test timeout covers the time
-a package spends queued on that lock, which is bounded at 600s, so
-`make test-with-db` passes `-timeout 900s` rather than the 120s it used to.
+a package spends queued on that lock, which is bounded at 1800s, so
+`make test-with-db` passes `-timeout 2400s` rather than the 120s it used to.
 At 120s the command could not produce a green run at all on a 4-core machine —
 `internal/notes` alone takes ~153s without `-race` — and reported
 `panic: test timed out after 2m0s`, which reads as a product failure and is only
-the clock.
+the clock. The lock bound itself grew from 600s for the same class of reason: with
+five packages taking turns, the last one waits for the sum of the others, and on a
+loaded host `internal/notes` alone ran 916s, so the two cheapest packages behind it
+failed with `could not acquire "thornotes_test_db" within 600s`. The queue is now
+given room to drain, and the lock wait still reports itself before the test
+timeout would.
 
 **The trade:** the MySQL-touching packages run one at a time — the database is
 serialised, the rest of the suite is not — and the lock is held on the server, so

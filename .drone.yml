@@ -181,7 +181,7 @@ steps:
       # // indirect and imported nowhere). A blanket `go test ... || go test`
       # would be wrong — it hides genuine test failures.
       - go mod download all || go mod download all
-      - go test -race -timeout 900s -coverprofile=coverage.out -covermode=atomic ./...
+      - go test -race -timeout 2400s -coverprofile=coverage.out -covermode=atomic ./...
       - go tool cover -func=coverage.out | tail -1
 
   - name: discord-test-success

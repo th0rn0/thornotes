@@ -42,8 +42,21 @@ import (
 // for whoever upgrades second. TestLockName_IsStable pins it.
 const LockName = "thornotes_test_db"
 
-// lockTimeout bounds how long one package waits for the other to finish.
-const lockTimeout = 600 // seconds
+// lockTimeout bounds how long one package waits for the others to finish.
+//
+// It has to cover the *whole queue*, not one package: five packages now share
+// this lock (internal/db, internal/dbtest, internal/repository,
+// internal/repository/mysql, internal/notes), so the last to arrive waits for the
+// sum of the rest. Measured under -race with coverage on a loaded 6-vCPU host,
+// internal/notes alone ran 916s and the two cheap packages behind it gave up at
+// 600s — a red suite caused by arithmetic, not by a test. At 1800s the queue
+// drains even there.
+//
+// Keep it strictly below the per-binary `-timeout` (Makefile's test-with-db and
+// CI's test step pass 2400s): a waiter that cannot get the lock must print the
+// refusal below, not die of a test-binary timeout with a stack trace, which is
+// the same event told in a way nobody can act on.
+const lockTimeout = 1800 // seconds
 
 // lockName is LockName, except inside this package's own tests, which point the
 // helper at scratch names to exercise the refusal paths without waiting out
