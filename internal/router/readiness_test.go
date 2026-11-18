@@ -76,7 +76,7 @@ func newStartupStack(t *testing.T, noteFiles int) *startupStack {
 	staticSub, err := iofs.Sub(thornotes.StaticFS, "web/static")
 	require.NoError(t, err)
 
-	h := router.New(authSvc, svc, apiTokenRepo, userRepo, rateLimiter, tmpl,
+	h := router.New(authSvc, svc, apiTokenRepo, userRepo, rateLimiter, testShareLimiter(t), tmpl,
 		http.FS(staticSub), hub.New(), false, false, &stubDBHealth{}, context.Background(), "test")
 	server := httptest.NewServer(h)
 	t.Cleanup(server.Close)

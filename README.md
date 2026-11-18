@@ -256,6 +256,23 @@ All options are available as environment variables and CLI flags.
 | `THORNOTES_SKIP_RECONCILIATION` | `--skip-reconciliation` | `false` | Skip the startup hash-check scan (safe on trusted restarts with large note corpora) |
 | `THORNOTES_ENABLE_GIT_HISTORY` | `--enable-git-history` | `false` | Record every note save/delete as a git commit in the notes directory. Enables the history API (`GET /api/v1/notes/:id/history`, `GET /api/v1/notes/:id/history/:sha`, `POST /api/v1/notes/:id/history/:sha/restore`). Uses [go-git](https://github.com/go-git/go-git) — no git binary required. |
 | `THORNOTES_SEED_DEV` | `--seed-dev` | `false` | **Development only.** On startup, create a `dev` user (password `devpassword1`), a realistic folder tree, and ~100 seeded notes — but only if the `dev` user does not already exist. Idempotent. Never enable in production. |
+| `THORNOTES_SHARE_RATE_PER_MINUTE` | `--share-rate-per-minute` | `60` | Reads of one public share link (`/s/:token`, `/f/:token`) allowed per minute from one client IP. `0` disables the minute window. |
+| `THORNOTES_SHARE_RATE_PER_HOUR` | `--share-rate-per-hour` | `600` | Reads of one public share link allowed per hour from one client IP — the ceiling on sustained use. `0` disables the hour window (both `0` disables the throttle). |
+
+### Share links and rate limiting
+
+Public share links are bearer capabilities: whoever holds the URL reads the note or folder, with no
+session. They are throttled separately from the auth endpoints, per `(client IP, link)`, at the
+budgets above — a shared NAT or CGNAT therefore does not throttle one reader because a colleague
+opened another link, and one hot link cannot spend another link's budget.
+
+A throttled read is answered with the same empty `404` an unknown token gets; the surface never
+returns `429`, because a status only a real link produces would confirm that a token is valid. The
+refusal is logged (`share read throttled`) with the link's short handle, never the token.
+
+The limiter's own bookkeeping is bounded: it tracks counters for at most 4,096 live
+`(client IP, link)` pairs and sweeps idle ones, so a flood of random tokens cannot grow the map
+without limit.
 
 ## Running behind a reverse proxy
 

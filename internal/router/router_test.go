@@ -52,7 +52,17 @@ func buildHandler(t *testing.T) http.Handler {
 	staticSub, err := iofs.Sub(thornotes.StaticFS, "web/static")
 	require.NoError(t, err)
 
-	return router.New(authSvc, notesSvc, apiTokenRepo, userRepo, rateLimiter, tmpl, http.FS(staticSub), hub.New(), false, false, &stubDBHealth{}, context.Background(), "test")
+	return router.New(authSvc, notesSvc, apiTokenRepo, userRepo, rateLimiter, testShareLimiter(t), tmpl, http.FS(staticSub), hub.New(), false, false, &stubDBHealth{}, context.Background(), "test")
+}
+
+// testShareLimiter is a share limiter whose budget no test in this package can
+// exhaust: these tests are about routing, not throttling. The throttle itself is
+// covered end to end in internal/handler/share_ratelimit_test.go.
+func testShareLimiter(t *testing.T) *security.ShareRateLimiter {
+	t.Helper()
+	rl := security.NewShareRateLimiter(nil, security.ShareRateLimits{PerMinute: 100000, PerHour: 100000})
+	t.Cleanup(rl.Stop)
+	return rl
 }
 
 // stubDBHealth satisfies handler.DBHealthChecker for router tests.
@@ -160,7 +170,7 @@ func TestRouter_Healthz_DBError(t *testing.T) {
 	staticSub, err := iofs.Sub(thornotes.StaticFS, "web/static")
 	require.NoError(t, err)
 
-	h := router.New(authSvc, notesSvc, apiTokenRepo, userRepo, rateLimiter, tmpl, http.FS(staticSub), hub.New(), false, false,
+	h := router.New(authSvc, notesSvc, apiTokenRepo, userRepo, rateLimiter, testShareLimiter(t), tmpl, http.FS(staticSub), hub.New(), false, false,
 		&stubDBHealth{err: "connection refused"}, context.Background(), "test")
 
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)

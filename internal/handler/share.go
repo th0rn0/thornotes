@@ -46,7 +46,7 @@ func (h *ShareHandler) View(c *gin.Context) {
 
 	token := c.Param("token")
 	if token == "" {
-		c.AbortWithStatus(http.StatusNotFound)
+		refuseAnonymousShare(c)
 		return
 	}
 
@@ -59,7 +59,7 @@ func (h *ShareHandler) View(c *gin.Context) {
 		// when it died, which is information the holder of a burned URL should
 		// not be able to get. Nothing below may distinguish them either: adding
 		// a body, a header or a redirect to the expired case is the bug.
-		c.AbortWithStatus(http.StatusNotFound)
+		refuseAnonymousShare(c)
 		return
 	}
 
@@ -131,6 +131,21 @@ func setAnonymousShareHeaders(c *gin.Context) {
 	c.Header("X-Robots-Tag", "noindex")
 }
 
+// refuseAnonymousShare answers a request on a public share surface with the
+// surface's one refusal: the empty 404, carrying the two share headers.
+//
+// Every refusal on this surface goes through here — unknown token, expired link,
+// revoked link, malformed path, an internal error, a throttled read — because
+// the surface's whole design is that they are indistinguishable. Status, headers
+// and body must match byte for byte, so a caller that adds a header (or a
+// different status, e.g. 429) to one branch hands the holder of a burned URL an
+// oracle that says which failure they hit — and, for a throttle, that the token
+// was real.
+func refuseAnonymousShare(c *gin.Context) {
+	setAnonymousShareHeaders(c)
+	c.AbortWithStatus(http.StatusNotFound)
+}
+
 // ViewFolder serves GET /f/:token and GET /f/:token/d/*path: one level of a
 // shared folder, HTML only.
 //
@@ -153,7 +168,7 @@ func (h *ShareHandler) ViewFolder(c *gin.Context) {
 		// Every failure, including an internal one: a 500 above a valid token
 		// would tell the holder the token is real. See the note view's branch
 		// for the same reasoning.
-		c.AbortWithStatus(http.StatusNotFound)
+		refuseAnonymousShare(c)
 		return
 	}
 
@@ -181,7 +196,7 @@ func (h *ShareHandler) ViewFolderNote(c *gin.Context) {
 
 	note, err := h.svc.FolderShareNote(c.Request.Context(), token, rel)
 	if err != nil {
-		c.AbortWithStatus(http.StatusNotFound)
+		refuseAnonymousShare(c)
 		return
 	}
 
