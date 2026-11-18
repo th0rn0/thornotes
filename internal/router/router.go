@@ -26,6 +26,7 @@ func New(
 	apiTokenRepo repository.APITokenRepository,
 	userRepo repository.UserRepository,
 	rateLimiter *security.AuthRateLimiter,
+	shareLimiter *security.ShareRateLimiter,
 	tmpl *template.Template,
 	staticFS http.FileSystem,
 	h *hub.Hub,
@@ -93,6 +94,22 @@ func New(
 	csrfMW := security.CSRFGinMiddleware()
 	rateMW := rateLimiter.GinMiddleware()
 
+	// The anonymous share surfaces get their own limiter — per (IP, token), with
+	// read-sized budgets. The auth bucket (10 per 15 min per IP) is unusable
+	// here: one visit to a ten-note folder would trip it.
+	//
+	// A nil limiter is refused rather than allowed: an instance that mounted the
+	// public surface with no throttle is the defect this wiring exists to close,
+	// so fall back to the defaults instead of falling open.
+	if shareLimiter == nil {
+		log.Warn().Msg("share rate limiter not provided; using default budgets")
+		shareLimiter = security.NewShareRateLimiter(nil, security.ShareRateLimits{
+			PerMinute: security.DefaultShareRatePerMinute,
+			PerHour:   security.DefaultShareRatePerHour,
+		})
+	}
+	shareMW := handler.ShareThrottleMiddleware(shareLimiter)
+
 	// Health check — unauthenticated, used by load balancers and monitoring.
 	// The notes-root check reports whether the reconciler trusts the volume; the
 	// schema block reports the applied migration version against this build's
@@ -122,7 +139,7 @@ func New(
 	r.GET("/", shell)
 
 	// Public shared note view.
-	r.GET("/s/:token", shareH.View)
+	r.GET("/s/:token", shareMW, shareH.View)
 
 	// Public shared folder views. Same capability model as /s/:token — the
 	// segment after the prefix is the credential, read with no session — and
@@ -133,9 +150,9 @@ func New(
 	// Two path prefixes, d/ and n/, rather than one route that guesses: a folder
 	// called "design" and a note "design.md" can sit in the same parent, and one
 	// route that tries both is one route that can render the wrong thing.
-	r.GET("/f/:token", shareH.ViewFolder)
-	r.GET("/f/:token/d/*path", shareH.ViewFolder)
-	r.GET("/f/:token/n/*path", shareH.ViewFolderNote)
+	r.GET("/f/:token", shareMW, shareH.ViewFolder)
+	r.GET("/f/:token/d/*path", shareMW, shareH.ViewFolder)
+	r.GET("/f/:token/n/*path", shareMW, shareH.ViewFolderNote)
 
 	// Auth endpoints.
 	authGroup := r.Group("/api/v1/auth")

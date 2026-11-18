@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -26,6 +27,11 @@ type Config struct {
 	SkipReconciliation bool          // skip startup hash-check scan
 	EnableGitHistory   bool          // record every note save/delete as a git commit
 	SeedDev            bool          // seed a dev user + folder tree + ~100 notes on first boot
+
+	// Read budgets for one anonymous share link (/s/:token, /f/:token), per
+	// client IP. 0 disables that window; both 0 disables the throttle entirely.
+	ShareRatePerMinute int
+	ShareRatePerHour   int
 }
 
 func Parse() (*Config, error) {
@@ -47,9 +53,21 @@ func Parse() (*Config, error) {
 	flag.BoolVar(&cfg.SkipReconciliation, "skip-reconciliation", envBool("THORNOTES_SKIP_RECONCILIATION", false), "skip startup reconciliation scan (use on trusted restarts with large note corpora)")
 	flag.BoolVar(&cfg.EnableGitHistory, "enable-git-history", envBool("THORNOTES_ENABLE_GIT_HISTORY", false), "record every note save/delete as a git commit in the notes directory")
 	flag.BoolVar(&cfg.SeedDev, "seed-dev", envBool("THORNOTES_SEED_DEV", false), "development-only: create a 'dev' user with a realistic folder tree and ~100 seeded notes if the user does not already exist")
+	flag.IntVar(&cfg.ShareRatePerMinute, "share-rate-per-minute", envInt("THORNOTES_SHARE_RATE_PER_MINUTE", 60), "reads per minute of one public share link from one client IP (0 disables the window)")
+	flag.IntVar(&cfg.ShareRatePerHour, "share-rate-per-hour", envInt("THORNOTES_SHARE_RATE_PER_HOUR", 600), "reads per hour of one public share link from one client IP (0 disables the window)")
 	flag.Parse()
 
 	cfg.MaxContentBytes = 1 << 20 // 1 MB
+
+	// A negative budget is a configuration mistake, not a request to disable:
+	// 0 is the documented way to switch a window off, so a typo must not leave
+	// the public surface unbounded without anyone noticing.
+	if cfg.ShareRatePerMinute < 0 {
+		return nil, fmt.Errorf("invalid --share-rate-per-minute %d: must be >= 0 (0 disables the window)", cfg.ShareRatePerMinute)
+	}
+	if cfg.ShareRatePerHour < 0 {
+		return nil, fmt.Errorf("invalid --share-rate-per-hour %d: must be >= 0 (0 disables the window)", cfg.ShareRatePerHour)
+	}
 
 	if trustedProxy != "" {
 		_, ipNet, err := net.ParseCIDR(trustedProxy)
@@ -75,6 +93,20 @@ func envBool(key string, def bool) bool {
 		return def
 	}
 	return strings.EqualFold(v, "true") || v == "1"
+}
+
+// envInt reads an integer environment override, falling back to def when the
+// variable is unset or not a number.
+func envInt(key string, def int) int {
+	v := os.Getenv(key)
+	if v == "" {
+		return def
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(v))
+	if err != nil {
+		return def
+	}
+	return n
 }
 
 func envDuration(key string, def time.Duration) time.Duration {
