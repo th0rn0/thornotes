@@ -315,13 +315,21 @@ func (h *ShareHandler) recordFolderView(ctx context.Context, listing *notes.Fold
 	}()
 }
 
-// List answers GET /api/v1/shares with the caller's own share links.
+// List answers GET /api/v1/shares with the caller's own share links — note links
+// (/s/<token>) and folder links (/f/<token>) in one list, each row tagged with a
+// `kind`.
 //
 // The token is redacted to a prefix by the repository, so this handler cannot
 // leak one even by accident. The endpoint exists so a user can find and revoke
 // the links they handed out: before it, a link could only be cleared from the
 // note that produced it, which meant you had to already hold the note — and the
-// whole point of a link is that it gets passed around.
+// whole point of a link is that it gets passed around. The folder half closes
+// the same gap for a grant that is recursive, where not finding the link means
+// not being able to close a whole subtree.
+//
+// The merge and the ordering live in notes.Service.ListShares: this handler only
+// serialises. It serialises [] rather than null when there is nothing to list,
+// because a JSON null is a branch every client would have to write.
 func (h *ShareHandler) List(c *gin.Context) {
 	user := ginUser(c)
 	shares, err := h.svc.ListShares(c.Request.Context(), user.ID)

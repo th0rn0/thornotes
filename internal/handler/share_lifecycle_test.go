@@ -189,7 +189,7 @@ func TestShareView_ExpiredLinkStillResolvesForItsOwner(t *testing.T) {
 
 	shares := listShares(t, f.client)
 	require.Len(t, shares, 1)
-	assert.Equal(t, noteID, shares[0].NoteID)
+	assert.Equal(t, &noteID, shares[0].NoteID)
 	assert.NotNil(t, shares[0].ExpiresAt, "the dead deadline must still be visible, or it cannot be revoked")
 
 	resp = f.client.do(t, http.MethodGet, "/s/"+token, nil)
@@ -227,7 +227,9 @@ func TestShareList_OwnSharesWithRedactedToken(t *testing.T) {
 
 	byNote := map[int64]model.ShareLink{}
 	for _, s := range shares {
-		byNote[s.NoteID] = s
+		require.NotNil(t, s.NoteID, "a note row carries its note id")
+		assert.Equal(t, model.ShareKindNote, s.Kind)
+		byNote[*s.NoteID] = s
 		// The token itself must never appear in this payload: one authenticated
 		// read must not be a bulk export of every share.
 		assert.NotEqual(t, firstToken, s.TokenPrefix)

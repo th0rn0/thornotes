@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/th0rn0/thornotes/internal/apperror"
@@ -218,11 +219,73 @@ func mapShareExpiryError(err error) error {
 	return apperror.ShareExpired(ShareExpiredMessage)
 }
 
-// ListShares returns the caller's own share links, token redacted to a prefix.
-// It is scoped by user_id in SQL, so it can only ever answer with the caller's
-// own links.
+// ListShares returns the caller's own share links of BOTH kinds — note links
+// (/s/<token>) and folder links (/f/<token>) — with the token redacted to a
+// prefix on every row. Both halves are scoped by user_id in SQL, so the answer
+// can only ever hold the caller's own links.
+//
+// This is the one place a person looks for "what have I handed out", and a
+// folder link belongs in it for a reason the note half does not have: a folder
+// share is recursive, so a link the owner cannot find again is a subtree they
+// cannot close. Before this, revoking one meant navigating to the folder and
+// pressing Unshare from memory.
+//
+// The order is part of the answer, not an accident of two queries:
+//
+//  1. updated_at DESC — newest link first, which is what a person opening this
+//     panel is looking for. For a folder row that is the share row's created_at;
+//     a folder share has no note to be "updated".
+//  2. kind, ascending, so a tie is broken the same way every time ("folder"
+//     sorts before "note").
+//  3. the row's own id, ascending, which is unique within a kind.
+//
+// Steps 2 and 3 are what make the order total: two links stamped in the same
+// second (SQLite's DATETIME has second resolution) would otherwise come back in
+// whatever order the two queries happened to append them, and a list that
+// reshuffles between two identical requests is a UI bug waiting to happen. The
+// sort is done here rather than in SQL because the two kinds are two tables and
+// a UNION over two dialects is a worse place to state this rule.
 func (s *Service) ListShares(ctx context.Context, userID int64) ([]model.ShareLink, error) {
-	return s.notes.ListShares(ctx, userID)
+	noteLinks, err := s.notes.ListShares(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	folderLinks, err := s.folderShares.ListShares(ctx, userID)
+	if err != nil {
+		return nil, apperror.Internal("list folder shares", err)
+	}
+
+	links := make([]model.ShareLink, 0, len(noteLinks)+len(folderLinks))
+	links = append(links, noteLinks...)
+	links = append(links, folderLinks...)
+
+	sort.Slice(links, func(i, j int) bool {
+		a, b := links[i], links[j]
+		if !a.UpdatedAt.Equal(b.UpdatedAt) {
+			return a.UpdatedAt.After(b.UpdatedAt)
+		}
+		if a.Kind != b.Kind {
+			return a.Kind < b.Kind
+		}
+		return shareLinkID(a) < shareLinkID(b)
+	})
+	return links, nil
+}
+
+// shareLinkID is the id a row is ordered (and identified) by: the note's for a
+// note link, the folder's for a folder link. It is only meaningful as a
+// tie-breaker alongside Kind — the two id spaces are separate.
+func shareLinkID(link model.ShareLink) int64 {
+	if link.Kind == model.ShareKindFolder {
+		if link.FolderID != nil {
+			return *link.FolderID
+		}
+		return 0
+	}
+	if link.NoteID != nil {
+		return *link.NoteID
+	}
+	return 0
 }
 
 // RecordShareView records a view of a share link at now, subject to

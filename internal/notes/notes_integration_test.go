@@ -50,7 +50,10 @@ func newTestStackFull(t *testing.T) *serviceStack {
 	user, err := userRepo.Create(ctx, "testuser", "$2a$12$fakehash0000000000000000000000000000000000000000000000", "test-uuid")
 	require.NoError(t, err)
 
-	svc := notes.NewService(noteRepo, folderRepo, searchRepo, sqlite_repo.NewJournalRepo(pool.ReadDB, pool.WriteDB), sqlite_repo.NewLinkRepo(pool.ReadDB, pool.WriteDB), nil, fs)
+	// The folder-share repo is not optional for this stack any more: Service
+	// .ListShares answers with both kinds, so a nil here is a nil dereference on
+	// the one read the share tests make (TestService_ShareExpiryIsStoredInUTC).
+	svc := notes.NewService(noteRepo, folderRepo, searchRepo, sqlite_repo.NewJournalRepo(pool.ReadDB, pool.WriteDB), sqlite_repo.NewLinkRepo(pool.ReadDB, pool.WriteDB), sqlite_repo.NewFolderShareRepo(pool.ReadDB, pool.WriteDB), fs)
 	return &serviceStack{svc: svc, user: user, userID: user.ID, pool: pool, notesDir: fsDir}
 }
 
@@ -74,7 +77,9 @@ func newTestStack(t *testing.T) (svc *notes.Service, userID int64) {
 	user, err := userRepo.Create(ctx, "testuser", "$2a$12$fakehash0000000000000000000000000000000000000000000000", "test-uuid")
 	require.NoError(t, err)
 
-	svc = notes.NewService(noteRepo, folderRepo, searchRepo, sqlite_repo.NewJournalRepo(pool.ReadDB, pool.WriteDB), sqlite_repo.NewLinkRepo(pool.ReadDB, pool.WriteDB), nil, fs)
+	// Same reason as newTestStackFull: ListShares reads both kinds, so this stack
+	// needs a folder-share repo rather than a nil.
+	svc = notes.NewService(noteRepo, folderRepo, searchRepo, sqlite_repo.NewJournalRepo(pool.ReadDB, pool.WriteDB), sqlite_repo.NewLinkRepo(pool.ReadDB, pool.WriteDB), sqlite_repo.NewFolderShareRepo(pool.ReadDB, pool.WriteDB), fs)
 	return svc, user.ID
 }
 
