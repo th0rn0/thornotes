@@ -413,8 +413,14 @@ func (r *NoteRepo) SetShareExpiry(ctx context.Context, userID, noteID int64, exp
 	return nil
 }
 
-// ListShares returns the caller's own share links with the token redacted to a
-// prefix. See repository.RedactShareToken for why the token is not in this row.
+// ListShares returns the caller's own note share links with the token redacted
+// to a prefix. See repository.RedactShareToken for why the token is not in this
+// row.
+//
+// It answers note rows only: GET /api/v1/shares also carries folder links, and
+// those live in their own table (FolderShareRepo.ListShares). The two are merged
+// by the service, which is where the ordering is decided — see
+// notes.Service.ListShares.
 func (r *NoteRepo) ListShares(ctx context.Context, userID int64) ([]model.ShareLink, error) {
 	rows, err := r.readDB.QueryContext(ctx, `
 		SELECT id, folder_id, title, share_token, expires_at, last_viewed_at, updated_at
@@ -428,13 +434,16 @@ func (r *NoteRepo) ListShares(ctx context.Context, userID int64) ([]model.ShareL
 	var shares []model.ShareLink
 	for rows.Next() {
 		var (
-			link  model.ShareLink
-			token string
+			link   model.ShareLink
+			noteID int64
+			token  string
 		)
-		if err := rows.Scan(&link.NoteID, &link.FolderID, &link.Title, &token,
+		if err := rows.Scan(&noteID, &link.FolderID, &link.Title, &token,
 			&link.ExpiresAt, &link.LastViewedAt, &link.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan share: %w", err)
 		}
+		link.Kind = model.ShareKindNote
+		link.NoteID = &noteID
 		link.TokenPrefix = repository.RedactShareToken(token)
 		shares = append(shares, link)
 	}

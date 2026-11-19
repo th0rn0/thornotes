@@ -183,3 +183,72 @@ func (r *FolderShareRepo) ListChildNotes(ctx context.Context, userID, folderID i
 	}
 	return items, rows.Err()
 }
+
+// ListShares returns the caller's own folder links, one row per live share, with
+// the token redacted to a display prefix and the folder's name as the title.
+//
+// It is the folder half of GET /api/v1/shares, and it exists because a folder
+// share is a *recursive* grant: before it, the only way to find one was to
+// remember which folder had been shared, which is the one thing a link is for
+// not having to remember. Revoking still happens on the folder route; this makes
+// the link findable so that route can be reached.
+//
+// Three deliberate choices:
+//
+//   - `fs.user_id = ?` is the whole authorisation, in SQL, like the note half.
+//     Another account's folder link cannot be in this answer, whatever the
+//     caller does with the request.
+//   - The join to `folders` is what supplies the name for display; it is
+//     INNER, so a share row that outlived its folder is not listed. The foreign
+//     key cascades, so that row should not exist — and a link to a folder that
+//     is not there does not resolve either.
+//   - There is no expiry predicate. An expired link is listed with its deadline
+//     visible, exactly as the note half lists one: the deadline is the only
+//     thing that explains why a URL the owner still has stopped answering.
+//     Filtering here would make the two halves of this one endpoint disagree
+//     about what "the links you have handed out" means.
+//
+// The ORDER BY is for debuggability, not for the contract: notes.Service
+// .ListShares merges this answer with the note half and imposes the one order the
+// endpoint promises (updated_at DESC, then kind, then id).
+func (r *FolderShareRepo) ListShares(ctx context.Context, userID int64) ([]model.ShareLink, error) {
+	rows, err := r.readDB.QueryContext(ctx, `
+		SELECT fs.folder_id, f.name, fs.token, fs.expires_at, fs.last_viewed_at, fs.created_at
+		FROM folder_shares fs
+		JOIN folders f ON f.id = fs.folder_id AND f.user_id = fs.user_id
+		WHERE fs.user_id = ?
+		ORDER BY fs.created_at DESC, fs.folder_id ASC`, userID)
+	if err != nil {
+		return nil, fmt.Errorf("list folder shares: %w", err)
+	}
+	defer rows.Close()
+
+	var shares []model.ShareLink
+	for rows.Next() {
+		var (
+			link    model.ShareLink
+			folder  int64
+			title   string
+			token   string
+			created time.Time
+		)
+		if err := rows.Scan(&folder, &title, &token, &link.ExpiresAt, &link.LastViewedAt, &created); err != nil {
+			return nil, fmt.Errorf("scan folder share: %w", err)
+		}
+		folderID := folder
+		link.Kind = model.ShareKindFolder
+		// No note: a folder link is not a note link, and a zero here would be a
+		// note id that does not exist.
+		link.NoteID = nil
+		link.FolderID = &folderID
+		link.Title = title
+		link.TokenPrefix = repository.RedactShareToken(token)
+		// A folder share row has no updated_at: nothing edits it but rotation,
+		// which rewrites the token and the deadline and leaves created_at alone.
+		// Its creation is therefore the only "when did this link appear" the row
+		// can answer, which is what the list orders by.
+		link.UpdatedAt = created
+		shares = append(shares, link)
+	}
+	return shares, rows.Err()
+}

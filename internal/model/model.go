@@ -57,8 +57,19 @@ type Note struct {
 	UpdatedAt    time.Time  `json:"updated_at"`
 }
 
+// The kinds a row of GET /api/v1/shares can be. The field exists because the
+// list is a union of two surfaces (/s/<token> and /f/<token>), and a client that
+// guessed the kind from "which id is set" would have to treat a note with no
+// parent folder and a folder row as the same row.
+const (
+	ShareKindNote   = "note"
+	ShareKindFolder = "folder"
+)
+
 // ShareLink is one entry of the caller's own share list, as returned by
-// GET /api/v1/shares.
+// GET /api/v1/shares. A row is a note link or a folder link, and Kind says
+// which — the identifier, the title and the meaning of UpdatedAt all follow
+// from it.
 //
 // The token is deliberately absent: this endpoint exists so a user can find and
 // revoke the links they have handed out, and answering it with a list of live
@@ -67,9 +78,22 @@ type Note struct {
 // against a URL the user still has in front of them and useless for replaying
 // it. Anything that returns a usable token must keep returning it to the note
 // that owns it (POST /notes/:id/share), not to an enumeration endpoint.
+//
+// Two fields carry an id, and which one means what depends on Kind:
+//
+//	kind "note"    NoteID = the shared note; FolderID = the folder it lives in
+//	               (unchanged from before folder links were listed)
+//	kind "folder"  NoteID = null; FolderID = the shared folder, which is the
+//	               identifier a revoke needs
+//
+// NoteID is a pointer, not a zero, for the second case: a folder link has no
+// note, and 0 is a value a client would have to special-case anyway. It is the
+// only field whose Go type changed when folder links joined this list — a note
+// row still serialises its id as the same JSON number it always did.
 type ShareLink struct {
-	NoteID       int64      `json:"note_id"`
-	Title        string     `json:"title"`
+	Kind         string     `json:"kind"`
+	NoteID       *int64     `json:"note_id"`
+	Title        string     `json:"title"` // note title, or the folder's name
 	FolderID     *int64     `json:"folder_id"`
 	TokenPrefix  string     `json:"token_prefix"`
 	ExpiresAt    *time.Time `json:"expires_at"`

@@ -2037,7 +2037,7 @@ async function setShareExpiry(hours) {
   try {
     const shares = await api('GET', '/api/v1/shares');
     if (Array.isArray(shares)) {
-      const row = shares.filter(s => Number(s.note_id) === Number(currentNote.id))[0];
+      const row = shares.filter(s => s.kind !== 'folder' && Number(s.note_id) === Number(currentNote.id))[0];
       live = !!row && !isExpired(row.expires_at);
     }
   } catch (e) {
@@ -2078,8 +2078,78 @@ async function clearShareExpiry() {
   }
 }
 
-// showSharedLinksModal fetches the caller's own share links and renders them
-// in a modal. Only token_prefix is shown — never the full token.
+// sharedLinkTarget says what one row of GET /api/v1/shares is and where its
+// revoke lives.
+//
+// The endpoint returns two kinds of link in one list — a note link (/s/<token>)
+// and a folder link (/f/<token>) — each tagged with `kind`. A folder row carries
+// folder_id and a null note_id, so reading note_id blindly would post a revoke
+// to /api/v1/notes/null/share for half the list: the folder link would stay live
+// while the panel said it had been revoked. The kind decides the route, and the
+// route decides which id is read. A row with no kind (an older server) is a note
+// row, which is what the endpoint answered before folders were listed.
+function sharedLinkTarget(s) {
+  if (s && s.kind === 'folder') {
+    const id = Number(s.folder_id);
+    return { kind: 'folder', id, revokePath: `/api/v1/folders/${id}/share` };
+  }
+  const id = Number(s && s.note_id);
+  return { kind: 'note', id, revokePath: `/api/v1/notes/${id}/share` };
+}
+
+// renderSharedLinkRow renders one shared link. Kept out of the modal on purpose:
+// it is the whole of what a row promises (which link, which id, which actions),
+// and a pure function can be asserted without a DOM.
+//
+// A folder row offers Revoke and nothing else. A folder's deadline is set from
+// the folder's own share control, not from this list — the panel's deadline
+// actions PATCH /api/v1/notes/:id/share, which takes a note id.
+function renderSharedLinkRow(s) {
+  const target = sharedLinkTarget(s);
+  const expired = isExpired(s.expires_at);
+  const expiry = s.expires_at ? formatExpiry(s.expires_at) : 'never';
+  const viewed = s.last_viewed_at ? formatExpiry(s.last_viewed_at) : 'never';
+  const rowClass = expired ? 'shared-link-row expired' : 'shared-link-row';
+  // Expired rows show an "EXPIRED" badge and no actions — the link no longer
+  // resolves, so Set deadline / Clear / Revoke would be noise.
+  const metaLine = expired
+    ? `<span>Expired: ${esc(expiry)}</span>`
+    : `<span>Expires: ${esc(expiry)}</span>`;
+  const kindLine = target.kind === 'folder'
+    ? '<span class="shared-link-kind" title="This link opens a folder, not a note">folder</span>'
+    : '';
+  let actions;
+  if (expired) {
+    actions = '<span class="shared-link-expired-badge" aria-label="Share link expired">Expired</span>';
+  } else if (target.kind === 'folder') {
+    actions = `<div class="shared-link-actions">
+            <button class="shared-link-revoke-btn" data-kind="folder" data-folder-id="${target.id}" data-action="revoke" aria-label="Revoke the link to folder ${esc(s.title)}">Revoke</button>
+          </div>`;
+  } else {
+    actions = `<div class="shared-link-actions">
+            <button class="shared-link-deadline-btn" data-kind="note" data-note-id="${target.id}" data-action="set-deadline" aria-label="Set deadline for ${esc(s.title)}">Deadline</button>
+            ${s.expires_at ? `<button class="shared-link-clear-deadline-btn" data-kind="note" data-note-id="${target.id}" data-action="clear-deadline" aria-label="Remove deadline for ${esc(s.title)}">No expiry</button>` : ''}
+            <button class="shared-link-revoke-btn" data-kind="note" data-note-id="${target.id}" data-action="revoke" aria-label="Revoke share for ${esc(s.title)}">Revoke</button>
+          </div>`;
+  }
+  return `<div class="${rowClass}" data-kind="${target.kind}" data-share-id="${target.id}" data-note-id="${target.kind === 'note' ? target.id : ''}">
+        <div class="shared-link-info">
+          <span class="shared-link-title">${esc(s.title)}</span>
+          ${kindLine}
+          <span class="shared-link-prefix">${esc(s.token_prefix)}</span>
+        </div>
+        <div class="shared-link-meta">
+          ${metaLine}
+          <span>Last viewed: ${esc(viewed)}</span>
+        </div>
+        ${actions}
+      </div>`;
+}
+
+// showSharedLinksModal fetches the caller's own share links — note links and
+// folder links — and renders them in a modal. Only token_prefix is shown, never
+// the full token. The server decides the order (newest first, ties broken
+// stably); nothing here sorts, so what the panel shows is what the API said.
 async function showSharedLinksModal() {
   const modal = document.getElementById('shared-links-modal');
   const list = document.getElementById('shared-links-list');
@@ -2097,35 +2167,7 @@ async function showSharedLinksModal() {
       list.innerHTML = '<p class="shared-links-empty">No shared links.</p>';
       return;
     }
-    list.innerHTML = shares.map(s => {
-      const expired = isExpired(s.expires_at);
-      const expiry = s.expires_at ? formatExpiry(s.expires_at) : 'never';
-      const viewed = s.last_viewed_at ? formatExpiry(s.last_viewed_at) : 'never';
-      const rowClass = expired ? 'shared-link-row expired' : 'shared-link-row';
-      // Expired rows show an "EXPIRED" badge and no actions — the link no
-      // longer resolves, so Set deadline / Clear / Revoke would be noise.
-      const metaLine = expired
-        ? `<span>Expired: ${esc(expiry)}</span>`
-        : `<span>Expires: ${esc(expiry)}</span>`;
-      const actions = expired
-        ? `<span class="shared-link-expired-badge" aria-label="Share link expired">Expired</span>`
-        : `<div class="shared-link-actions">
-            <button class="shared-link-deadline-btn" data-note-id="${s.note_id}" data-action="set-deadline" aria-label="Set deadline for ${esc(s.title)}">Deadline</button>
-            ${s.expires_at ? `<button class="shared-link-clear-deadline-btn" data-note-id="${s.note_id}" data-action="clear-deadline" aria-label="Remove deadline for ${esc(s.title)}">No expiry</button>` : ''}
-            <button class="shared-link-revoke-btn" data-note-id="${s.note_id}" data-action="revoke" aria-label="Revoke share for ${esc(s.title)}">Revoke</button>
-          </div>`;
-      return `<div class="${rowClass}" data-note-id="${s.note_id}">
-        <div class="shared-link-info">
-          <span class="shared-link-title">${esc(s.title)}</span>
-          <span class="shared-link-prefix">${esc(s.token_prefix)}</span>
-        </div>
-        <div class="shared-link-meta">
-          ${metaLine}
-          <span>Last viewed: ${esc(viewed)}</span>
-        </div>
-        ${actions}
-      </div>`;
-    }).join('');
+    list.innerHTML = shares.map(renderSharedLinkRow).join('');
   } catch (e) {
     loading.style.display = 'none';
     error.textContent = e.message || 'Failed to load shared links.';
@@ -2137,21 +2179,39 @@ function closeSharedLinksModal() {
   if (modal) modal.style.display = 'none';
 }
 
-// revokeShareFromPanel revokes a share by note_id. It proves the revoke by
-// verifying the URL no longer resolves — but since we cannot fetch the public
-// URL from the client (CORS, auth), we rely on the server response: a 200 with
-// share_token: null proves the token is gone.
-async function revokeShareFromPanel(noteId) {
-  if (!confirm('Revoke this share link? The URL will stop working immediately.')) return;
+// revokeShareFromPanel revokes a link from the shared-links panel, whichever
+// kind it is: a note link is cleared on POST /api/v1/notes/:id/share, a folder
+// link on POST /api/v1/folders/:id/share, both with {clear:true}.
+//
+// It proves the revoke by what the server answers: a 200 with share_token: null
+// is the only shape that means "the token is gone". The panel cannot fetch the
+// public URL to watch it 404 (no CORS, no session), so this is the proof it has —
+// and it is why the check is on the body rather than on the status code.
+//
+// The kind comes from the row (sharedLinkTarget), never from which id happens to
+// be present: posting a folder's revoke to /api/v1/notes/null/share would leave
+// a recursive link live while the panel said it was revoked.
+async function revokeShareFromPanel(kind, shareId) {
+  const target = kind === 'folder'
+    ? { kind: 'folder', id: shareId, revokePath: `/api/v1/folders/${shareId}/share` }
+    : { kind: 'note', id: shareId, revokePath: `/api/v1/notes/${shareId}/share` };
+  // A folder link is recursive, so the confirmation says what actually stops:
+  // not one page, but everything under that folder, for everyone holding the
+  // URL. A generic "revoke this link?" would understate it.
+  const question = target.kind === 'folder'
+    ? 'Revoke this folder link? The URL will stop working immediately, for every note in that folder and its subfolders.'
+    : 'Revoke this share link? The URL will stop working immediately.';
+  if (!confirm(question)) return;
   try {
-    const res = await api('POST', `/api/v1/notes/${noteId}/share`, { clear: true });
+    const res = await api('POST', target.revokePath, { clear: true });
     if (!res || res.share_token !== null) {
       showNotification('Revoke did not take effect; the share link is still live.');
       return;
     }
     showNotification('Share link revoked.');
-    // If the revoked note is currently open, clear its share state.
-    if (currentNote && currentNote.id === noteId) {
+    // If the revoked note is currently open, clear its share state. A folder
+    // share is not a note's share state, so there is nothing to clear for it.
+    if (target.kind === 'note' && currentNote && currentNote.id === shareId) {
       currentNote.share_token = null;
       currentNote.expires_at = null;
       syncShareControls();
@@ -2179,7 +2239,7 @@ async function setShareExpiryFromPanel(noteId, hours) {
   try {
     const shares = await api('GET', '/api/v1/shares');
     if (Array.isArray(shares)) {
-      const row = shares.filter(s => Number(s.note_id) === Number(noteId))[0];
+      const row = shares.filter(s => s.kind !== 'folder' && Number(s.note_id) === Number(noteId))[0];
       live = !!row && !isExpired(row.expires_at);
     }
   } catch (e) {
@@ -2998,26 +3058,35 @@ document.querySelector('.unshare-btn').addEventListener('click', revokeShare);
   const closeBtn = document.getElementById('shared-links-close-btn');
   if (closeBtn) closeBtn.addEventListener('click', closeSharedLinksModal);
   // Delegate action clicks inside the modal. Each button carries
-  // data-action="set-deadline" | "clear-deadline" | "revoke" and data-note-id.
+  // data-action="set-deadline" | "clear-deadline" | "revoke", a data-kind
+  // ("note" | "folder"), and the id that kind's revoke route takes: data-note-id
+  // for a note row, data-folder-id for a folder row. The kind decides both the
+  // id and the route — a folder link revoked through the note route would answer
+  // 404 and leave the link live.
   const list = document.getElementById('shared-links-list');
   if (list) {
     list.addEventListener('click', function(e) {
       const actionBtn = e.target.closest('[data-action]');
       if (!actionBtn) return;
-      const noteId = Number(actionBtn.dataset.noteId);
-      if (!noteId) return;
+      const kind = actionBtn.dataset.kind === 'folder' ? 'folder' : 'note';
+      const shareId = Number(kind === 'folder' ? actionBtn.dataset.folderId : actionBtn.dataset.noteId);
+      if (!shareId) return;
       const action = actionBtn.dataset.action;
       if (action === 'revoke') {
-        revokeShareFromPanel(noteId);
+        revokeShareFromPanel(kind, shareId);
       } else if (action === 'set-deadline') {
+        // Deadlines are a note-link control: a folder's deadline is set on the
+        // folder's own share control, and PATCH /notes/:id/share takes a note id.
+        if (kind !== 'note') return;
         // prompt() is the same shape as the one shareNote uses at share time;
         // keeps the UI consistent and avoids a new modal for a one-shot input.
         const input = prompt('Deadline in hours from now (e.g. 24, 168 for a week):');
         if (input === null) return; // cancelled
         const hours = Number(input);
-        setShareExpiryFromPanel(noteId, hours);
+        setShareExpiryFromPanel(shareId, hours);
       } else if (action === 'clear-deadline') {
-        clearShareExpiryFromPanel(noteId);
+        if (kind !== 'note') return;
+        clearShareExpiryFromPanel(shareId);
       }
     });
   }

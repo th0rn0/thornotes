@@ -173,12 +173,20 @@ func lockedWith(dsn string, timeout int, run func() int) int {
 // Tables is every application table, children before parents. One list on
 // purpose: it was copied into three packages, and a table added to the schema
 // would be emptied by whichever copy was remembered.
+//
+// TestTables_CoversEverySchemaTable is what makes "a table added to the schema"
+// a test failure rather than a habit: migration 012 (`folder_shares`, ticket 616)
+// was added without this list being told, so every package that truncated the
+// schema left stale folder links behind — invisible until the first folder-share
+// tests ran after another package's truncation and found rows pointing at
+// folders that no longer existed.
 var Tables = []string{
 	"api_token_folder_permissions",
 	"api_tokens",
 	"journals",
 	"note_links",
 	"notes",
+	"folder_shares",
 	"sessions",
 	"folders",
 	"users",

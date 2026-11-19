@@ -171,6 +171,19 @@ type FolderShareRepository interface {
 	// ListByFolder: that one orders by updated_at and returns the whole folder,
 	// which an anonymous route cannot afford uncapped.
 	ListChildNotes(ctx context.Context, userID, folderID int64, after string, limit int) ([]*model.NoteListItem, error)
+
+	// ListShares returns the caller's own folder links, one row per live share,
+	// with the token reduced to a display prefix and the folder's name as the
+	// title. It is the folder half of GET /api/v1/shares: a folder link is a
+	// recursive grant, so a link the owner cannot find again is a link they
+	// cannot revoke, and finding it must not require remembering the folder.
+	//
+	// Like NoteRepository.ListShares it filters on "is there a share", not on
+	// expiry: an expired link belongs in the list with its deadline visible
+	// (see the note half's test, TestShareView_ExpiredLinkStillResolvesForItsOwner).
+	// It is scoped by user_id in SQL, so it can only ever answer with the
+	// caller's own rows.
+	ListShares(ctx context.Context, userID int64) ([]model.ShareLink, error)
 }
 
 type APITokenRepository interface {
