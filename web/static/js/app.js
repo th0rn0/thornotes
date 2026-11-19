@@ -2080,7 +2080,11 @@ async function clearShareExpiry() {
 
 // showSharedLinksModal fetches the caller's own share links and renders them
 // in a modal. Only token_prefix is shown — never the full token.
+// _sharedLinksTrigger remembers the element that opened the panel so focus can
+// be returned to it on close — keyboard users should not lose their place.
+let _sharedLinksTrigger = null;
 async function showSharedLinksModal() {
+  _sharedLinksTrigger = document.activeElement;
   const modal = document.getElementById('shared-links-modal');
   const list = document.getElementById('shared-links-list');
   const loading = document.getElementById('shared-links-loading');
@@ -2090,6 +2094,11 @@ async function showSharedLinksModal() {
   list.innerHTML = '';
   loading.style.display = 'block';
   error.textContent = '';
+  // Move focus into the panel so screen readers announce it and keyboard
+  // users can navigate the contents. The Close button is the safest target:
+  // it is always present, always focusable, and dismisses the panel.
+  const closeBtn = document.getElementById('shared-links-close-btn');
+  if (closeBtn) closeBtn.focus();
   try {
     const shares = await api('GET', '/api/v1/shares');
     loading.style.display = 'none';
@@ -2135,6 +2144,12 @@ async function showSharedLinksModal() {
 function closeSharedLinksModal() {
   const modal = document.getElementById('shared-links-modal');
   if (modal) modal.style.display = 'none';
+  // Return focus to the trigger so keyboard users land where they started.
+  const trigger = _sharedLinksTrigger;
+  _sharedLinksTrigger = null;
+  if (trigger && typeof trigger.focus === 'function') {
+    try { trigger.focus(); } catch (e) {}
+  }
 }
 
 // revokeShareFromPanel revokes a share by note_id. It proves the revoke by
@@ -2883,7 +2898,8 @@ function esc(s) {
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 if ('serviceWorker' in navigator) {
@@ -3028,6 +3044,14 @@ document.querySelector('.unshare-btn').addEventListener('click', revokeShare);
       if (e.target === this) closeSharedLinksModal();
     });
   }
+  // Escape closes the panel — matches the keyboard-exit contract the other
+  // modals (new-note, new-folder, journals) already honour. Listened at
+  // document level because the panel has no text inputs to scope it to.
+  document.addEventListener('keydown', function(e) {
+    if (e.key !== 'Escape') return;
+    const m = document.getElementById('shared-links-modal');
+    if (m && m.style.display !== 'none') closeSharedLinksModal();
+  });
 })();
 
 // Editor share-expiry controls: Deadline sets/changes the deadline, No expiry
