@@ -41,7 +41,14 @@ func TestShareViewWindow_IsMinutesNotSeconds(t *testing.T) {
 	assert.Equal(t, 10*time.Minute, notes.ShareViewWindow)
 }
 
-func TestService_ExpiredShareIsNotFound(t *testing.T) {
+// TestService_ExpiredShareIsFinal replaces the assertion this suite used to make
+// — "a new deadline revives the same URL" — which is exactly why the revival
+// survived a security review: the test encoded the old semantics and stayed green
+// while the API answered 200 on a dead link.
+//
+// An expired link is now not-found for the reader AND closed for writing. The way
+// back is a fresh share, which rotates the token and leaves the old URL dead.
+func TestService_ExpiredShareIsFinal(t *testing.T) {
 	st := newTestStackFull(t)
 	ctx := context.Background()
 
@@ -61,16 +68,80 @@ func TestService_ExpiredShareIsNotFound(t *testing.T) {
 	assert.ErrorIs(t, err, apperror.ErrNotFound,
 		"an expired link must be the same not-found a wrong token produces, not a distinct 'expired' error")
 
-	// Nothing about the row was destroyed: the owner can still see it, and a new
-	// deadline revives the same URL.
+	// Nothing about the row was destroyed: the owner can still see it.
 	_, err = st.svc.GetNote(ctx, st.userID, note.ID)
 	require.NoError(t, err)
 
+	// Extending the deadline is refused, with the explanation the caller needs.
 	future := time.Now().UTC().Add(time.Hour)
-	require.NoError(t, st.svc.SetShareExpiry(ctx, st.userID, note.ID, &future))
-	revived, err := st.svc.GetNoteByShareToken(ctx, *token)
+	err = st.svc.SetShareExpiry(ctx, st.userID, note.ID, &future)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, apperror.ErrShareExpired)
+	var appErr *apperror.AppError
+	require.ErrorAs(t, err, &appErr)
+	assert.Equal(t, http.StatusConflict, appErr.Code,
+		"a well-formed write refused by the resource's state is 409, not 400 and not 500")
+	assert.Equal(t, notes.ShareExpiredMessage, appErr.Message)
+
+	// Clearing the deadline is the stronger revival — NULL never expires — and is
+	// refused for the same reason.
+	err = st.svc.SetShareExpiry(ctx, st.userID, note.ID, nil)
+	require.Error(t, err, "clearing the deadline would make the dead link immortal")
+	assert.ErrorIs(t, err, apperror.ErrShareExpired)
+
+	// Neither refusal wrote anything: the deadline is still in the past and the
+	// link is still dead.
+	stored := storedDeadline(t, st, note.ID)
+	require.NotNil(t, stored, "a refused PATCH must leave the deadline in place")
+	assert.True(t, past.Equal(stored.UTC()), "a refused PATCH must not move the deadline: got %s", stored)
+	_, err = st.svc.GetNoteByShareToken(ctx, *token)
+	assert.ErrorIs(t, err, apperror.ErrNotFound, "the old URL must stay dead after a refused revival")
+
+	// The way back: a fresh share, which rotates the token. The old URL does not
+	// come back with it — that is the whole point of "expired is final".
+	fresh, err := st.svc.SetShareToken(ctx, st.userID, note.ID, false, &future)
+	require.NoError(t, err, "re-sharing must work on a note whose link has expired")
+	require.NotNil(t, fresh)
+	assert.NotEqual(t, *token, *fresh, "re-sharing must rotate the token")
+
+	revived, err := st.svc.GetNoteByShareToken(ctx, *fresh)
 	require.NoError(t, err)
 	assert.Equal(t, note.ID, revived.ID)
+
+	_, err = st.svc.GetNoteByShareToken(ctx, *token)
+	assert.ErrorIs(t, err, apperror.ErrNotFound, "the expired URL must stay dead even after a fresh share")
+}
+
+// TestService_LiveShareStaysEditable keeps the behaviour PATCH exists for: on a
+// live link, extending and clearing the deadline both succeed and neither rotates
+// the token, because rotation would revoke every copy already in circulation.
+func TestService_LiveShareStaysEditable(t *testing.T) {
+	st := newTestStackFull(t)
+	ctx := context.Background()
+
+	note, err := st.svc.CreateNote(ctx, st.userID, "test-uuid", nil, "Live", nil)
+	require.NoError(t, err)
+
+	first := time.Now().UTC().Add(time.Hour)
+	token, err := st.svc.SetShareToken(ctx, st.userID, note.ID, false, &first)
+	require.NoError(t, err)
+	require.NotNil(t, token)
+
+	second := time.Now().UTC().Add(2 * time.Hour)
+	require.NoError(t, st.svc.SetShareExpiry(ctx, st.userID, note.ID, &second),
+		"extending a live link's deadline must succeed")
+	stored := storedDeadline(t, st, note.ID)
+	require.NotNil(t, stored)
+	assert.True(t, second.Equal(stored.UTC()))
+
+	require.NoError(t, st.svc.SetShareExpiry(ctx, st.userID, note.ID, nil),
+		"clearing a live link's deadline must still succeed")
+	assert.Nil(t, storedDeadline(t, st, note.ID))
+
+	// The token never moved, and the URL still resolves.
+	stillLive, err := st.svc.GetNoteByShareToken(ctx, *token)
+	require.NoError(t, err)
+	assert.Equal(t, note.ID, stillLive.ID)
 }
 
 // TestService_ClearShareClearsExpiry keeps the invariant "expires_at is set
@@ -191,7 +262,13 @@ func TestService_ShareExpiryIsStoredInUTC(t *testing.T) {
 	east := time.FixedZone("+05:00", 5*60*60)
 	west := time.FixedZone("-08:00", -8*60*60)
 
-	posted := time.Date(2026, 11, 19, 5, 48, 54, 0, east)
+	// Relative to now, not a hard-coded date: with the "expired is final" guard
+	// an absolute deadline is a time bomb — this test's 2026-11-19T00:48:54Z was
+	// in the future when written and in the past by the next evening, at which
+	// point the PATCH below is (correctly) refused as an expired link and the
+	// failure reads as a bug in the guard rather than in the fixture.
+	instant := time.Now().UTC().Add(2 * time.Hour).Truncate(time.Second)
+	posted := instant.In(east)
 	token, err := st.svc.SetShareToken(ctx, st.userID, note.ID, false, &posted)
 	require.NoError(t, err)
 	require.NotNil(t, token)
@@ -210,7 +287,7 @@ func TestService_ShareExpiryIsStoredInUTC(t *testing.T) {
 	assert.Equal(t, note.ID, resolved.ID)
 
 	// Door two: PATCH, on the same link, with the other direction.
-	patched := time.Date(2026, 11, 18, 16, 48, 54, 0, west)
+	patched := instant.In(west) // the same instant, expressed the other way round
 	require.NoError(t, st.svc.SetShareExpiry(ctx, st.userID, note.ID, &patched))
 
 	stored = storedDeadline(t, st, note.ID)

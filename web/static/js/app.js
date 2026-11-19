@@ -1984,8 +1984,9 @@ async function revokeShare() {
 // only useful when there is something to revoke, and showing it otherwise would
 // invite a click that cannot do anything. On an expired link both controls are
 // hidden as well — but hiding them is presentation, not enforcement: a tab or
-// panel opened before the deadline passed keeps its buttons, so every write path
-// below re-reads the share state first and refuses to edit a dead link.
+// panel opened before the deadline passed keeps its buttons, so the deadline
+// write below re-reads the share state first, and the server refuses a revival
+// with 409 whatever this page believes.
 function syncShareControls() {
   const btn = document.getElementById('unshare-btn');
   const expired = currentNote && currentNote.share_token && isExpired(currentNote.expires_at);
@@ -2029,10 +2030,11 @@ async function setShareExpiry(hours) {
     return;
   }
   // A deadline edit must never revive a link that has already expired. The
-  // server would allow it (SetShareExpiry only checks that a token exists), and
-  // internal/notes' test calls that revival intended, so the refusal belongs
-  // here: ask the server for the link's current state rather than trusting the
-  // page, which may have been open since before the deadline passed.
+  // server refuses that with 409 (`expires_at` and `clear_expiry` alike — a
+  // cleared deadline is the stronger revival, since it would make the link
+  // immortal), and it is the authority: this pre-check only saves the round
+  // trip in the common case. It re-reads the share state rather than trusting
+  // the page, which may have been open since before the deadline passed.
   let live = true;
   try {
     const shares = await api('GET', '/api/v1/shares');
@@ -2057,6 +2059,7 @@ async function setShareExpiry(hours) {
       showNotification(`Share deadline set to ${formatExpiry(res.expires_at)}.`);
     }
   } catch (e) {
+    if (await applyShareRefusal(e)) return;
     showNotification(`Could not set deadline: ${e.message || 'request failed'}`);
   }
 }
@@ -2064,6 +2067,10 @@ async function setShareExpiry(hours) {
 // clearShareExpiry removes the deadline from the current note's share link,
 // making it immortal again. Uses PATCH with clear_expiry: true — NOT {clear:true},
 // which on POST means revoke.
+//
+// There is no pre-check here, on purpose: clearing a live deadline is harmless,
+// and on an expired link the server answers 409. The refusal is the server's
+// answer, not something this panel is allowed to decide.
 async function clearShareExpiry() {
   if (!currentNote || !currentNote.share_token) return;
   try {
@@ -2074,7 +2081,40 @@ async function clearShareExpiry() {
       showNotification('Share deadline removed; link has no expiry.');
     }
   } catch (e) {
+    if (await applyShareRefusal(e)) return;
     showNotification(`Could not clear deadline: ${e.message || 'request failed'}`);
+  }
+}
+
+// applyShareRefusal reports a server refusal of a deadline edit and re-syncs the
+// panel, and returns true when it handled the error.
+//
+// The interesting case is 409: the link expired between this page being drawn and
+// the click, so the panel is stale. The server's message is shown as-is — it says
+// what to do (share the note again) and a generic "request failed" would throw
+// that away — and the state is re-read so the controls stop offering an edit that
+// cannot work. Every other status is left to the caller's own message.
+async function applyShareRefusal(e) {
+  if (!e || e.status !== 409) return false;
+  await refreshShareExpiryFromServer();
+  showNotification(e.message || 'This share link has expired. Share the note again for a new link.');
+  return true;
+}
+
+// refreshShareExpiryFromServer re-reads the caller's share list and applies the
+// server's current deadline to the open note. Best effort: a failed refresh
+// leaves the panel as it was rather than reporting a second error over the first.
+async function refreshShareExpiryFromServer() {
+  if (!currentNote) return;
+  try {
+    const shares = await api('GET', '/api/v1/shares');
+    if (!Array.isArray(shares)) return;
+    const row = shares.filter(s => Number(s.note_id) === Number(currentNote.id))[0];
+    if (!row) return;
+    currentNote.expires_at = row.expires_at || null;
+    syncShareControls();
+  } catch (_) {
+    // The refusal already told the user what matters; this is presentation.
   }
 }
 
@@ -2217,6 +2257,12 @@ async function setShareExpiryFromPanel(noteId, hours) {
       await showSharedLinksModal();
     }
   } catch (e) {
+    if (await applyShareRefusal(e)) {
+      // The refusal is the server's answer about a link this panel drew as live;
+      // showSharedLinksModal is the re-read that brings the row up to date.
+      await showSharedLinksModal();
+      return;
+    }
     showNotification(`Could not set deadline: ${e.message || 'request failed'}`);
   }
 }
@@ -2237,6 +2283,10 @@ async function clearShareExpiryFromPanel(noteId) {
       await showSharedLinksModal();
     }
   } catch (e) {
+    if (await applyShareRefusal(e)) {
+      await showSharedLinksModal();
+      return;
+    }
     showNotification(`Could not clear deadline: ${e.message || 'request failed'}`);
   }
 }
