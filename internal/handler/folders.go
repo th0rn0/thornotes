@@ -4,6 +4,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/th0rn0/thornotes/internal/model"
@@ -142,16 +143,34 @@ func (h *FoldersHandler) ListNotes(c *gin.Context) {
 
 // folderShareRequest is the body of POST /api/v1/folders/:id/share.
 //
-// It mirrors the note-share request exactly, including what is NOT here: an
-// expiry deadline is slice 2, so a payload carrying `expires_at` is rejected as
-// an unknown field rather than silently ignored. A caller who thinks they set a
-// deadline and did not would be told the link is immortal by accident.
+// It mirrors the note-share request exactly: `clear` revokes, and `expires_at`
+// is the opt-in deadline, so the two share routes cannot be told apart by their
+// payload. Omitted or null expires_at means no expiry — the caller has to ask for
+// a deadline, and nothing here invents one.
 type folderShareRequest struct {
 	// Clear revokes the link (the row is deleted). It is the same word, with the
 	// same meaning, as on POST /api/v1/notes/:id/share — two share routes ten
 	// lines apart that disagreed about what `clear` does is the trap ticket 601
 	// wrote itself a note about.
 	Clear bool `json:"clear"`
+	// ExpiresAt is the deadline for the link the request creates, as RFC3339. It
+	// applies to the NEW link: a rotation clears the previous deadline, so a
+	// caller who wants the old link's date kept has to send it again (that is
+	// what POST has always meant on both surfaces).
+	ExpiresAt *time.Time `json:"expires_at"`
+}
+
+// folderShareExpiryRequest is the body of PATCH /api/v1/folders/:id/share: the
+// same two shapes the note-share route accepts, and the same reasoning for the
+// explicit `clear_expiry`.
+type folderShareExpiryRequest struct {
+	ExpiresAt *time.Time `json:"expires_at"`
+	// ClearExpiry removes the deadline instead of setting one. The field is
+	// deliberately NOT called "clear", which the sibling POST route uses to
+	// REVOKE the token: two routes ten lines apart where the same word means
+	// opposite things on a security-relevant field is how an operator trying to
+	// kill a leaked link makes it permanent instead.
+	ClearExpiry bool `json:"clear_expiry"`
 }
 
 // Share issues, rotates or revokes a folder's public link.
@@ -181,7 +200,16 @@ func (h *FoldersHandler) Share(c *gin.Context) {
 		return
 	}
 
-	token, err := h.svc.SetFolderShareToken(c.Request.Context(), user.ID, folderID, req.Clear)
+	// A deadline in the past would publish a link that is already dead: the
+	// caller would get a token that answers 404 everywhere, with nothing in the
+	// response saying why. The note route refuses it for the same reason, and
+	// the two must agree or one of them hands out a stillborn URL.
+	if req.ExpiresAt != nil && !req.ExpiresAt.After(time.Now()) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "expires_at must be in the future"})
+		return
+	}
+
+	token, err := h.svc.SetFolderShareToken(c.Request.Context(), user.ID, folderID, req.Clear, req.ExpiresAt)
 	if err != nil {
 		writeError(c, err)
 		return
@@ -192,4 +220,52 @@ func (h *FoldersHandler) Share(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"share_token": *token})
+}
+
+// PatchShareExpiry changes the deadline of a folder's existing link without
+// rotating its token, so URLs already handed out keep working.
+//
+// Re-sharing (POST /api/v1/folders/:id/share) generates a new token, which is
+// what a user wants when a link leaked and the opposite of what they want when
+// they merely need to extend or drop a deadline. Without this route, the only way
+// to change a folder link's expiry would revoke every copy of it in circulation.
+//
+// An expired link is refused with 409 by the service (see
+// notes.SetFolderShareExpiry) — and so is clearing its deadline, because nulling
+// it would make a dead link immortal.
+func (h *FoldersHandler) PatchShareExpiry(c *gin.Context) {
+	user := ginUser(c)
+	folderID, err := ginParamInt64(c, "id")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "folder id must be a positive integer"})
+		return
+	}
+
+	var req folderShareExpiryRequest
+	if err := readJSON(c, &req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "request body must be a JSON object: " + err.Error()})
+		return
+	}
+
+	var expiresAt *time.Time
+	switch {
+	case req.ClearExpiry:
+		expiresAt = nil
+	case req.ExpiresAt != nil:
+		if !req.ExpiresAt.After(time.Now()) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "expires_at must be in the future"})
+			return
+		}
+		expiresAt = req.ExpiresAt
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{"error": "expires_at or clear_expiry is required"})
+		return
+	}
+
+	if err := h.svc.SetFolderShareExpiry(c.Request.Context(), user.ID, folderID, expiresAt); err != nil {
+		writeError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"expires_at": expiresAt})
 }

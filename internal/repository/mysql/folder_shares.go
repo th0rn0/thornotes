@@ -102,6 +102,57 @@ func (r *FolderShareRepo) Clear(ctx context.Context, userID, folderID int64) err
 	return nil
 }
 
+// SetExpiry changes the deadline on a folder's live link (nil = no expiry)
+// without rotating the token. See the SQLite implementation and
+// NoteRepo.SetShareExpiry for the reasoning; the statements are the same pair of
+// engines answering the same question, and the guard is a predicate on the
+// UPDATE rather than a read before it so a request cannot race the deadline.
+//
+// Deliberately not updateScoped-style "did it match": on this driver zero
+// changed rows has three meanings — no link, an expired link, or a live link
+// that already carried this deadline — and only the middle one is a refusal, so
+// the tie-breaker reads the row (expiryRefusal) and answers from its state.
+func (r *FolderShareRepo) SetExpiry(ctx context.Context, userID, folderID int64, expiresAt *time.Time) error {
+	now := time.Now().UTC()
+	res, err := r.db.ExecContext(ctx, `
+		UPDATE folder_shares SET expires_at = ?
+		WHERE folder_id = ? AND user_id = ?
+		  AND (expires_at IS NULL OR expires_at > ?)`,
+		expiresAt, folderID, userID, now,
+	)
+	if err != nil {
+		return fmt.Errorf("set folder share expiry: %w", err)
+	}
+	changed, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("set folder share expiry: rows affected: %w", err)
+	}
+	if changed > 0 {
+		return nil
+	}
+	return r.expiryRefusal(ctx, userID, folderID, now)
+}
+
+// expiryRefusal names why a guarded deadline write changed no row, without
+// changing anything itself: the predicate decided, this only explains.
+func (r *FolderShareRepo) expiryRefusal(ctx context.Context, userID, folderID int64, now time.Time) error {
+	var expiresAt *time.Time
+	err := r.db.QueryRowContext(ctx,
+		`SELECT expires_at FROM folder_shares WHERE folder_id = ? AND user_id = ?`,
+		folderID, userID,
+	).Scan(&expiresAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return apperror.ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("set folder share expiry: read row: %w", err)
+	}
+	if repository.ShareLinkExpired(expiresAt, now) {
+		return apperror.ErrShareExpired
+	}
+	return nil
+}
+
 // TouchView stamps last_viewed_at with now, at most once per window. See the
 // SQLite implementation and NoteRepo.TouchShareView: zero changed rows is the
 // answer here, not an ambiguity to resolve with a tie-breaker.

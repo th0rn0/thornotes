@@ -102,6 +102,64 @@ func (r *FolderShareRepo) Clear(ctx context.Context, userID, folderID int64) err
 	return nil
 }
 
+// SetExpiry changes the deadline on a folder's live link (nil = no expiry)
+// without rotating the token, so URLs already handed out keep working.
+//
+// An EXPIRED link is refused, with apperror.ErrShareExpired, for both shapes:
+// moving a dead deadline forward, and clearing it (the stronger revival, since
+// NULL never expires). Expiry is final on both share surfaces — the way back is
+// a fresh share, which rotates the token and leaves the old URL dead — and the
+// rule is one function (repository.ShareLinkExpired), not one per table.
+//
+// The guard is a predicate on the UPDATE itself, not a read before it: with a
+// check-then-write, a request that arrived while the row was live would still
+// land after the deadline passed. `now` is bound once, so the row is compared
+// against a single instant for the whole statement.
+func (r *FolderShareRepo) SetExpiry(ctx context.Context, userID, folderID int64, expiresAt *time.Time) error {
+	now := time.Now().UTC()
+	res, err := r.writeDB.ExecContext(ctx, `
+		UPDATE folder_shares SET expires_at = ?
+		WHERE folder_id = ? AND user_id = ?
+		  AND (expires_at IS NULL OR expires_at > ?)`,
+		expiresAt, folderID, userID, now,
+	)
+	if err != nil {
+		return fmt.Errorf("set folder share expiry: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("set folder share expiry: rows affected: %w", err)
+	}
+	if n > 0 {
+		return nil
+	}
+	return r.expiryRefusal(ctx, userID, folderID, now)
+}
+
+// expiryRefusal names why a guarded deadline write changed no row.
+//
+// It runs after the write has been refused and decides nothing about the write
+// itself — the predicate did that. MySQL counts changed rows, so re-writing a
+// deadline the row already holds also lands here, and that case is success, not
+// a refusal: it is the documented behaviour of setting an unchanged deadline.
+func (r *FolderShareRepo) expiryRefusal(ctx context.Context, userID, folderID int64, now time.Time) error {
+	var expiresAt *time.Time
+	err := r.readDB.QueryRowContext(ctx,
+		`SELECT expires_at FROM folder_shares WHERE folder_id = ? AND user_id = ?`,
+		folderID, userID,
+	).Scan(&expiresAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return apperror.ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("set folder share expiry: read row: %w", err)
+	}
+	if repository.ShareLinkExpired(expiresAt, now) {
+		return apperror.ErrShareExpired
+	}
+	return nil
+}
+
 // TouchView stamps last_viewed_at with now, at most once per window.
 //
 // Deliberately not "did it match": here zero changed rows is the answer, because

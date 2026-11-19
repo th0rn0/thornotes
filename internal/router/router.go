@@ -192,6 +192,11 @@ func New(
 		// this group, because a link that publishes a folder must not be issuable
 		// from another origin.
 		folders.POST("/:id/share", csrfMW, foldersH.Share)
+		// PATCH changes an existing link's deadline without rotating the token
+		// (ticket 616, slice 2), because extending a circulating link must not
+		// revoke it. An expired link is refused with 409: expiry is final on
+		// both share surfaces.
+		folders.PATCH("/:id/share", csrfMW, foldersH.PatchShareExpiry)
 		folders.GET("/:id/zip", exportH.Folder)
 		// HEAD is the UI's cheap preflight; Gin does not answer HEAD for a GET
 		// route, and without it the preflight 404s on rows that exist.

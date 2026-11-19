@@ -2,6 +2,8 @@ package notes
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"time"
@@ -88,17 +90,25 @@ type FolderShareListing struct {
 // SetFolderShareToken issues, rotates or revokes a folder's public link.
 //
 // clear=true revokes: the row is deleted, so a revoked link and a folder that was
-// never shared are the same state and answer the same 404. clear=false always
-// mints a NEW token, even if the folder already had one — re-sharing rotates,
-// exactly as POST /notes/:id/share does. Two share routes ten lines apart that
-// disagreed about whether they rotate would be a trap, and the note UI already
-// carries the confirm ("generating a new one replaces it").
+// never shared are the same state and answer the same 404. Revocation is not
+// subject to the expiry guard — it destroys the link rather than publishing it
+// again, and a leaked link that has already expired must still be killable.
+// clear=false always mints a NEW token, even if the folder already had one —
+// re-sharing rotates, exactly as POST /notes/:id/share does. Two share routes ten
+// lines apart that disagreed about whether they rotate would be a trap, and the
+// note UI already carries the confirm ("generating a new one replaces it").
+//
+// expiresAt is opt-in: nil keeps the link immortal, which is the documented
+// default. It is written after the rotation, over the NULL that the rotating
+// statement leaves behind — which is what keeps a re-share working on a folder
+// whose previous link has expired, since the deadline write itself refuses a dead
+// link (SetFolderShareExpiry).
 //
 // The ownership check comes first and is the #40 fix: a folder the caller does
 // not own and a folder that does not exist both answer apperror.ErrNotFound, and
 // nothing is written for either. The repository repeats the guard in SQL, so a
 // folder deleted between the check and the write cannot end up shared either.
-func (s *Service) SetFolderShareToken(ctx context.Context, userID, folderID int64, clear bool) (*string, error) {
+func (s *Service) SetFolderShareToken(ctx context.Context, userID, folderID int64, clear bool, expiresAt *time.Time) (*string, error) {
 	if _, err := s.folders.GetByID(ctx, userID, folderID); err != nil {
 		return nil, err
 	}
@@ -110,6 +120,16 @@ func (s *Service) SetFolderShareToken(ctx context.Context, userID, folderID int6
 		return nil, nil
 	}
 
+	// Normalised before either write, with the note-share normaliser: one UTC
+	// rule for both tables, because the SQLite representation defect it fixes is
+	// a property of the column, not of the surface. A deadline the column cannot
+	// hold is refused while the row is untouched, rather than after a token has
+	// been issued for a link that can never be read.
+	expiry, err := normalizeShareExpiry(expiresAt)
+	if err != nil {
+		return nil, err
+	}
+
 	token, err := newShareToken()
 	if err != nil {
 		return nil, err
@@ -117,7 +137,57 @@ func (s *Service) SetFolderShareToken(ctx context.Context, userID, folderID int6
 	if err := s.folderShares.UpsertToken(ctx, userID, folderID, token); err != nil {
 		return nil, err
 	}
+	// Always written, including the nil case: the deadline belongs to the link
+	// that was just created. The statement above cleared the previous link's
+	// deadline, so this lands on NULL and cannot be refused as an expired link.
+	if err := s.folderShares.SetExpiry(ctx, userID, folderID, expiry); err != nil {
+		// The token landed but the deadline did not. Reporting success would claim
+		// an expiry the row does not have, so this is an error — the caller can
+		// revoke the share and retry.
+		return nil, mapFolderShareExpiryError(fmt.Errorf("set folder share expiry: %w", err))
+	}
 	return &token, nil
+}
+
+// FolderShareExpiredMessage is what an owner is told when a deadline write is
+// refused because the folder link has already expired. It names the only way
+// forward on purpose: a caller told merely "conflict" would try the same PATCH
+// again, and re-sharing is the one action that works (it issues a new token, and
+// the old URL stays dead).
+//
+// The wording mirrors the note-share message; the two surfaces must not disagree
+// about what an owner is being told.
+const FolderShareExpiredMessage = "this share link has expired; share the folder again to create a new link"
+
+// SetFolderShareExpiry changes the deadline on an existing folder link (nil = no
+// expiry) without rotating the token, so URLs already handed out keep working.
+//
+// It refuses a link that has already expired, whether the caller is moving the
+// deadline forward or clearing it: expiry is final, and the way back is a fresh
+// share (SetFolderShareToken), which rotates the token and leaves the old URL
+// dead. The refusal is the repository's — the guard is a predicate on the UPDATE,
+// so a request cannot slip between a check here and the write there — and it is
+// turned into a 409 with an explanation at this layer, because the repository
+// speaks in sentinels and the caller needs to be told what to do instead.
+func (s *Service) SetFolderShareExpiry(ctx context.Context, userID, folderID int64, expiresAt *time.Time) error {
+	expiry, err := normalizeShareExpiry(expiresAt)
+	if err != nil {
+		return err
+	}
+	return mapFolderShareExpiryError(s.folderShares.SetExpiry(ctx, userID, folderID, expiry))
+}
+
+// mapFolderShareExpiryError turns the repository's expired sentinel into the 409
+// the caller sees, and leaves every other error as it found it.
+//
+// One place, rather than one per caller: both doors into folder_shares.expires_at
+// (POST with a deadline, PATCH) must answer an expired link identically, and a
+// divergence would be a route that reports 500 for a state the other explains.
+func mapFolderShareExpiryError(err error) error {
+	if err == nil || !errors.Is(err, apperror.ErrShareExpired) {
+		return err
+	}
+	return apperror.ShareExpired(FolderShareExpiredMessage)
 }
 
 // FolderShareListing resolves one level of a shared folder.
