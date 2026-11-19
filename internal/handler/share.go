@@ -15,10 +15,15 @@ import (
 	"github.com/th0rn0/thornotes/internal/notes"
 )
 
-// shareViewTouchTimeout bounds the background write that records a share view.
-// It is a ceiling on a single indexed UPDATE, not a budget: the request that
-// triggered it has already been answered by then.
-const shareViewTouchTimeout = 5 * time.Second
+// shareViewTouchTimeout bounds the write that records a share view.
+//
+// It is a ceiling on a single indexed UPDATE, and it now bounds the *request*:
+// the stamp is no longer written from a detached goroutine (see recordView), so
+// this is the worst case a reader waits for a view to be counted. Two seconds is
+// an order of magnitude above a local UPDATE and far below a timeout that would
+// read as a broken page, so a database that has stopped answering costs a slow
+// page twice an hour per link rather than a goroutine that outlives the request.
+const shareViewTouchTimeout = 2 * time.Second
 
 // ShareHandler serves the public shared note view and lists the caller's own
 // share links.
@@ -69,23 +74,31 @@ func (h *ShareHandler) View(c *gin.Context) {
 		return
 	}
 
-	// After the body: recording the view must never delay the reader or change
-	// what they get. See recordView for the bound that keeps this off the write
-	// path almost always.
+	// After the body: what the reader gets is already written, and the bound in
+	// recordView keeps this from touching the database more than once per window.
 	h.recordView(c.Request.Context(), note)
 }
 
-// recordView records that a share link was opened, without making the reader
-// wait for it.
+// recordView records that a share link was opened.
 //
-// Three things are deliberate here:
+// Four things are deliberate here:
 //
-//   - The bound is checked before any work: inside the window this returns
-//     without spawning anything, so a flood of views on one link costs a
-//     comparison per request and no goroutine at all.
-//   - It runs off the request goroutine, with the request's cancellation
-//     detached (a reader who closes the tab must not cancel the stamp) and its
-//     own deadline, so a slow database cannot hold the response open.
+//   - The bound is checked before any work: inside the window this returns after
+//     a comparison, so a flood of views on one link writes nothing at all. That
+//     window is what keeps this cheap — not a goroutine.
+//   - The request's cancellation is detached (a reader who closes the tab must
+//     not cancel the stamp) and the write carries its own deadline, so a slow
+//     database is bounded rather than open-ended.
+//   - It runs in the request goroutine, *after* the body has been written. It
+//     used to run in a detached goroutine "so the reader does not wait"; that
+//     goroutine outlives the request, and a write that lands after the database
+//     is closed (logged as `record folder share view: sql: database is closed`)
+//     is the harmless half of the problem — the other half is that it logs into
+//     whatever logger is current at that later moment, which the race detector
+//     caught in TestFolderShare_TokenNeverReachesTheAccessLog (build #440: a
+//     read of the global zerolog logger against the test's own swap of it). One
+//     indexed UPDATE per ten minutes per link is not worth a goroutine that
+//     nothing can join.
 //   - A failure is logged and dropped. Counting a view is telemetry; it is never
 //     worth failing a read for.
 func (h *ShareHandler) recordView(ctx context.Context, note *model.Note) {
@@ -94,16 +107,11 @@ func (h *ShareHandler) recordView(ctx context.Context, note *model.Note) {
 		return
 	}
 
-	base := context.WithoutCancel(ctx)
-	noteID := note.ID
-	lastViewed := note.LastViewedAt
-	go func() {
-		ctx, cancel := context.WithTimeout(base, shareViewTouchTimeout)
-		defer cancel()
-		if _, err := h.svc.RecordShareView(ctx, noteID, lastViewed, now); err != nil {
-			log.Debug().Err(err).Int64("note_id", noteID).Msg("record share view")
-		}
-	}()
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), shareViewTouchTimeout)
+	defer cancel()
+	if _, err := h.svc.RecordShareView(ctx, note.ID, note.LastViewedAt, now); err != nil {
+		log.Debug().Err(err).Int64("note_id", note.ID).Msg("record share view")
+	}
 }
 
 // --- Folder shares (ticket 616, slice 1) -----------------------------------
@@ -293,26 +301,22 @@ func escapeSharePath(rel string) string {
 	return strings.Join(segments, "/")
 }
 
-// recordFolderView stamps the link's last_viewed_at, off the request path and
-// bounded by ShareViewWindow — the same discipline as recordView, because this
-// route has the same exposure: an unauthenticated reader who can hit it as fast
-// as they like.
+// recordFolderView stamps the link's last_viewed_at, bounded by ShareViewWindow
+// and written in the request goroutine after the body — the same discipline as
+// recordView, because this route has the same exposure: an unauthenticated
+// reader who can hit it as fast as they like, and the same reason not to detach
+// a goroutine that nothing can join.
 func (h *ShareHandler) recordFolderView(ctx context.Context, listing *notes.FolderShareListing) {
 	now := time.Now().UTC()
 	if !notes.ShareViewDue(listing.LastViewedAt, now) {
 		return
 	}
 
-	base := context.WithoutCancel(ctx)
-	folderID := listing.FolderID
-	lastViewed := listing.LastViewedAt
-	go func() {
-		ctx, cancel := context.WithTimeout(base, shareViewTouchTimeout)
-		defer cancel()
-		if _, err := h.svc.RecordFolderShareView(ctx, folderID, lastViewed, now); err != nil {
-			log.Debug().Err(err).Int64("folder_id", folderID).Msg("record folder share view")
-		}
-	}()
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), shareViewTouchTimeout)
+	defer cancel()
+	if _, err := h.svc.RecordFolderShareView(ctx, listing.FolderID, listing.LastViewedAt, now); err != nil {
+		log.Debug().Err(err).Int64("folder_id", listing.FolderID).Msg("record folder share view")
+	}
 }
 
 // List answers GET /api/v1/shares with the caller's own share links.
