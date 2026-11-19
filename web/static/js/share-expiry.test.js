@@ -65,9 +65,15 @@ function makeHarness(note) {
 
 // compile returns a function that, when called with args, runs the extracted
 // function with those args and the stubbed environment.
+//
+// The two shipped helpers a refused deadline edit goes through are compiled in
+// alongside it, from the same file: a 409 is handled by applyShareRefusal /
+// refreshShareExpiryFromServer, so a stub for them would test nothing.
 function compile(h, name) {
   const src = fs.readFileSync(APP_JS_PATH, 'utf8');
   const fnSrc = extractFunction(src, name);
+  const helpers = extractFunction(src, 'applyShareRefusal') + '\n' +
+    extractFunction(src, 'refreshShareExpiryFromServer');
   // Extract the parameter list from the function signature.
   const sigMatch = fnSrc.match(/async function \w+\(([^)]*)\)/);
   const params = sigMatch ? sigMatch[1] : '';
@@ -80,6 +86,7 @@ function compile(h, name) {
       const showNotification = __h.showNotification;
       const syncShareControls = __h.syncShareControls;
       const isExpired = __h.isExpired;
+      ${helpers}
       ${body}
     });
   `;
@@ -142,9 +149,10 @@ describe('share expiry — PATCH body carries clear_expiry, not clear', () => {
   });
 
   // QA found this on PR #88: hiding the controls on an expired link did not stop
-  // the write, and the server accepts it (SetShareExpiry only checks that a token
-  // exists), so a tab or panel opened before the deadline passed could take the
-  // URL from 404 back to 200. The refusal has to be on the state, not the DOM.
+  // the write, and at the time the server accepted it, so a tab or panel opened
+  // before the deadline passed could take the URL from 404 back to 200. The
+  // refusal therefore has to be on the state, not the DOM — and the server now
+  // refuses it too, which the 409 tests below pin.
   it('setShareExpiry refuses to revive a link that has already expired', async () => {
     h.responders.push({ method: 'GET', path: '/api/v1/shares', repeat: true,
       response: [{ note_id: NOTE_ID, expires_at: '2020-01-01T00:00:00Z' }] });
@@ -168,6 +176,57 @@ describe('share expiry — PATCH body carries clear_expiry, not clear', () => {
     await fn(24);
 
     assert.equal(h.apiCalls.filter(c => c.method === 'PATCH').length, 1);
+  });
+
+  // The guard above is an accident-preventer, not the authority. A link can
+  // expire between the page being drawn and the click, or the pre-check can pass
+  // while the server refuses anyway — and when the server refuses with 409, the
+  // panel must show the server's own sentence (it names the way forward) rather
+  // than flattening it into a generic failure, and adopt the state it reported.
+  it('setShareExpiry surfaces a 409 verbatim and re-reads the link', async () => {
+    const serverMessage = 'this share link has expired; share the note again to create a new link';
+    // Live at the moment of the pre-check...
+    h.responders.push({ method: 'GET', path: '/api/v1/shares',
+      response: [{ note_id: NOTE_ID, expires_at: '2099-01-01T00:00:00Z' }] });
+    // ...refused by the server, which is the authority.
+    h.responders.push({ method: 'PATCH', path: PATCH_PATH, response: () => {
+      const err = new Error(serverMessage);
+      err.status = 409;
+      throw err;
+    } });
+    // The re-read afterwards reports the link as expired.
+    h.responders.push({ method: 'GET', path: '/api/v1/shares', repeat: true,
+      response: [{ note_id: NOTE_ID, expires_at: '2020-01-01T00:00:00Z' }] });
+
+    const fn = compile(h, 'setShareExpiry');
+    await fn(24);
+
+    assert.ok(h.notifications.includes(serverMessage),
+      `the server's message must be shown as-is, got ${JSON.stringify(h.notifications)}`);
+    assert.doesNotMatch(h.notifications.join(' '), /could not set deadline/i,
+      'a 409 must not be flattened into a generic failure');
+    assert.equal(h.currentNote.expires_at, '2020-01-01T00:00:00Z',
+      'the panel must adopt the state the server reported');
+    assert.ok(h.syncCalls >= 1, 'the controls must be re-synced after the refusal');
+  });
+
+  it('clearShareExpiry surfaces a 409 the same way, with no pre-check of its own', async () => {
+    const serverMessage = 'this share link has expired; share the note again to create a new link';
+    h.responders.push({ method: 'PATCH', path: PATCH_PATH, response: () => {
+      const err = new Error(serverMessage);
+      err.status = 409;
+      throw err;
+    } });
+    h.responders.push({ method: 'GET', path: '/api/v1/shares', repeat: true,
+      response: [{ note_id: NOTE_ID, expires_at: '2020-01-01T00:00:00Z' }] });
+
+    const fn = compile(h, 'clearShareExpiry');
+    await fn();
+
+    assert.ok(h.notifications.includes(serverMessage), 'the server message must reach the user');
+    assert.doesNotMatch(h.notifications.join(' '), /could not clear deadline/i,
+      'a 409 must not be flattened into a generic failure');
+    assert.equal(h.currentNote.expires_at, '2020-01-01T00:00:00Z');
   });
 
   it('setShareExpiry rejects non-positive hours without calling the API', async () => {

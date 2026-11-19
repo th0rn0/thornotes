@@ -73,6 +73,14 @@ type NoteRepository interface {
 	// SetShareExpiry sets or clears (nil) the expiry of an existing share link
 	// without touching the token, so a deadline can be shortened, dropped or
 	// added without breaking URLs already handed out.
+	//
+	// It refuses a link whose current deadline has already passed, returning
+	// apperror.ErrShareExpired: moving a dead deadline forward and nulling it
+	// both publish the link again, which is a revival, and expiry is final
+	// (re-sharing rotates the token and leaves the old URL dead). The guard is a
+	// predicate on the UPDATE itself rather than a read before it, so a request
+	// cannot win a race against the deadline. A nil deadline — no expiry — is
+	// live and stays editable.
 	SetShareExpiry(ctx context.Context, userID, noteID int64, expiresAt *time.Time) error
 	// GetByFolderAndSlug returns a note by folder + slug, or ErrNotFound.
 	// Pass nil folderID to look up root notes.
