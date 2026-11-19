@@ -102,6 +102,57 @@ func (r *FolderShareRepo) Clear(ctx context.Context, userID, folderID int64) err
 	return nil
 }
 
+// SetExpiry changes the deadline on a folder's live link (nil = no expiry)
+// without rotating the token. See the SQLite implementation and
+// NoteRepo.SetShareExpiry for the reasoning; the statements are the same pair of
+// engines answering the same question, and the guard is a predicate on the
+// UPDATE rather than a read before it so a request cannot race the deadline.
+//
+// Deliberately not updateScoped-style "did it match": on this driver zero
+// changed rows has three meanings — no link, an expired link, or a live link
+// that already carried this deadline — and only the middle one is a refusal, so
+// the tie-breaker reads the row (expiryRefusal) and answers from its state.
+func (r *FolderShareRepo) SetExpiry(ctx context.Context, userID, folderID int64, expiresAt *time.Time) error {
+	now := time.Now().UTC()
+	res, err := r.db.ExecContext(ctx, `
+		UPDATE folder_shares SET expires_at = ?
+		WHERE folder_id = ? AND user_id = ?
+		  AND (expires_at IS NULL OR expires_at > ?)`,
+		expiresAt, folderID, userID, now,
+	)
+	if err != nil {
+		return fmt.Errorf("set folder share expiry: %w", err)
+	}
+	changed, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("set folder share expiry: rows affected: %w", err)
+	}
+	if changed > 0 {
+		return nil
+	}
+	return r.expiryRefusal(ctx, userID, folderID, now)
+}
+
+// expiryRefusal names why a guarded deadline write changed no row, without
+// changing anything itself: the predicate decided, this only explains.
+func (r *FolderShareRepo) expiryRefusal(ctx context.Context, userID, folderID int64, now time.Time) error {
+	var expiresAt *time.Time
+	err := r.db.QueryRowContext(ctx,
+		`SELECT expires_at FROM folder_shares WHERE folder_id = ? AND user_id = ?`,
+		folderID, userID,
+	).Scan(&expiresAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return apperror.ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("set folder share expiry: read row: %w", err)
+	}
+	if repository.ShareLinkExpired(expiresAt, now) {
+		return apperror.ErrShareExpired
+	}
+	return nil
+}
+
 // TouchView stamps last_viewed_at with now, at most once per window. See the
 // SQLite implementation and NoteRepo.TouchShareView: zero changed rows is the
 // answer here, not an ambiguity to resolve with a tie-breaker.
@@ -177,4 +228,73 @@ func (r *FolderShareRepo) ListChildNotes(ctx context.Context, userID, folderID i
 		items = append(items, item)
 	}
 	return items, rows.Err()
+}
+
+// ListShares returns the caller's own folder links, one row per live share, with
+// the token redacted to a display prefix and the folder's name as the title.
+//
+// It is the folder half of GET /api/v1/shares, and it exists because a folder
+// share is a *recursive* grant: before it, the only way to find one was to
+// remember which folder had been shared, which is the one thing a link is for
+// not having to remember. Revoking still happens on the folder route; this makes
+// the link findable so that route can be reached.
+//
+// Three deliberate choices:
+//
+//   - `fs.user_id = ?` is the whole authorisation, in SQL, like the note half.
+//     Another account's folder link cannot be in this answer, whatever the
+//     caller does with the request.
+//   - The join to `folders` is what supplies the name for display; it is
+//     INNER, so a share row that outlived its folder is not listed. The foreign
+//     key cascades, so that row should not exist — and a link to a folder that
+//     is not there does not resolve either.
+//   - There is no expiry predicate. An expired link is listed with its deadline
+//     visible, exactly as the note half lists one: the deadline is the only
+//     thing that explains why a URL the owner still has stopped answering.
+//     Filtering here would make the two halves of this one endpoint disagree
+//     about what "the links you have handed out" means.
+//
+// The ORDER BY is for debuggability, not for the contract: notes.Service
+// .ListShares merges this answer with the note half and imposes the one order the
+// endpoint promises (updated_at DESC, then kind, then id).
+func (r *FolderShareRepo) ListShares(ctx context.Context, userID int64) ([]model.ShareLink, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT fs.folder_id, f.name, fs.token, fs.expires_at, fs.last_viewed_at, fs.created_at
+		FROM folder_shares fs
+		JOIN folders f ON f.id = fs.folder_id AND f.user_id = fs.user_id
+		WHERE fs.user_id = ?
+		ORDER BY fs.created_at DESC, fs.folder_id ASC`, userID)
+	if err != nil {
+		return nil, fmt.Errorf("list folder shares: %w", err)
+	}
+	defer rows.Close()
+
+	var shares []model.ShareLink
+	for rows.Next() {
+		var (
+			link    model.ShareLink
+			folder  int64
+			title   string
+			token   string
+			created time.Time
+		)
+		if err := rows.Scan(&folder, &title, &token, &link.ExpiresAt, &link.LastViewedAt, &created); err != nil {
+			return nil, fmt.Errorf("scan folder share: %w", err)
+		}
+		folderID := folder
+		link.Kind = model.ShareKindFolder
+		// No note: a folder link is not a note link, and a zero here would be a
+		// note id that does not exist.
+		link.NoteID = nil
+		link.FolderID = &folderID
+		link.Title = title
+		link.TokenPrefix = repository.RedactShareToken(token)
+		// A folder share row has no updated_at: nothing edits it but rotation,
+		// which rewrites the token and the deadline and leaves created_at alone.
+		// Its creation is therefore the only "when did this link appear" the row
+		// can answer, which is what the list orders by.
+		link.UpdatedAt = created
+		shares = append(shares, link)
+	}
+	return shares, rows.Err()
 }

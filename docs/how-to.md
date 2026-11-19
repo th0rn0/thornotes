@@ -16,13 +16,14 @@ Thornotes is a self-hosted markdown notes app. Every note is a real `.md` file o
 8. [Board View](#board-view)
 9. [Search](#search)
 10. [Sharing Notes](#sharing-notes)
-11. [Journals](#journals)
-12. [Version History](#version-history)
-13. [Import](#import)
-14. [Themes](#themes)
-15. [API Tokens](#api-tokens)
-16. [MCP Server (AI Integration)](#mcp-server-ai-integration)
-17. [Keyboard Shortcuts](#keyboard-shortcuts)
+11. [Sharing a Folder](#sharing-a-folder)
+12. [Journals](#journals)
+13. [Version History](#version-history)
+14. [Import](#import)
+15. [Themes](#themes)
+16. [API Tokens](#api-tokens)
+17. [MCP Server (AI Integration)](#mcp-server-ai-integration)
+18. [Keyboard Shortcuts](#keyboard-shortcuts)
 
 ---
 
@@ -326,9 +327,40 @@ A share link can be given a deadline. Two ways, and the difference matters:
 
 An expired link answers exactly what a token that never existed answers — the same status, the same empty body, the same headers. There is nothing in the response that says "this was a real link once", because that is information the holder of a burned URL should not be able to get.
 
-**Your links, in one place: `GET /api/v1/shares`.** It lists the caller's own share links — note, folder, deadline, and when the link was last opened — with the token itself reduced to its first eight characters plus `…`. That is enough to match a row against a URL you still have and useless for replaying one: an endpoint that answered with every working token would turn one authenticated read into a bulk export of the capabilities themselves. It is what makes bulk revocation possible at all; before it, a link could only be cleared from the note that produced it.
+**Your links, in one place: `GET /api/v1/shares`.** It lists the caller's own share links of **both kinds** — note links and folder links — with the kind on each row (`"kind": "note"` or `"kind": "folder"`), the note's title or the folder's name, the deadline, and when the link was last opened. The token itself is reduced to its first eight characters plus `…`. That is enough to match a row against a URL you still have and useless for replaying one: an endpoint that answered with every working token would turn one authenticated read into a bulk export of the capabilities themselves. It is what makes bulk revocation possible at all; before it, a link could only be cleared from the note (or the folder) that produced it — and a folder you had to remember you had shared.
+
+A folder row carries `folder_id` (the folder to revoke) and a `note_id` of `null`; a note row carries `note_id` and, as before, the `folder_id` of the folder the note lives in. The order is part of the answer: newest first, ties broken by kind and then by id, so two identical calls return the same sequence. A link that has been revoked is gone from the list — revoking deletes the row — and a link that has **expired stays listed with its deadline**, so the panel can say why a URL you still have stopped answering.
 
 **Last opened** is recorded at most **once per link per ten minutes**. A share link is read-only, unauthenticated and easy to hit in a loop, so a write per view would let anyone holding a URL grow the database; one write per ten minutes caps a link at six an hour however hard it is hit, and still answers the only question the field is for — is this link still in use, and roughly when?
+
+---
+
+## Sharing a Folder
+
+A folder can be shared as one read-only link at `https://your-instance.example.com/f/{token}`. Anyone with that link reads the folder's contents with no account and no session, and the view is **live**: it shows the folder as it is when they open it, not as it was when you made the link. That has two consequences and both are the feature, not a caveat: a note you add to the folder later is published to everyone holding the link, and a note you move out of it is unpublished.
+
+Sharing is recursive. A link to `work` includes `work/projects` and everything under it, and a subfolder cannot be excluded from a link that covers its parent.
+
+Right-click the folder and choose **Share**. Before a link exists, the confirmation states the whole promise, not a summary of it:
+
+> Anyone with this link can read every note in **work**, including any note added to it later. Revoke the link to close it.
+
+(If your build predates the folder Share control, the same thing is one request: `POST /api/v1/folders/{id}/share` returns `{"share_token": "…"}`, and the link is `/f/{token}`.)
+
+Clicking **Share** on a folder that already has a link asks for confirmation and then **replaces** the link, exactly as it does for a note: the previous URL stops working at that moment. A folder link that is lost can therefore only be replaced, never recovered — `GET /api/v1/shares` deliberately answers with a prefix, not the token.
+
+### Seeing every link you have handed out, and revoking one
+
+Open the shared-links panel (the **link icon** in the sidebar toolbar). It lists every link you have handed out, of either kind, newest first, each row showing the note's title or the folder's name, the token's first eight characters, the deadline (or `never`) and when the link was last opened. Folder rows are marked `folder`.
+
+That panel is the only place a folder link has to be findable, and it exists because the alternative is worse than inconvenient: a folder link grants a whole subtree, so a link you cannot find is an entitlement you cannot close.
+
+- **Revoke from the panel.** Press **Revoke** on the row. The confirmation says what stops — every note in that folder and its subfolders, for everyone holding the URL — and the link stops resolving on the next request. There is no cache to expire and no session to wait out.
+- **Revoke from the folder.** Right-click the folder and choose **Unshare**. Same effect: the row is deleted.
+- **Revoking is not expiry.** A revoke deletes the link; a deadline makes a link stop answering at a moment. An expired link keeps its row in the panel with its deadline, which is what explains why a URL you still have stopped working.
+
+What also closes a folder link, without asking: deleting the folder, or deleting any folder above it. What does **not**: moving or renaming the folder, which keeps the link working because the share is keyed on the folder and not on its path — so a renamed bookmarked note *inside* the folder does stop resolving while the folder link itself keeps working.
+
 
 ---
 

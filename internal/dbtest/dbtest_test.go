@@ -183,6 +183,43 @@ func TestTruncateAll_EmptiesEveryTable(t *testing.T) {
 		"the migration ledger is not application data and must survive")
 }
 
+// TestTables_CoversEverySchemaTable is the guard the list above needs: it asks
+// the server which tables exist and fails when one of them is not in Tables.
+//
+// Without it, a migration that adds a table leaves Tables short and every
+// truncation silently leaves that table's rows behind, which presents as a
+// product failure in whichever suite runs next (ticket 616 slice 1 added
+// `folder_shares` and hit exactly this). schema_migrations is the one exception:
+// it is the migration ledger, not application data.
+func TestTables_CoversEverySchemaTable(t *testing.T) {
+	db := openTestDB(t, testDSN(t))
+
+	rows, err := db.Query(`SHOW TABLES`)
+	require.NoError(t, err)
+	defer rows.Close()
+
+	var onServer []string
+	for rows.Next() {
+		var name string
+		require.NoError(t, rows.Scan(&name))
+		if name == "schema_migrations" {
+			continue
+		}
+		onServer = append(onServer, name)
+	}
+	require.NoError(t, rows.Err())
+
+	known := map[string]bool{}
+	for _, table := range Tables {
+		known[table] = true
+	}
+	for _, table := range onServer {
+		assert.True(t, known[table],
+			"the schema has a table Tables does not: %q must be added to dbtest.Tables, "+
+				"or every truncation leaves its rows behind for the next suite", table)
+	}
+}
+
 // TestTruncateAll_RefusesWhenTheLockIsFree is the package that forgot TestMain:
 // the lock is held by nobody, so the truncation would be unguarded. It must be
 // refused, and refused before the first DELETE — a refusal that had already

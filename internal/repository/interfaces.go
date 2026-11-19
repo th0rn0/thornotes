@@ -169,6 +169,19 @@ type FolderShareRepository interface {
 	// unauthenticated, so a write per request would let anyone holding a URL
 	// grow the table.
 	TouchView(ctx context.Context, folderID int64, previous *time.Time, now time.Time, window time.Duration) (bool, error)
+	// SetExpiry sets or clears (nil) the deadline of a folder's live link
+	// without touching the token, so a deadline can be shortened, dropped or
+	// added without breaking URLs already handed out.
+	//
+	// It refuses a link whose current deadline has already passed, returning
+	// apperror.ErrShareExpired: moving a dead deadline forward and nulling it
+	// both publish the link again, which is a revival, and expiry is final
+	// (re-sharing rotates the token and leaves the old URL dead). The guard is a
+	// predicate on the UPDATE itself rather than a read before it, so a request
+	// cannot win a race against the deadline. A nil deadline — no expiry — is
+	// live and stays editable. It answers ErrNotFound when the folder is not the
+	// caller's or carries no link.
+	SetExpiry(ctx context.Context, userID, folderID int64, expiresAt *time.Time) error
 
 	// ListChildFolders returns one level of a folder's subfolders, ordered by
 	// name and keyset-paged on it (names are unique within a parent on both
@@ -179,6 +192,19 @@ type FolderShareRepository interface {
 	// ListByFolder: that one orders by updated_at and returns the whole folder,
 	// which an anonymous route cannot afford uncapped.
 	ListChildNotes(ctx context.Context, userID, folderID int64, after string, limit int) ([]*model.NoteListItem, error)
+
+	// ListShares returns the caller's own folder links, one row per live share,
+	// with the token reduced to a display prefix and the folder's name as the
+	// title. It is the folder half of GET /api/v1/shares: a folder link is a
+	// recursive grant, so a link the owner cannot find again is a link they
+	// cannot revoke, and finding it must not require remembering the folder.
+	//
+	// Like NoteRepository.ListShares it filters on "is there a share", not on
+	// expiry: an expired link belongs in the list with its deadline visible
+	// (see the note half's test, TestShareView_ExpiredLinkStillResolvesForItsOwner).
+	// It is scoped by user_id in SQL, so it can only ever answer with the
+	// caller's own rows.
+	ListShares(ctx context.Context, userID int64) ([]model.ShareLink, error)
 }
 
 type APITokenRepository interface {

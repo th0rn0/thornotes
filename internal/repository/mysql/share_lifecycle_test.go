@@ -138,7 +138,9 @@ func TestMySQL_NoteRepo_ListShares_RedactsToken(t *testing.T) {
 
 	byNote := map[int64]model.ShareLink{}
 	for _, s := range shares {
-		byNote[s.NoteID] = s
+		require.NotNil(t, s.NoteID, "a note row carries its note id")
+		assert.Equal(t, model.ShareKindNote, s.Kind)
+		byNote[*s.NoteID] = s
 		assert.NotEqual(t, tokenA, s.TokenPrefix)
 		assert.NotEqual(t, tokenB, s.TokenPrefix)
 	}

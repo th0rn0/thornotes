@@ -536,14 +536,30 @@ func TestFolderShare_MalformedBody_400AndTouchesNothing(t *testing.T) {
 	assert.Contains(t, string(raw), "request body must be a JSON object")
 	assert.Zero(t, rows(), "a refused request must not leave a token behind")
 
-	// An unknown field: expiry is slice 2, so a caller who sends a deadline must
-	// be told rather than handed an immortal link they believe is dated.
+	// An unknown field is still refused: `expires` is a typo for `expires_at`,
+	// and a caller who believed they set a deadline must be told rather than
+	// handed an immortal link they think is dated.
 	resp = f.client.do(t, http.MethodPost, path,
-		map[string]any{"expires_at": time.Now().UTC().Add(time.Hour).Format(time.RFC3339)})
+		map[string]any{"expires": time.Now().UTC().Add(time.Hour).Format(time.RFC3339)})
 	resp.Body.Close()
 	assert.Equal(t, http.StatusBadRequest, resp.StatusCode,
-		"expires_at is not accepted in slice 1; silently ignoring it would mislead")
+		"an unknown field must still be refused, not silently ignored")
 	assert.Zero(t, rows())
+
+	// expires_at IS accepted (slice 2): it is the same field the note-share route
+	// takes, and it applies to the link this request creates.
+	resp = f.client.do(t, http.MethodPost, path,
+		map[string]any{"expires_at": time.Now().UTC().Add(time.Hour).Format(time.RFC3339)})
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	resp.Body.Close()
+	require.Equal(t, 1, rows(), "a share carrying a deadline must store exactly one link")
+	assert.NotNil(t, storedFolderExpiry(t, f.client.pool, f.folderID),
+		"slice 2: expires_at must be stored on the row, not ignored")
+
+	// Revoking clears the row (and with it the deadline), which is where the
+	// fixture for the remaining assertions starts.
+	revokeFolderShare(t, f.client, f.folderID)
+	assert.Zero(t, rows(), "revoking deletes the row")
 
 	// A body that is absent entirely means "share", which is what the UI's
 	// one-click button sends.
