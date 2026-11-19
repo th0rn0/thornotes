@@ -54,3 +54,24 @@ func ShareViewDue(previous *time.Time, now time.Time, window time.Duration) bool
 	}
 	return now.Sub(*previous) >= window
 }
+
+// ShareLinkExpired reports whether a link carrying this deadline has stopped
+// answering at now. A nil deadline never expires: that is the default and the
+// value every link created before ticket 601 carries, so it must stay live.
+//
+// The boundary is inclusive — a link whose deadline is exactly now is dead —
+// because the alternative makes "expires at 12:00" answer at 12:00 exactly and
+// leaves a one-second window a caller could observe.
+//
+// It lives here, beside the other share rules, so the anonymous read path and
+// the two repositories' expiry guard cannot disagree about the boundary: the
+// SQL predicate in each dialect is this comparison, and internal/notes'
+// ShareLinkExpired is defined in terms of this function rather than repeating
+// it. One of the two drifting by a nanosecond would mean a link the reader sees
+// as dead and the owner can still edit, or the other way round.
+func ShareLinkExpired(expiresAt *time.Time, now time.Time) bool {
+	if expiresAt == nil {
+		return false
+	}
+	return !now.Before(*expiresAt)
+}

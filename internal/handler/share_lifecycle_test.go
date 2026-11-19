@@ -302,6 +302,10 @@ func TestShareCreate_PastDeadlineIsRejected(t *testing.T) {
 
 // TestShareExpiryPatch_ChangesDeadlineWithoutRotatingToken is why PATCH exists:
 // shortening or dropping a deadline must not break the URLs already handed out.
+//
+// Both shapes are exercised on a LIVE link, which is the only case where they are
+// still allowed: expiry is final, so a dead link cannot be edited at all (see
+// TestShareExpiryPatch_ExpiredLinkIsRefusedWith409).
 func TestShareExpiryPatch_ChangesDeadlineWithoutRotatingToken(t *testing.T) {
 	f := newIsolationFixture(t)
 	f.asAlice(t)
@@ -328,20 +332,101 @@ func TestShareExpiryPatch_ChangesDeadlineWithoutRotatingToken(t *testing.T) {
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	resp.Body.Close()
 
-	// And it takes effect: expire it via the DB and the link stops answering.
-	expireShare(t, f.client.pool, f.noteID)
-	resp = f.client.do(t, http.MethodGet, "/s/"+token, nil)
-	require.Equal(t, http.StatusNotFound, resp.StatusCode)
-	resp.Body.Close()
-
-	// Clearing the deadline makes the same token immortal again.
+	// Clearing the deadline on a live link still works, and still keeps the token:
+	// this is the "extend a circulating link" story the route was built for.
 	resp = f.client.do(t, http.MethodPatch, path, map[string]any{"clear_expiry": true})
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	resp.Body.Close()
 
-	resp = f.client.do(t, http.MethodGet, "/s/"+token, nil)
-	require.Equal(t, http.StatusOK, resp.StatusCode, "clearing the deadline must revive the same link")
+	assert.Nil(t, storedExpiryInstant(t, f.client.pool, f.noteID),
+		"clearing a live link's deadline must remove the deadline")
+
+	resp = f.client.do(t, http.MethodGet, "/api/v1/notes/"+i64str(f.noteID), nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
 	resp.Body.Close()
+
+	require.NoError(t, f.client.pool.ReadDB.QueryRow(
+		`SELECT share_token FROM notes WHERE id = ?`, f.noteID).Scan(&stored))
+	require.NotNil(t, stored)
+	assert.Equal(t, token, *stored, "clearing a deadline must not rotate the token either")
+
+	resp = f.client.do(t, http.MethodGet, "/s/"+token, nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode, "a live link with no deadline must still resolve")
+	resp.Body.Close()
+}
+
+// TestShareExpiryPatch_ExpiredLinkIsRefusedWith409 is the acceptance test for
+// "expired is final" over HTTP.
+//
+// Both write shapes are refused with 409 — not 400 (the request is well-formed
+// and the caller owns the link) and not 500 (nothing failed) — and the old URL is
+// still dead afterwards. Clearing the deadline is included deliberately: making
+// expires_at NULL does not extend a dead link, it makes it immortal, so a guard
+// that only caught the future-dated write would leave the stronger revival open.
+func TestShareExpiryPatch_ExpiredLinkIsRefusedWith409(t *testing.T) {
+	f := newIsolationFixture(t)
+	f.asAlice(t)
+
+	noteID := isolationCreateNote(t, f.client, nil, "Expiring note")
+	token := shareNote(t, f.client, noteID, map[string]any{
+		"expires_at": time.Now().UTC().Add(time.Hour).Format(time.RFC3339),
+	})
+	expireShare(t, f.client.pool, noteID)
+
+	path := "/api/v1/notes/" + i64str(noteID) + "/share"
+
+	// A deadline far enough ahead that only the expired state can refuse it.
+	future := time.Now().UTC().Add(48 * time.Hour).Truncate(time.Second)
+	shapes := []struct {
+		name string
+		body map[string]any
+	}{
+		{"extending the deadline", map[string]any{"expires_at": future.Format(time.RFC3339)}},
+		{"clearing the deadline", map[string]any{"clear_expiry": true}},
+	}
+
+	for _, shape := range shapes {
+		t.Run(shape.name, func(t *testing.T) {
+			resp := f.client.do(t, http.MethodPatch, path, shape.body)
+			defer resp.Body.Close()
+
+			require.Equal(t, http.StatusConflict, resp.StatusCode,
+				"an expired link must refuse a deadline edit with 409")
+
+			var out map[string]any
+			decodeInto(t, resp, &out)
+			assert.Equal(t, notes.ShareExpiredMessage, out["error"],
+				"the body must explain what happened and what to do instead: %v", out)
+
+			// The refusal stuck: the deadline is still in the past and the URL is
+			// still dead. A 409 that had written anyway would be worse than a 200.
+			stored := storedExpiryInstant(t, f.client.pool, noteID)
+			require.NotNil(t, stored, "a refused PATCH must leave the deadline in place")
+			assert.True(t, notes.ShareLinkExpired(stored, time.Now().UTC()),
+				"the deadline must still be in the past after a refused write: %s", stored)
+
+			view := f.client.do(t, http.MethodGet, "/s/"+token, nil)
+			view.Body.Close()
+			assert.Equal(t, http.StatusNotFound, view.StatusCode,
+				"the expired URL must stay dead after a refused revival")
+		})
+	}
+
+	// The one way back: a fresh share, which rotates the token. The old URL does
+	// not come back with it.
+	fresh := shareNote(t, f.client, noteID, map[string]any{
+		"expires_at": future.Format(time.RFC3339),
+	})
+	require.NotEqual(t, token, fresh, "re-sharing must rotate the token")
+
+	resp := f.client.do(t, http.MethodGet, "/s/"+fresh, nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode, "the new link must resolve")
+	resp.Body.Close()
+
+	resp = f.client.do(t, http.MethodGet, "/s/"+token, nil)
+	resp.Body.Close()
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode,
+		"the expired URL must stay dead even after a fresh share is issued")
 }
 
 // TestShareExpiryPatch_RequiresAnInstruction: an empty body must not be able to

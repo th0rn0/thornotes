@@ -363,8 +363,21 @@ func (r *NoteRepo) SetShareToken(ctx context.Context, userID, noteID int64, toke
 	// ten-minute bound then suppressed the new link's genuine first view. On a
 	// clear there is no link left to have views, so the stamp goes too — a note
 	// that is not shared must not carry a history that the next link inherits.
+	//
+	// expires_at goes with it for the same reason, and for one more: expiry is
+	// final (a deadline that has passed cannot be rewritten — see
+	// SetShareExpiry), so the only way back from a dead link is a fresh share.
+	// That fresh share has to clear the old deadline in the same statement that
+	// rotates the token, because the deadline write that follows would
+	// otherwise be refused by the very guard that makes expiry final — every
+	// new link would be born dead and un-editable. The deadline for the new
+	// link is then written by the caller (SetShareExpiry with NULL is a no-op
+	// over the NULL this leaves), so no link ever keeps the previous link's
+	// deadline, which is the invariant the old two-step clear existed to
+	// protect.
 	res, err := r.writeDB.ExecContext(ctx,
-		`UPDATE notes SET share_token = ?, last_viewed_at = NULL WHERE id = ? AND user_id = ?`,
+		`UPDATE notes SET share_token = ?, last_viewed_at = NULL, expires_at = NULL
+		 WHERE id = ? AND user_id = ?`,
 		token, noteID, userID,
 	)
 	if err != nil {
@@ -392,13 +405,31 @@ func (r *NoteRepo) SetShareToken(ctx context.Context, userID, noteID int64, toke
 // It is separate from SetShareToken because expiry is not part of what revokes a
 // link: a user can shorten or drop a deadline without rotating the token and
 // breaking every URL already handed out.
+//
+// An EXPIRED link is refused, with apperror.ErrShareExpired, for both shapes:
+// moving a dead deadline forward, and clearing it. Clearing is the stronger of
+// the two — expires_at = NULL makes the link immortal — so a guard that only
+// caught the future-dated write would leave the more thorough revival open. A
+// deadline that anyone can silently undo is not a deadline, and a recipient's
+// 404 would stop being information they can trust. The way back is a fresh
+// share, which rotates the token and leaves the old URL dead.
 func (r *NoteRepo) SetShareExpiry(ctx context.Context, userID, noteID int64, expiresAt *time.Time) error {
-	// Guarded on share_token IS NOT NULL: a deadline on a note that is not
+	// The guard is a predicate on the UPDATE itself, not a read before it: with
+	// a check-then-write, a request that arrived while the row was live would
+	// still land after the deadline passed, and two concurrent PATCHes could
+	// both observe "live" and one of them revive a link the other had just
+	// found dead. `now` is bound once, so the row is compared against a single
+	// instant for the whole statement.
+	//
+	// Guarded on share_token IS NOT NULL too: a deadline on a note that is not
 	// shared is a value nothing reads, and reporting success would tell the
 	// caller a link now expires when there is no link.
+	now := time.Now().UTC()
 	res, err := r.writeDB.ExecContext(ctx,
-		`UPDATE notes SET expires_at = ? WHERE id = ? AND user_id = ? AND share_token IS NOT NULL`,
-		expiresAt, noteID, userID,
+		`UPDATE notes SET expires_at = ?
+		 WHERE id = ? AND user_id = ? AND share_token IS NOT NULL
+		   AND (expires_at IS NULL OR expires_at > ?)`,
+		expiresAt, noteID, userID, now,
 	)
 	if err != nil {
 		return fmt.Errorf("set share expiry: %w", err)
@@ -408,9 +439,38 @@ func (r *NoteRepo) SetShareExpiry(ctx context.Context, userID, noteID int64, exp
 		return fmt.Errorf("set share expiry: rows affected: %w", err)
 	}
 	if n == 0 {
-		return apperror.ErrNotFound
+		return r.shareExpiryRefusal(ctx, userID, noteID, now)
 	}
 	return nil
+}
+
+// shareExpiryRefusal names the reason a guarded expiry write matched no row.
+//
+// It runs only after the write has already been refused, and it decides nothing
+// about the write — the predicate did that. All it does is choose between the
+// two honest answers: no link to edit (not found), or a link that has expired
+// (conflict). Reading the row here cannot resurrect the race the predicate
+// closed, because a misclassification would at worst report not-found for a row
+// that changed under the caller's feet, and never a successful write.
+func (r *NoteRepo) shareExpiryRefusal(ctx context.Context, userID, noteID int64, now time.Time) error {
+	var (
+		token     *string
+		expiresAt *time.Time
+	)
+	err := r.readDB.QueryRowContext(ctx,
+		`SELECT share_token, expires_at FROM notes WHERE id = ? AND user_id = ?`,
+		noteID, userID,
+	).Scan(&token, &expiresAt)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && token == nil) {
+		return apperror.ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("set share expiry: read row: %w", err)
+	}
+	if repository.ShareLinkExpired(expiresAt, now) {
+		return apperror.ErrShareExpired
+	}
+	return apperror.ErrNotFound
 }
 
 // ListShares returns the caller's own share links with the token redacted to a

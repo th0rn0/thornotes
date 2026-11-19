@@ -250,6 +250,137 @@ func TestNoteRepo_SetShareExpiry_UnsharedNoteIsNotFound(t *testing.T) {
 	assert.ErrorIs(t, err, apperror.ErrNotFound)
 }
 
+// storedExpiry reads the deadline as the row holds it, which is the only way to
+// prove a refused write wrote nothing: the caller who is refused gets an error,
+// not a value to compare against.
+func storedExpiry(t *testing.T, pool *db.Pool, noteID int64) *time.Time {
+	t.Helper()
+	var expiresAt *time.Time
+	require.NoError(t, pool.ReadDB.QueryRow(
+		`SELECT expires_at FROM notes WHERE id = ?`, noteID).Scan(&expiresAt))
+	return expiresAt
+}
+
+// TestNoteRepo_SetShareExpiry_ExpiredLinkIsRefused is the SQLite leg of "expired
+// is final", and it pins BOTH write shapes: a new future deadline, and a clear.
+//
+// Clearing is the one that is easy to miss. expires_at = NULL does not extend a
+// dead link, it makes it immortal — a stronger revival than the future-dated
+// write — so a guard that only tests the shape a caller reaches for first would
+// leave the more thorough revival open.
+func TestNoteRepo_SetShareExpiry_ExpiredLinkIsRefused(t *testing.T) {
+	pool := openTestDB(t)
+	user := createUser(t, pool)
+	repo := NewNoteRepo(pool.ReadDB, pool.WriteDB)
+	ctx := context.Background()
+
+	token := "expired0000000000000000000000001"
+	note := linkNote(t, repo, user.ID, "Dead Link", "dead-link", &token)
+
+	// The deadline is moved into the past in the database, which is how time
+	// passing produces this state without anybody calling the API (the API
+	// refuses to create a link that is dead on arrival).
+	deadline := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
+	res, err := pool.WriteDB.Exec(`UPDATE notes SET expires_at = ? WHERE id = ?`, deadline, note.ID)
+	require.NoError(t, err)
+	n, err := res.RowsAffected()
+	require.NoError(t, err)
+	require.EqualValues(t, 1, n, "the fixture must have expired the link it then edits")
+
+	t.Run("extending the deadline", func(t *testing.T) {
+		future := time.Now().UTC().Add(time.Hour)
+		err := repo.SetShareExpiry(ctx, user.ID, note.ID, &future)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, apperror.ErrShareExpired,
+			"a future deadline on a dead link is a revival, and the repository is where it is refused")
+		assert.True(t, deadline.Equal(*storedExpiry(t, pool, note.ID)),
+			"a refused write must leave the deadline where it was")
+	})
+
+	t.Run("clearing the deadline", func(t *testing.T) {
+		err := repo.SetShareExpiry(ctx, user.ID, note.ID, nil)
+		require.Error(t, err, "nulling the deadline would make the dead link immortal")
+		assert.ErrorIs(t, err, apperror.ErrShareExpired)
+		assert.NotNil(t, storedExpiry(t, pool, note.ID),
+			"a refused clear must leave the deadline in place, not NULL")
+	})
+
+	// Nothing above rotated the token, so the dead URL is still the dead URL.
+	read, err := repo.GetByShareToken(ctx, token)
+	require.NoError(t, err, "the row is still there; expiry is checked by the reader, not the lookup")
+	require.NotNil(t, read.ExpiresAt)
+	assert.True(t, deadline.Equal(*read.ExpiresAt), "the dead deadline must not have moved")
+}
+
+// TestNoteRepo_SetShareExpiry_LiveLinkStaysEditable is the other half of the
+// rule, and the reason PATCH exists at all: on a live link, extending and
+// clearing a deadline must keep working and must not rotate the token, because
+// rotation would revoke every copy already in circulation.
+func TestNoteRepo_SetShareExpiry_LiveLinkStaysEditable(t *testing.T) {
+	pool := openTestDB(t)
+	user := createUser(t, pool)
+	repo := NewNoteRepo(pool.ReadDB, pool.WriteDB)
+	ctx := context.Background()
+
+	token := "livelink000000000000000000000001"
+	note := linkNote(t, repo, user.ID, "Live Link", "live-link", &token)
+
+	first := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
+	require.NoError(t, repo.SetShareExpiry(ctx, user.ID, note.ID, &first),
+		"adding a deadline to a live link must succeed")
+	require.NotNil(t, storedExpiry(t, pool, note.ID))
+
+	second := time.Now().UTC().Add(2 * time.Hour).Truncate(time.Second)
+	require.NoError(t, repo.SetShareExpiry(ctx, user.ID, note.ID, &second),
+		"extending a live link's deadline must succeed without rotating the token")
+	assert.True(t, second.Equal(storedExpiry(t, pool, note.ID).UTC()))
+
+	require.NoError(t, repo.SetShareExpiry(ctx, user.ID, note.ID, nil),
+		"clearing a live link's deadline must still succeed")
+	assert.Nil(t, storedExpiry(t, pool, note.ID))
+
+	read, err := repo.GetByShareToken(ctx, token)
+	require.NoError(t, err)
+	assert.Equal(t, token, *read.ShareToken, "no deadline edit may rotate the token")
+	assert.Nil(t, read.ExpiresAt)
+}
+
+// TestNoteRepo_SetShareToken_ClearsExpiry is what makes a fresh share the way
+// back from a dead link: rotating the token must drop the old deadline in the
+// same statement, or the write that sets the new link's deadline would be
+// refused by the very guard that makes expiry final.
+func TestNoteRepo_SetShareToken_ClearsExpiry(t *testing.T) {
+	pool := openTestDB(t)
+	user := createUser(t, pool)
+	repo := NewNoteRepo(pool.ReadDB, pool.WriteDB)
+	ctx := context.Background()
+
+	first := "reshares000000000000000000000001"
+	note := linkNote(t, repo, user.ID, "Reshared", "reshared", &first)
+
+	deadline := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
+	_, err := pool.WriteDB.Exec(`UPDATE notes SET expires_at = ? WHERE id = ?`, deadline, note.ID)
+	require.NoError(t, err)
+	require.NotNil(t, storedExpiry(t, pool, note.ID))
+
+	second := "reshares000000000000000000000002"
+	require.NoError(t, repo.SetShareToken(ctx, user.ID, note.ID, &second))
+	assert.Nil(t, storedExpiry(t, pool, note.ID),
+		"the rotating statement must clear the previous link's deadline")
+
+	// And the new link's deadline can then be written, which is the whole point.
+	future := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
+	require.NoError(t, repo.SetShareExpiry(ctx, user.ID, note.ID, &future),
+		"a link created by re-sharing must be editable")
+	require.NotNil(t, storedExpiry(t, pool, note.ID))
+
+	// Revoking clears it too: a note that is not shared must not carry a deadline
+	// into its next link, and it must be revocable at all — expiry is final for
+	// the public URL, not for the owner's ability to destroy the link.
+	require.NoError(t, repo.SetShareToken(ctx, user.ID, note.ID, nil))
+	assert.Nil(t, storedExpiry(t, pool, note.ID))
+}
+
 // TestNoteRepo_SetShareToken_ResetsLastViewedAt is the SQLite leg of the
 // rotation rule: last_viewed_at belongs to the token that was current when the
 // view happened, so the statement that moves the token must drop it.

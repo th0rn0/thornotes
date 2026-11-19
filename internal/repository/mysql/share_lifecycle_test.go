@@ -180,6 +180,131 @@ func TestMySQL_NoteRepo_SetShareExpiry_UnsharedNoteIsNotFound(t *testing.T) {
 	assert.ErrorIs(t, err, apperror.ErrNotFound)
 }
 
+// mysqlStoredExpiry reads the deadline as the row holds it. A refused write is
+// proved by this value being unchanged, not by the error alone: an error plus a
+// written column would be the worst of both.
+func mysqlStoredExpiry(t *testing.T, pool *db.Pool, noteID int64) *time.Time {
+	t.Helper()
+	var expiresAt *time.Time
+	require.NoError(t, pool.ReadDB.QueryRow(
+		`SELECT expires_at FROM notes WHERE id = ?`, noteID).Scan(&expiresAt))
+	return expiresAt
+}
+
+// TestMySQL_NoteRepo_SetShareExpiry_ExpiredLinkIsRefused is the MariaDB leg of
+// "expired is final", for both write shapes.
+//
+// It is a separate test from the SQLite one on purpose: the guard is a
+// comparison between a bound time and a DATETIME column inside an UPDATE, and the
+// two engines do not answer that question the same way — MariaDB truncates the
+// bound value to the column's second precision, SQLite compares the text form its
+// driver stores — so "the SQLite suite proves it" is not evidence here.
+func TestMySQL_NoteRepo_SetShareExpiry_ExpiredLinkIsRefused(t *testing.T) {
+	pool := openTestMySQL(t)
+	user := createMySQLUser(t, pool)
+	repo := NewNoteRepo(pool.WriteDB)
+	ctx := context.Background()
+
+	token := "expired0000000000000000000000001"
+	note := mysqlLinkNote(t, repo, user.ID, "Dead Link", "dead-link", &token)
+
+	deadline := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
+	res, err := pool.WriteDB.Exec(`UPDATE notes SET expires_at = ? WHERE id = ?`, deadline, note.ID)
+	require.NoError(t, err)
+	n, err := res.RowsAffected()
+	require.NoError(t, err)
+	require.EqualValues(t, 1, n, "the fixture must have expired the link it then edits")
+
+	t.Run("extending the deadline", func(t *testing.T) {
+		future := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
+		err := repo.SetShareExpiry(ctx, user.ID, note.ID, &future)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, apperror.ErrShareExpired,
+			"on a dead link the guard must win over the driver's changed-rows answer")
+		stored := mysqlStoredExpiry(t, pool, note.ID)
+		require.NotNil(t, stored)
+		assert.True(t, deadline.Equal(stored.UTC()), "a refused write must leave the deadline alone")
+	})
+
+	t.Run("clearing the deadline", func(t *testing.T) {
+		err := repo.SetShareExpiry(ctx, user.ID, note.ID, nil)
+		require.Error(t, err, "nulling the deadline would make the dead link immortal")
+		assert.ErrorIs(t, err, apperror.ErrShareExpired)
+		assert.NotNil(t, mysqlStoredExpiry(t, pool, note.ID),
+			"a refused clear must leave the deadline in place, not NULL")
+	})
+}
+
+// TestMySQL_NoteRepo_SetShareExpiry_LiveLinkStaysEditable keeps the other half:
+// a live link's deadline can still be added, extended and cleared, and the token
+// never moves. The unchanged-deadline case is asserted too, because on this
+// driver "changed no rows" is also what re-writing the same value looks like and
+// that must not be read as a refusal.
+func TestMySQL_NoteRepo_SetShareExpiry_LiveLinkStaysEditable(t *testing.T) {
+	pool := openTestMySQL(t)
+	user := createMySQLUser(t, pool)
+	repo := NewNoteRepo(pool.WriteDB)
+	ctx := context.Background()
+
+	token := "livelink000000000000000000000001"
+	note := mysqlLinkNote(t, repo, user.ID, "Live Link", "live-link", &token)
+
+	first := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
+	require.NoError(t, repo.SetShareExpiry(ctx, user.ID, note.ID, &first),
+		"adding a deadline to a live link must succeed")
+	require.NotNil(t, mysqlStoredExpiry(t, pool, note.ID))
+
+	require.NoError(t, repo.SetShareExpiry(ctx, user.ID, note.ID, &first),
+		"re-setting an unchanged deadline must stay a success, not a refusal")
+
+	second := time.Now().UTC().Add(2 * time.Hour).Truncate(time.Second)
+	require.NoError(t, repo.SetShareExpiry(ctx, user.ID, note.ID, &second),
+		"extending a live link's deadline must succeed without rotating the token")
+	stored := mysqlStoredExpiry(t, pool, note.ID)
+	require.NotNil(t, stored)
+	assert.True(t, second.Equal(stored.UTC()))
+
+	require.NoError(t, repo.SetShareExpiry(ctx, user.ID, note.ID, nil),
+		"clearing a live link's deadline must still succeed")
+	assert.Nil(t, mysqlStoredExpiry(t, pool, note.ID))
+
+	read, err := repo.GetByShareToken(ctx, token)
+	require.NoError(t, err)
+	assert.Equal(t, token, *read.ShareToken, "no deadline edit may rotate the token")
+	assert.Nil(t, read.ExpiresAt)
+}
+
+// TestMySQL_NoteRepo_SetShareToken_ClearsExpiry: the rotating statement must drop
+// the previous deadline, or a fresh share — the only way back from a dead link —
+// would be born dead and refused.
+func TestMySQL_NoteRepo_SetShareToken_ClearsExpiry(t *testing.T) {
+	pool := openTestMySQL(t)
+	user := createMySQLUser(t, pool)
+	repo := NewNoteRepo(pool.WriteDB)
+	ctx := context.Background()
+
+	first := "reshares000000000000000000000001"
+	note := mysqlLinkNote(t, repo, user.ID, "Reshared", "reshared", &first)
+
+	deadline := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
+	_, err := pool.WriteDB.Exec(`UPDATE notes SET expires_at = ? WHERE id = ?`, deadline, note.ID)
+	require.NoError(t, err)
+	require.NotNil(t, mysqlStoredExpiry(t, pool, note.ID))
+
+	second := "reshares000000000000000000000002"
+	require.NoError(t, repo.SetShareToken(ctx, user.ID, note.ID, &second))
+	assert.Nil(t, mysqlStoredExpiry(t, pool, note.ID),
+		"the rotating statement must clear the previous link's deadline")
+
+	future := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
+	require.NoError(t, repo.SetShareExpiry(ctx, user.ID, note.ID, &future),
+		"a link created by re-sharing must be editable")
+
+	// Revoking clears the deadline with the token, and must work on any link.
+	require.NoError(t, repo.SetShareToken(ctx, user.ID, note.ID, nil))
+	assert.Nil(t, mysqlStoredExpiry(t, pool, note.ID))
+}
+
 // TestMySQL_NoteRepo_SetShareToken_ResetsLastViewedAt is the MariaDB leg of the
 // rotation rule. It is separate from the SQLite test on purpose: the two
 // repositories reach "zero rows affected" differently (updateScoped's existence

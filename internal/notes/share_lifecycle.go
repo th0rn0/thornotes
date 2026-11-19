@@ -8,8 +8,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/rs/zerolog/log"
-
 	"github.com/th0rn0/thornotes/internal/apperror"
 	"github.com/th0rn0/thornotes/internal/model"
 	"github.com/th0rn0/thornotes/internal/repository"
@@ -73,6 +71,13 @@ func normalizeShareExpiry(expiresAt *time.Time) (*time.Time, error) {
 	return &utc, nil
 }
 
+// ShareExpiredMessage is what an owner is told when a deadline write is refused
+// because the link has already expired. It names the only way forward on
+// purpose: a caller told merely "conflict" would try the same PATCH again, and
+// re-sharing is the one action that works (it issues a new token, and the old
+// URL stays dead).
+const ShareExpiredMessage = "this share link has expired; share the note again to create a new link"
+
 // GetNoteByShareToken returns the note behind a public share token, or
 // apperror.ErrNotFound when there is no link or the link has expired.
 //
@@ -99,11 +104,12 @@ func (s *Service) GetNoteByShareToken(ctx context.Context, token string) (*model
 // The boundary is inclusive — a link whose deadline is exactly now is dead —
 // because the alternative makes "expires at 12:00" answer at 12:00 exactly and
 // leaves a one-second window a caller could observe.
+//
+// The rule itself lives in repository.ShareLinkExpired and is delegated to from
+// here, so the public read path and the two repositories' expiry guard are one
+// comparison rather than two that can drift apart at the boundary.
 func ShareLinkExpired(expiresAt *time.Time, now time.Time) bool {
-	if expiresAt == nil {
-		return false
-	}
-	return !now.Before(*expiresAt)
+	return repository.ShareLinkExpired(expiresAt, now)
 }
 
 // SetShareToken generates a new share token for a note, or clears the existing
@@ -115,16 +121,13 @@ func ShareLinkExpired(expiresAt *time.Time, now time.Time) bool {
 // silently apply to the next link somebody creates.
 func (s *Service) SetShareToken(ctx context.Context, userID, noteID int64, clear bool, expiresAt *time.Time) (*string, error) {
 	if clear {
-		// The deadline goes first: SetShareExpiry only writes to a row that still
-		// has a token, so clearing the token first would leave expires_at behind
-		// and a note that is not shared would silently carry a deadline into its
-		// next link.
-		//
-		// Not fatal when it fails: a note that was never shared has no deadline
-		// to drop, and the token clear below reports not-found for the caller.
-		if err := s.notes.SetShareExpiry(ctx, userID, noteID, nil); err != nil && !errors.Is(err, apperror.ErrNotFound) {
-			log.Warn().Err(err).Int64("note_id", noteID).Msg("clear share expiry before revoking token")
-		}
+		// Clearing the token clears the deadline with it, in the same statement
+		// (see the repository): a note that is not shared must not carry a
+		// deadline into its next link. That used to be a separate
+		// SetShareExpiry call here, which no longer works — that door refuses a
+		// link that has expired, because expiry is final — and revoking an
+		// expired link must still succeed. Revocation is not a revival: it
+		// destroys the link rather than publishing it again.
 		return nil, s.notes.SetShareToken(ctx, userID, noteID, nil)
 	}
 
@@ -150,11 +153,16 @@ func (s *Service) SetShareToken(ctx context.Context, userID, noteID int64, clear
 	// that was just created, so leaving a previous deadline on the row would
 	// make a re-shared link without an expiry silently die at the old one's
 	// deadline.
+	//
+	// The token write above cleared the old deadline in the same statement,
+	// which is what makes this write possible on a note whose previous link had
+	// expired: re-sharing is the one way back from a dead link, so the guard
+	// that refuses a deadline change on an expired row must not refuse this.
 	if err := s.notes.SetShareExpiry(ctx, userID, noteID, expiry); err != nil {
 		// The token landed but the deadline did not. Reporting success would
 		// claim an expiry the row does not have, so this is an error — the
 		// caller can clear the share and retry.
-		return nil, fmt.Errorf("set share expiry: %w", err)
+		return nil, mapShareExpiryError(fmt.Errorf("set share expiry: %w", err))
 	}
 	return &token, nil
 }
@@ -178,6 +186,14 @@ func newShareToken() (string, error) {
 // SetShareExpiry changes the deadline on an existing link (nil = no expiry)
 // without rotating the token, so URLs already handed out keep working.
 //
+// It refuses a link that has already expired, whether the caller is moving the
+// deadline forward or clearing it: expired is final, and the way back is a fresh
+// share (SetShareToken), which rotates the token and leaves the old URL dead.
+// The refusal is the repository's — the guard is a predicate on the UPDATE, so a
+// request cannot slip between a check here and the write there — and it is turned
+// into a 409 with an explanation at this layer, because the repository speaks in
+// sentinels and the caller needs to be told what to do instead.
+//
 // The deadline is normalised to UTC here for the same reason SetShareToken does
 // it: PATCH is the other door into expires_at, and leaving one of them
 // un-normalised would leave the SQLite poisoning reachable.
@@ -186,7 +202,20 @@ func (s *Service) SetShareExpiry(ctx context.Context, userID, noteID int64, expi
 	if err != nil {
 		return err
 	}
-	return s.notes.SetShareExpiry(ctx, userID, noteID, expiry)
+	return mapShareExpiryError(s.notes.SetShareExpiry(ctx, userID, noteID, expiry))
+}
+
+// mapShareExpiryError turns the repository's Expired sentinel into the 409 the
+// caller sees, and leaves every other error as it found it.
+//
+// One place, rather than one per caller: both doors into expires_at (POST with a
+// deadline, PATCH) must answer an expired link identically, and a divergence
+// would be a route that reports 500 for a state the other explains.
+func mapShareExpiryError(err error) error {
+	if err == nil || !errors.Is(err, apperror.ErrShareExpired) {
+		return err
+	}
+	return apperror.ShareExpired(ShareExpiredMessage)
 }
 
 // ListShares returns the caller's own share links, token redacted to a prefix.
