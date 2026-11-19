@@ -55,6 +55,12 @@ let searchResults = null;    // null = not in search mode
 let _pendingTablePaste = null; // { from, text, rows } set while paste-convert bar is visible
 let journals = [];           // all journals for current user
 let currentFolderViewId = null; // folder ID currently shown in folder view (null = not shown)
+// folderShares tracks which folders have live share links. Keyed by folder ID,
+// each value is { share_token, expires_at, last_viewed_at } from the most
+// recent GET /api/v1/shares. A folder absent from the map has no share link.
+// Populated by refreshFolderSharesFromServer() and consumed by
+// syncFolderShareControls() to decide whether to show Share or Unshare.
+let folderShares = {};
 
 const AUTO_SAVE_DELAY_MS = 1500;
 
@@ -954,6 +960,12 @@ function showFolderView(folderId) {
   const titleEl = document.getElementById('folder-view-title');
   titleEl.textContent = folder ? folder.name : 'Folder';
 
+  // Refresh folder share state from the server and sync the controls. The
+  // share state is not carried by the folder tree, so we must fetch it from
+  // GET /api/v1/shares. Best effort: a failed fetch leaves the controls as
+  // they were rather than blocking the folder view.
+  refreshFolderSharesFromServer().then(() => syncFolderShareControls());
+
   const grid = document.getElementById('folder-view-grid');
   if (notes.length === 0) {
     grid.innerHTML = '<div class="folder-view-empty">No notes in this folder yet.</div>';
@@ -986,6 +998,8 @@ function showFolderView(folderId) {
 function closeFolderView() {
   currentFolderViewId = null;
   document.getElementById('folder-view').style.display = 'none';
+  // Hide folder share controls when leaving the folder view.
+  syncFolderShareControls();
 }
 
 function noteStats(content) {
@@ -2372,6 +2386,274 @@ function isExpired(iso) {
   return Number.isFinite(d.getTime()) && d.getTime() < Date.now();
 }
 
+// ── Folder sharing ──────────────────────────────────────────────────────────
+//
+// A folder share is a live, recursive link: every note in the folder and its
+// subfolders is published through /f/<token>, and any note added or edited
+// later appears through the same URL. There is no way to exclude one note.
+// Re-sharing rotates the token and kills the old URL immediately. The
+// confirmation copy in shareFolder() must say all of that, in those words,
+// because a generic "share this folder?" would understate what the link does.
+
+// FOLDER_SHARE_CONFIRMATION_COPY is the exact text shown when a user shares a
+// folder that already has a live link (rotation case). Pinned here so a test
+// can assert the words that make the promise: live, recursive, subfolder,
+// token rotation. A later edit that weakens any of these must fail the test.
+const FOLDER_SHARE_CONFIRMATION_COPY =
+  'This folder already has a share link. Generating a new one replaces it, ' +
+  'and the existing link stops working immediately.\n\n' +
+  'A folder share is live and recursive: every note in this folder and its ' +
+  'subfolders is published through the link, and any note added or edited ' +
+  'later appears through the same URL. There is no way to exclude one note.';
+
+// FOLDER_SHARE_FIRST_COPY is the text shown when a user shares a folder that
+// has no link yet. Same promise, no rotation warning.
+const FOLDER_SHARE_FIRST_COPY =
+  'A folder share is live and recursive: every note in this folder and its ' +
+  'subfolders is published through the link, and any note added or edited ' +
+  'later appears through the same URL. There is no way to exclude one note.\n\n' +
+  'Re-sharing this folder later will rotate the token and kill the old URL.';
+
+// shareFolder issues or rotates a share link for the currently viewed folder.
+// The confirmation copy is part of the deliverable, not decoration: it must
+// say the link is live, recursive, covers subfolders, and that re-sharing
+// rotates the token. The words are pinned by the test file.
+async function shareFolder() {
+  if (!currentFolderViewId) return;
+  const folder = folders.find(f => f.id === currentFolderViewId);
+  if (!folder) return;
+
+  const existing = folderShares[currentFolderViewId];
+  const hasExisting = existing && existing.share_token;
+  const copy = hasExisting ? FOLDER_SHARE_CONFIRMATION_COPY : FOLDER_SHARE_FIRST_COPY;
+
+  if (!confirm(copy)) return;
+
+  // Offer an optional deadline, same shape as shareNote.
+  const expiryInput = prompt(
+    'Set a deadline for this link (hours from now), or leave empty for no expiry:',
+    ''
+  );
+  if (expiryInput === null) return; // cancelled
+  const body = {};
+  if (expiryInput.trim() !== '') {
+    const hours = Number(expiryInput);
+    if (!Number.isFinite(hours) || hours <= 0) {
+      showNotification('Deadline must be a positive number of hours.');
+      return;
+    }
+    body.expires_at = new Date(Date.now() + hours * 3600 * 1000).toISOString();
+  }
+
+  let res;
+  try {
+    res = await api('POST', `/api/v1/folders/${currentFolderViewId}/share`, body);
+  } catch (e) {
+    // A 409 from the server (expired link) must surface the server's message
+    // rather than a generic failure. The same discipline as applyShareRefusal.
+    if (e && e.status === 409) {
+      showNotification(e.message || 'This share link has expired. Share the folder again for a new link.');
+      await refreshFolderSharesFromServer();
+      return;
+    }
+    showNotification(`Could not create share link: ${e.message || 'request failed'}`);
+    return;
+  }
+
+  if (!res || typeof res.share_token !== 'string' || res.share_token === '') {
+    showNotification('Share link could not be created.');
+    return;
+  }
+
+  folderShares[currentFolderViewId] = {
+    share_token: res.share_token,
+    expires_at: body.expires_at || null,
+  };
+  syncFolderShareControls();
+  const url = `${location.origin}/f/${res.share_token}`;
+  await copyToClipboard(url).catch(() => {});
+  showNotification(`Folder share link copied: ${url}`);
+}
+
+// revokeFolderShare stops sharing the currently viewed folder. It never issues
+// a token: generating one here would revoke and immediately re-publish.
+async function revokeFolderShare() {
+  if (!currentFolderViewId) return;
+  const existing = folderShares[currentFolderViewId];
+  if (!existing || !existing.share_token) return;
+
+  if (!confirm('Revoke this folder share link? The URL will stop working immediately, for every note in that folder and its subfolders.')) return;
+
+  let res;
+  try {
+    res = await api('POST', `/api/v1/folders/${currentFolderViewId}/share`, { clear: true });
+  } catch (e) {
+    if (e && e.status === 409) {
+      showNotification(e.message || 'This share link has expired.');
+      await refreshFolderSharesFromServer();
+      return;
+    }
+    showNotification(`Could not revoke share link: ${e.message || 'request failed'}`);
+    return;
+  }
+
+  if (!res || res.share_token !== null) {
+    showNotification('Revoke did not take effect; the share link is still live.');
+    return;
+  }
+
+  delete folderShares[currentFolderViewId];
+  syncFolderShareControls();
+  showNotification('Folder share link revoked.');
+}
+
+// syncFolderShareControls reflects the current folder's share state in the UI.
+// Unshare is only useful when there is something to revoke, and showing it
+// otherwise would invite a click that cannot do anything. On an expired link
+// both controls are hidden as well — but hiding them is presentation, not
+// enforcement: a tab opened before the deadline passed keeps its buttons, so
+// the deadline write re-reads the share state first, and the server refuses
+// a revival with 409 whatever this page believes.
+function syncFolderShareControls() {
+  const shareBtn = document.getElementById('folder-share-btn');
+  const unshareBtn = document.getElementById('folder-unshare-btn');
+  const expiryEl = document.getElementById('folder-share-expiry-info');
+  const controlsEl = document.getElementById('folder-share-expiry-controls');
+  const clearBtn = document.getElementById('folder-share-clear-deadline-btn');
+
+  if (!currentFolderViewId) {
+    if (shareBtn) shareBtn.hidden = true;
+    if (unshareBtn) unshareBtn.hidden = true;
+    if (expiryEl) expiryEl.hidden = true;
+    if (controlsEl) controlsEl.hidden = true;
+    return;
+  }
+
+  const existing = folderShares[currentFolderViewId];
+  const hasShare = existing && existing.share_token;
+  const expired = hasShare && isExpired(existing.expires_at);
+
+  if (shareBtn) shareBtn.hidden = hasShare && !expired;
+  if (unshareBtn) unshareBtn.hidden = !hasShare || expired;
+
+  if (expiryEl) {
+    if (hasShare) {
+      if (existing.expires_at) {
+        if (expired) {
+          expiryEl.textContent = `Expired: ${formatExpiry(existing.expires_at)}`;
+        } else {
+          expiryEl.textContent = `Expires: ${formatExpiry(existing.expires_at)}`;
+        }
+        expiryEl.hidden = false;
+      } else {
+        expiryEl.textContent = 'No expiry';
+        expiryEl.hidden = false;
+      }
+      if (controlsEl) controlsEl.hidden = expired;
+      if (clearBtn) clearBtn.disabled = !existing.expires_at;
+    } else {
+      expiryEl.hidden = true;
+      if (controlsEl) controlsEl.hidden = true;
+    }
+  }
+}
+
+// setFolderShareExpiry changes the deadline of the current folder's share link
+// without rotating its token, so URLs already handed out keep working.
+async function setFolderShareExpiry(hours) {
+  if (!currentFolderViewId) return;
+  const existing = folderShares[currentFolderViewId];
+  if (!existing || !existing.share_token) return;
+  if (!Number.isFinite(hours) || hours <= 0) {
+    showNotification('Deadline must be a positive number of hours.');
+    return;
+  }
+  // A deadline edit must never revive a link that has already expired. The
+  // server refuses that with 409, and it is the authority: this pre-check
+  // only saves the round trip in the common case.
+  let live = true;
+  try {
+    const shares = await api('GET', '/api/v1/shares');
+    if (Array.isArray(shares)) {
+      const row = shares.filter(s => s.kind === 'folder' && Number(s.folder_id) === Number(currentFolderViewId))[0];
+      live = !!row && !isExpired(row.expires_at);
+    }
+  } catch (e) {
+    live = true; // a failed refresh must not lock the user out of their own link
+  }
+  if (!live) {
+    showNotification('This folder link has expired. Share the folder again for a new link — the expired URL stays dead.');
+    syncFolderShareControls();
+    return;
+  }
+  const expiresAt = new Date(Date.now() + hours * 3600 * 1000).toISOString();
+  try {
+    const res = await api('PATCH', `/api/v1/folders/${currentFolderViewId}/share`, { expires_at: expiresAt });
+    if (res && res.expires_at) {
+      existing.expires_at = res.expires_at;
+      syncFolderShareControls();
+      showNotification(`Folder share deadline set to ${formatExpiry(res.expires_at)}.`);
+    }
+  } catch (e) {
+    if (e && e.status === 409) {
+      showNotification(e.message || 'This folder share link has expired. Share the folder again for a new link.');
+      await refreshFolderSharesFromServer();
+      return;
+    }
+    showNotification(`Could not set deadline: ${e.message || 'request failed'}`);
+  }
+}
+
+// clearFolderShareExpiry removes the deadline from the current folder's share
+// link, making it immortal again. Uses PATCH with clear_expiry: true — NOT
+// {clear:true}, which on POST means revoke.
+async function clearFolderShareExpiry() {
+  if (!currentFolderViewId) return;
+  const existing = folderShares[currentFolderViewId];
+  if (!existing || !existing.share_token) return;
+  try {
+    const res = await api('PATCH', `/api/v1/folders/${currentFolderViewId}/share`, { clear_expiry: true });
+    if (res && res.expires_at === null) {
+      existing.expires_at = null;
+      syncFolderShareControls();
+      showNotification('Folder share deadline removed; link has no expiry.');
+    }
+  } catch (e) {
+    if (e && e.status === 409) {
+      showNotification(e.message || 'This folder share link has expired.');
+      await refreshFolderSharesFromServer();
+      return;
+    }
+    showNotification(`Could not clear deadline: ${e.message || 'request failed'}`);
+  }
+}
+
+// refreshFolderSharesFromServer re-reads GET /api/v1/shares and updates the
+// folderShares map with the server's current state for all folders. Called
+// after share/revoke operations and on 409 refusals to resync the UI.
+async function refreshFolderSharesFromServer() {
+  try {
+    const shares = await api('GET', '/api/v1/shares');
+    if (!Array.isArray(shares)) return;
+    // Build a fresh map from the server's answer. A folder absent from the
+    // list has no share link; a folder present carries its current state.
+    const newMap = {};
+    for (const s of shares) {
+      if (s.kind === 'folder' && s.folder_id != null) {
+        newMap[Number(s.folder_id)] = {
+          share_token: s.token_prefix ? 'present' : null,
+          expires_at: s.expires_at || null,
+          last_viewed_at: s.last_viewed_at || null,
+        };
+      }
+    }
+    folderShares = newMap;
+    syncFolderShareControls();
+  } catch (_) {
+    // Best effort: a failed refresh leaves the UI as it was.
+  }
+}
+
 // ── Note deletion ───────────────────────────────────────────────────────────
 async function deleteNote(noteId, title) {
   if (!confirm(`Delete "${title}"?\n\nThis cannot be undone.`)) return;
@@ -3118,6 +3400,27 @@ document.getElementById('note-title').addEventListener('change', onTitleChange);
 document.getElementById('note-tags').addEventListener('change', onTagsChange);
 document.querySelector('.share-btn').addEventListener('click', shareNote);
 document.querySelector('.unshare-btn').addEventListener('click', revokeShare);
+
+// Folder share controls in the folder view header.
+(function() {
+  const shareBtn = document.getElementById('folder-share-btn');
+  const unshareBtn = document.getElementById('folder-unshare-btn');
+  const deadlineBtn = document.getElementById('folder-share-set-deadline-btn');
+  const clearDeadlineBtn = document.getElementById('folder-share-clear-deadline-btn');
+  if (shareBtn) shareBtn.addEventListener('click', shareFolder);
+  if (unshareBtn) unshareBtn.addEventListener('click', revokeFolderShare);
+  if (deadlineBtn) deadlineBtn.addEventListener('click', function() {
+    const input = prompt('Deadline in hours from now (e.g. 24, 168 for a week):');
+    if (input === null) return;
+    const hours = Number(input);
+    if (!Number.isFinite(hours) || hours <= 0) {
+      showNotification('Deadline must be a positive number of hours.');
+      return;
+    }
+    setFolderShareExpiry(hours);
+  });
+  if (clearDeadlineBtn) clearDeadlineBtn.addEventListener('click', clearFolderShareExpiry);
+})();
 
 // Shared links panel: button in sidebar toolbar opens the modal.
 (function() {
