@@ -268,6 +268,22 @@ body {
 .editor-titlebar-top input { border: none; outline: none; font-size: 16px; font-weight: 600; letter-spacing: -0.3px; flex: 1; background: transparent; color: var(--text); min-width: 0; }
 .editor-titlebar-tags { padding-bottom: 6px; }
 .editor-meta { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+/* Note view switcher: Edit / Split / Preview / Reading. Four modes, one
+   control, in the titlebar — they used to be three buttons buried in the
+   markdown toolbar next to Bold and Table, which is where a view mode goes to
+   be found by accident or not at all. */
+.view-switcher { display: inline-flex; align-items: stretch; border: 1px solid var(--border); border-radius: 3px; overflow: hidden; flex-shrink: 0; }
+.view-switcher button { font-size: 11px; padding: 4px 9px; min-height: 28px; background: var(--bg-btn); color: var(--text-btn); border: none; border-right: 1px solid var(--border); cursor: pointer; line-height: 1; }
+.view-switcher button:last-child { border-right: none; }
+.view-switcher button:hover { background: var(--bg-hover); }
+.view-switcher button[aria-pressed="true"] { background: var(--bg-active-folder); color: var(--text); font-weight: 600; }
+.view-switcher button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+/* Reading: the rendered note on its own, full width of the pane, no toolbar.
+   A measure of 74ch is the comfortable-reading ceiling; wider lines lose the
+   reader at the end of a line. */
+.editor-area.reading .cm6-toolbar { display: none; }
+.cm6-wrap.reading .cm6-preview { display: block; }
+.cm6-wrap.reading .cm6-preview-body, .cm6-wrap.reading > .cm6-preview { max-width: 74ch; margin: 0 auto; padding: 24px 20px 64px; }
 .save-status { font-size: 11px; color: var(--text-dim); }
 .save-status.saving { color: var(--color-warning); }
 .save-status.saved { color: var(--color-success); }
@@ -797,6 +813,12 @@ body {
           <div class="editor-titlebar-top">
             <input id="note-title" type="text" placeholder="Note title" />
             <div class="editor-meta">
+              <div class="view-switcher" id="view-switcher" role="group" aria-label="Note view">
+                <button type="button" data-view="editor" aria-pressed="true" title="Edit — plain markdown">Edit</button>
+                <button type="button" data-view="split" aria-pressed="false" title="Split — editor and preview side by side">Split</button>
+                <button type="button" data-view="preview" aria-pressed="false" title="Preview — the rendered note">Preview</button>
+                <button type="button" data-view="reading" aria-pressed="false" title="Reading — rendered, full width, no toolbar">Reading</button>
+              </div>
               <span class="save-status" id="save-status">Saved</span>
               <button class="share-btn">Share ↗</button>
                 <button class="unshare-btn" id="unshare-btn" hidden>Unshare</button>
@@ -1085,7 +1107,9 @@ body {
         <label for="default-note-view-select">Default note view</label>
         <select id="default-note-view-select" aria-label="Default note view">
           <option value="editor">Markdown (Editor)</option>
+          <option value="split">Split (editor and preview)</option>
           <option value="preview">Preview</option>
+          <option value="reading">Reading (rendered, full width)</option>
         </select>
       </div>
       <div class="settings-row">

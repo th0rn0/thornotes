@@ -591,9 +591,6 @@ async function openNote(noteId, { historyMode = 'push', isNew = false } = {}) {
       '<button data-cmd="table" title="Insert table" id="cm6-table-btn">Table</button>' +
       '<button data-cmd="formatTable" title="Format table columns">Fmt</button>' +
       '<span class="cm6-sep"></span>' +
-      '<button data-cmd="preview" title="Toggle preview" id="cm6-preview-btn">Preview</button>' +
-      '<button data-cmd="previewedit" title="Preview Edit — click any block to edit inline" id="cm6-previewedit-btn">P.Edit</button>' +
-      '<button data-cmd="split" title="Split editor / preview" id="cm6-split-btn">Split</button>' +
       '<button data-cmd="lineNumbers" title="Toggle line numbers" id="cm6-linenumbers-btn">Ln#</button>' +
       '<button data-cmd="links" title="Toggle links panel" id="cm6-links-btn">Links</button>' +
       '<span class="cm6-sep"></span>' +
@@ -689,13 +686,7 @@ async function openNote(noteId, { historyMode = 'push', isNew = false } = {}) {
       const btn = e.target.closest('[data-cmd]');
       if (!btn) return;
       const cmd = btn.dataset.cmd;
-      if (cmd === 'preview') {
-        toggleEditorPreview();
-      } else if (cmd === 'previewedit') {
-        toggleEditorPreviewEdit();
-      } else if (cmd === 'split') {
-        toggleEditorSplit();
-      } else if (cmd === 'lineNumbers') {
+      if (cmd === 'lineNumbers') {
         toggleLineNumbers();
       } else if (cmd === 'table') {
         handleTableBtn(e, btn);
@@ -1541,130 +1532,73 @@ function runLint() {
   }
 }
 
-function closePreviewEditMode() {
-  if (!editorPreviewEditOpen) return;
-  editorPreviewEditOpen = false;
-  _previewEditBlocks = [];
+// ── Note view switcher ─────────────────────────────────────────────────────
+// One control, four views. The state each view implies lives in viewClasses()
+// (web/static/js/default-note-view.js) so the mapping is testable without a DOM;
+// this function only puts that state on screen.
+
+function setNoteView(view, { persist = true } = {}) {
+  const c = viewClasses(view);
   const wrap = document.querySelector('.cm6-wrap');
-  if (wrap) wrap.classList.remove('preview-edit');
-  const peb = document.getElementById('cm6-previewedit-btn');
-  if (peb) peb.classList.remove('active');
-}
-
-function toggleEditorPreview() {
-  editorPreviewOpen = !editorPreviewOpen;
   const mount = document.querySelector('.cm6-mount');
-  const wrap  = document.querySelector('.cm6-wrap');
-  const btn   = document.getElementById('cm6-preview-btn');
-  if (editorPreviewOpen) {
-    // Close split and preview-edit if open.
-    if (editorSplitOpen) {
-      editorSplitOpen = false;
-      wrap.classList.remove('split');
-      const sb = document.getElementById('cm6-split-btn');
-      if (sb) sb.classList.remove('active');
-    }
-    closePreviewEditMode();
-    renderPreviewContent(editor.getValue());
-    editorPreviewEl.style.display = '';
-    mount.style.display = 'none';
-    btn.classList.add('active');
-    localStorage.setItem('editorViewMode', 'preview');
-  } else {
-    editorPreviewEl.style.display = 'none';
-    mount.style.display = '';
-    btn.classList.remove('active');
-    localStorage.setItem('editorViewMode', 'editor');
-    editor.focus();
+  const area = document.querySelector('.editor-area');
+  if (!wrap || !mount || !editorPreviewEl) return c.mode;
+
+  // The pane must render the current text before we reveal it: a preview left
+  // over from the previous note would show the wrong note for a moment.
+  if (c.previewShown) renderPreviewContent(editor.getValue());
+
+  wrap.className = c.wrap;
+  mount.style.display = c.mountShown ? '' : 'none';
+  editorPreviewEl.style.display = c.previewShown ? '' : 'none';
+  if (area) area.classList.toggle('reading', c.reading);
+
+  // Keep the legacy booleans honest: preview-edit and split still have their own
+  // implementations, and a stale flag would make the next toggle close the wrong
+  // thing.
+  editorPreviewOpen = c.mode === 'preview' || c.mode === 'reading';
+  editorSplitOpen = c.mode === 'split';
+  editorPreviewEditOpen = false;
+
+  const switcher = document.getElementById('view-switcher');
+  if (switcher) {
+    Array.prototype.forEach.call(switcher.querySelectorAll('button'), function(b) {
+      b.setAttribute('aria-pressed', String(b.getAttribute('data-view') === c.mode));
+    });
   }
+  const sel = document.getElementById('default-note-view-select');
+  if (sel) sel.value = c.mode;
+
+  if (persist) {
+    // One fact, one key: the setting and the last choice are the same
+    // preference, so writing both would eventually contradict itself.
+    try { localStorage.setItem('defaultNoteView', c.mode); } catch (e) {}
+    try { localStorage.setItem('editorViewMode', c.mode); } catch (e) {}
+  }
+  if (c.mountShown && editor) { try { editor.focus(); } catch (e) {} }
+  return c.mode;
 }
 
-function toggleEditorSplit() {
-  editorSplitOpen = !editorSplitOpen;
-  const mount = document.querySelector('.cm6-mount');
-  const wrap  = document.querySelector('.cm6-wrap');
-  const btn   = document.getElementById('cm6-split-btn');
-  if (editorSplitOpen) {
-    // Close preview-only and preview-edit if open.
-    if (editorPreviewOpen) {
-      editorPreviewOpen = false;
-      const pb = document.getElementById('cm6-preview-btn');
-      if (pb) pb.classList.remove('active');
-    }
-    closePreviewEditMode();
-    renderPreviewContent(editor.getValue());
-    mount.style.display = '';
-    editorPreviewEl.style.display = '';
-    wrap.classList.add('split');
-    btn.classList.add('active');
-    localStorage.setItem('editorViewMode', 'split');
-  } else {
-    editorPreviewEl.style.display = 'none';
-    wrap.classList.remove('split');
-    btn.classList.remove('active');
-    localStorage.setItem('editorViewMode', 'editor');
-    editor.focus();
-  }
-}
-
-function toggleEditorPreviewEdit() {
-  editorPreviewEditOpen = !editorPreviewEditOpen;
-  const mount = document.querySelector('.cm6-mount');
-  const wrap  = document.querySelector('.cm6-wrap');
-  const btn   = document.getElementById('cm6-previewedit-btn');
-  if (editorPreviewEditOpen) {
-    // Close split and preview if open.
-    if (editorSplitOpen) {
-      editorSplitOpen = false;
-      wrap.classList.remove('split');
-      const sb = document.getElementById('cm6-split-btn');
-      if (sb) sb.classList.remove('active');
-    }
-    if (editorPreviewOpen) {
-      editorPreviewOpen = false;
-      const pb = document.getElementById('cm6-preview-btn');
-      if (pb) pb.classList.remove('active');
-    }
-    wrap.classList.add('preview-edit');
-    renderPreviewContent(editor.getValue());
-    editorPreviewEl.style.display = '';
-    mount.style.display = 'none';
-    btn.classList.add('active');
-    localStorage.setItem('editorViewMode', 'previewedit');
-  } else {
-    _previewEditBlocks = [];
-    wrap.classList.remove('preview-edit');
-    editorPreviewEl.style.display = 'none';
-    mount.style.display = '';
-    btn.classList.remove('active');
-    localStorage.setItem('editorViewMode', 'editor');
-    editor.focus();
-  }
-}
-
-// ── Default note view ──────────────────────────────────────────────────────
-// Applies the correct editor view when a note is opened.  New notes always
-// open in editor mode; existing notes use the global defaultNoteView setting.
+// applyNoteOpenView applies the stored view when a note is opened. A new note
+// always opens in the editor; an existing one uses the saved preference.
 function applyNoteOpenView(isNew) {
-  const storedView = localStorage.getItem('defaultNoteView');
-  const targetView = computeTargetView(isNew, storedView);
-  
-  if (targetView === 'preview') {
-    if (editorSplitOpen) toggleEditorSplit();
-    if (editorPreviewEditOpen) toggleEditorPreviewEdit();
-    if (shouldOpenPreview(targetView, editorPreviewOpen)) {
-      toggleEditorPreview();
-    } else if (shouldRenderPreview(targetView, editorPreviewOpen)) {
-      // Preview already open — re-render with the new note's content.
-      renderPreviewContent(editor.getValue());
-      if (editorPreviewEl) editorPreviewEl.scrollTop = 0;
-    }
-  } else {
-    if (editorPreviewOpen) toggleEditorPreview();
-    if (editorSplitOpen) toggleEditorSplit();
-    if (editorPreviewEditOpen) toggleEditorPreviewEdit();
-  }
+  let stored = null;
+  try { stored = localStorage.getItem('defaultNoteView'); } catch (e) {}
+  const targetView = computeTargetView(isNew, stored);
+  setNoteView(targetView, { persist: false });
+  if (shouldResetPreviewScroll(targetView) && editorPreviewEl) editorPreviewEl.scrollTop = 0;
 }
+
+// The switcher itself: one handler, four buttons, no state of its own.
+(function wireViewSwitcher() {
+  const switcher = document.getElementById('view-switcher');
+  if (!switcher) return;
+  switcher.addEventListener('click', function(e) {
+    const btn = e.target.closest('button[data-view]');
+    if (!btn) return;
+    setNoteView(btn.getAttribute('data-view'));
+  });
+})();
 
 // ── Markdown table formatter ──────────────────────────────────────────────
 
@@ -4254,7 +4188,8 @@ document.getElementById('auto-collapse-toggle').addEventListener('change', funct
   else if (_autoCollapseTimer) { clearTimeout(_autoCollapseTimer); _autoCollapseTimer = null; }
 });
 document.getElementById('default-note-view-select').addEventListener('change', function() {
-  localStorage.setItem('defaultNoteView', this.value);
+  // Applying it now means the dropdown and the titlebar switcher never disagree.
+  setNoteView(this.value);
 });
 document.getElementById('auto-lint-toggle').addEventListener('change', function() {
   localStorage.setItem('autoLint', this.checked ? 'true' : 'false');
