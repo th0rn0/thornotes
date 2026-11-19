@@ -2,63 +2,112 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
 const {
+  NOTE_VIEW_MODES,
+  isValidView,
   computeTargetView,
-  shouldCloseSplit,
-  shouldClosePreviewEdit,
-  shouldOpenPreview,
+  viewClasses,
   shouldRenderPreview,
-  shouldClosePreview,
   shouldResetPreviewScroll,
 } = require('./default-note-view.js');
 
-test('computeTargetView returns editor for new notes', () => {
-  assert.strictEqual(computeTargetView(true, 'preview'), 'editor');
-  assert.strictEqual(computeTargetView(true, 'split'), 'editor');
+test('the four views are the four the switcher offers', () => {
+  assert.deepStrictEqual(NOTE_VIEW_MODES, ['editor', 'split', 'preview', 'reading']);
 });
 
-test('computeTargetView returns stored view for existing notes', () => {
+test('isValidView accepts the four and nothing else', () => {
+  for (const v of ['editor', 'split', 'preview', 'reading']) {
+    assert.strictEqual(isValidView(v), true, v + ' must be a view');
+  }
+  for (const v of ['', null, undefined, 'Preview', 'previewedit', 'html', 0]) {
+    assert.strictEqual(isValidView(v), false, JSON.stringify(v) + ' must not be a view');
+  }
+});
+
+test('a new note always opens in the editor', () => {
+  for (const stored of ['reading', 'preview', 'split', 'editor', null]) {
+    assert.strictEqual(computeTargetView(true, stored), 'editor');
+  }
+});
+
+test('an existing note opens in the stored view, including reading', () => {
+  assert.strictEqual(computeTargetView(false, 'reading'), 'reading');
   assert.strictEqual(computeTargetView(false, 'preview'), 'preview');
   assert.strictEqual(computeTargetView(false, 'split'), 'split');
   assert.strictEqual(computeTargetView(false, 'editor'), 'editor');
 });
 
-test('computeTargetView defaults to editor when no stored view', () => {
-  assert.strictEqual(computeTargetView(false, null), 'editor');
-  assert.strictEqual(computeTargetView(false, undefined), 'editor');
+test('a stored value that is not a view falls back to the editor', () => {
+  for (const stored of [null, undefined, '', 'previewedit', 'PREVIEW', 'garbage']) {
+    assert.strictEqual(computeTargetView(false, stored), 'editor', JSON.stringify(stored));
+  }
 });
 
-test('shouldCloseSplit returns true when switching to preview and split is open', () => {
-  assert.strictEqual(shouldCloseSplit('preview', true), true);
-  assert.strictEqual(shouldCloseSplit('preview', false), false);
-  assert.strictEqual(shouldCloseSplit('editor', true), false);
+test('viewClasses maps each view to the pane it shows', () => {
+  assert.deepStrictEqual(viewClasses('editor'), {
+    mode: 'editor',
+    wrap: 'cm6-wrap',
+    mountShown: true,
+    previewShown: false,
+    toolbarShown: true,
+    reading: false,
+  });
+  assert.deepStrictEqual(viewClasses('split'), {
+    mode: 'split',
+    wrap: 'cm6-wrap split',
+    mountShown: true,
+    previewShown: true,
+    toolbarShown: true,
+    reading: false,
+  });
+  assert.deepStrictEqual(viewClasses('preview'), {
+    mode: 'preview',
+    wrap: 'cm6-wrap',
+    mountShown: false,
+    previewShown: true,
+    toolbarShown: true,
+    reading: false,
+  });
+  assert.deepStrictEqual(viewClasses('reading'), {
+    mode: 'reading',
+    wrap: 'cm6-wrap reading',
+    mountShown: false,
+    previewShown: true,
+    toolbarShown: false,
+    reading: true,
+  });
 });
 
-test('shouldClosePreviewEdit returns true when switching to preview and preview-edit is open', () => {
-  assert.strictEqual(shouldClosePreviewEdit('preview', true), true);
-  assert.strictEqual(shouldClosePreviewEdit('preview', false), false);
-  assert.strictEqual(shouldClosePreviewEdit('editor', true), false);
+test('reading hides the toolbar and the editor; preview keeps the toolbar', () => {
+  const reading = viewClasses('reading');
+  const preview = viewClasses('preview');
+  assert.strictEqual(reading.mountShown, false);
+  assert.strictEqual(reading.toolbarShown, false);
+  assert.strictEqual(preview.mountShown, false);
+  assert.strictEqual(preview.toolbarShown, true);
+  assert.strictEqual(reading.reading, true);
+  assert.strictEqual(preview.reading, false);
 });
 
-test('shouldOpenPreview returns true when switching to preview and preview is closed', () => {
-  assert.strictEqual(shouldOpenPreview('preview', false), true);
-  assert.strictEqual(shouldOpenPreview('preview', true), false);
-  assert.strictEqual(shouldOpenPreview('editor', false), false);
+test('viewClasses refuses an unknown mode instead of inventing a pane', () => {
+  const c = viewClasses('previewedit');
+  assert.strictEqual(c.mode, 'editor');
+  assert.strictEqual(c.mountShown, true);
+  assert.strictEqual(c.previewShown, false);
+  const u = viewClasses(undefined);
+  assert.strictEqual(u.mode, 'editor');
 });
 
-test('shouldRenderPreview returns true when switching to preview and preview is open', () => {
-  assert.strictEqual(shouldRenderPreview('preview', true), true);
-  assert.strictEqual(shouldRenderPreview('preview', false), false);
-  assert.strictEqual(shouldRenderPreview('editor', true), false);
+test('only the views that render markdown need a render pass', () => {
+  assert.strictEqual(shouldRenderPreview('preview'), true);
+  assert.strictEqual(shouldRenderPreview('reading'), true);
+  assert.strictEqual(shouldRenderPreview('split'), true);
+  assert.strictEqual(shouldRenderPreview('editor'), false);
+  assert.strictEqual(shouldRenderPreview('previewedit'), false);
 });
 
-test('shouldClosePreview returns true when switching to editor and preview is open', () => {
-  assert.strictEqual(shouldClosePreview('editor', true), true);
-  assert.strictEqual(shouldClosePreview('editor', false), false);
-  assert.strictEqual(shouldClosePreview('preview', true), false);
-});
-
-test('shouldResetPreviewScroll returns true when switching to preview and preview is open', () => {
-  assert.strictEqual(shouldResetPreviewScroll('preview', true), true);
-  assert.strictEqual(shouldResetPreviewScroll('preview', false), false);
-  assert.strictEqual(shouldResetPreviewScroll('editor', true), false);
+test('the preview scroll resets when the reader arrives, not when editing', () => {
+  assert.strictEqual(shouldResetPreviewScroll('preview'), true);
+  assert.strictEqual(shouldResetPreviewScroll('reading'), true);
+  assert.strictEqual(shouldResetPreviewScroll('split'), false);
+  assert.strictEqual(shouldResetPreviewScroll('editor'), false);
 });
