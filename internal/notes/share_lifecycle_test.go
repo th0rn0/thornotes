@@ -262,7 +262,13 @@ func TestService_ShareExpiryIsStoredInUTC(t *testing.T) {
 	east := time.FixedZone("+05:00", 5*60*60)
 	west := time.FixedZone("-08:00", -8*60*60)
 
-	posted := time.Date(2026, 11, 19, 5, 48, 54, 0, east)
+	// Relative to now, not a hard-coded date: with the "expired is final" guard
+	// an absolute deadline is a time bomb — this test's 2026-11-19T00:48:54Z was
+	// in the future when written and in the past by the next evening, at which
+	// point the PATCH below is (correctly) refused as an expired link and the
+	// failure reads as a bug in the guard rather than in the fixture.
+	instant := time.Now().UTC().Add(2 * time.Hour).Truncate(time.Second)
+	posted := instant.In(east)
 	token, err := st.svc.SetShareToken(ctx, st.userID, note.ID, false, &posted)
 	require.NoError(t, err)
 	require.NotNil(t, token)
@@ -281,7 +287,7 @@ func TestService_ShareExpiryIsStoredInUTC(t *testing.T) {
 	assert.Equal(t, note.ID, resolved.ID)
 
 	// Door two: PATCH, on the same link, with the other direction.
-	patched := time.Date(2026, 11, 18, 16, 48, 54, 0, west)
+	patched := instant.In(west) // the same instant, expressed the other way round
 	require.NoError(t, st.svc.SetShareExpiry(ctx, st.userID, note.ID, &patched))
 
 	stored = storedDeadline(t, st, note.ID)
