@@ -106,6 +106,7 @@ steps:
       - node --test web/static/js/share-clear.test.js
       - node --test web/static/js/share-expiry.test.js
       - node --test web/static/js/board-view.test.js
+      - node --test web/static/js/sidebar-toolbar-layout.test.js
       - npm install --prefix web/cm6-bundle
       - node --test web/cm6-bundle/index.test.mjs
 
