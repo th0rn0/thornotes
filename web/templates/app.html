@@ -230,8 +230,27 @@ body {
 .sidebar.collapsed .sidebar-footer { display: none; }
 .sidebar-header { flex-shrink: 0; padding: 4px 6px; border-bottom: 1px solid var(--border-light); }
 .sidebar.collapsed .sidebar-header { padding: 4px 0; display: flex; justify-content: center; }
-.sidebar-toolbar { display: flex; gap: 4px; padding: 8px; border-bottom: 1px solid var(--border-light); }
-.sidebar-toolbar button { flex: 1; padding: 8px 0; font-size: 11px; border: 1px solid var(--border); background: var(--bg-btn); cursor: pointer; color: var(--text-btn); min-height: 36px; }
+/* Five actions in one row do not fit: flex:1 squeezed each to about 40px in a
+   220px sidebar, "+ Folder" and "↑ Import" wrapped onto two lines inside their
+   button, and the row overflowed so the last one was clipped. A grid whose
+   columns are at least 64px wide (enough for the longest label at 11px) gives
+   three equal columns at the default width and two on a narrower one, and never
+   truncates a label. */
+.sidebar-toolbar { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; padding: 8px; border-bottom: 1px solid var(--border-light); }
+.sidebar-toolbar button {
+  min-width: 0;
+  padding: 7px 4px;
+  font-size: 11px;
+  line-height: 1.3;
+  border: 1px solid var(--border);
+  background: var(--bg-btn);
+  cursor: pointer;
+  color: var(--text-btn);
+  min-height: 32px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .sidebar-toolbar button:hover { background: var(--bg-hover); }
 .sidebar-toolbar button.active { background: var(--bg-active-folder); border-color: var(--accent); font-weight: 600; }
 .sidebar-search { padding: 6px 8px; border-bottom: 1px solid var(--border-light); }
@@ -663,7 +682,7 @@ body {
   /* More touch-friendly tree items */
   .tree-note { min-height: 40px; font-size: 13px; padding-top: 0; padding-bottom: 0; }
   .tree-folder-label { min-height: 40px; font-size: 13px; }
-  .sidebar-toolbar button { min-height: 40px; padding: 0; }
+  .sidebar-toolbar button { min-height: 40px; }
   .journal-today-btn, .journal-manage-btn { min-height: 36px; }
 
   /* Editor pane fills full width */
