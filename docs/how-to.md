@@ -10,7 +10,7 @@ Thornotes is a self-hosted markdown notes app. Every note is a real `.md` file o
 2. [Getting started: web interface](#getting-started-web-interface)
 3. [Desktop app](#desktop-app)
 4. [Creating notes](#creating-notes)
-5. [The editor](#the-editor)
+5. [The editor](#the-editor), including [the link graph](#the-link-graph)
 6. [Organizing with folders](#organizing-with-folders)
 7. [Using tags](#using-tags)
 8. [Board view](#board-view)
@@ -237,6 +237,23 @@ A **new** note always opens in Edit, whatever you have chosen, because a rendere
 The same preference lives in **Settings → Editor → Default note view**, now with all four options; changing it there takes effect immediately rather than on the next note.
 
 ---
+
+### The link graph
+
+The editor toolbar's **Links** button opens a panel with the note's outgoing `[[links]]`, its backlinks, and a one-hop graph above them.
+
+The graph draws one note and its immediate neighbours: the current note sits in the middle, and its links and backlinks sit on an ellipse around it. Four states, and only one of them navigates:
+
+- **Resolved** nodes are real notes. Clicking one opens it.
+- **Ghost** nodes are `[[titles]]` that name nothing in the vault.
+- **Ambiguous** nodes are titles two notes claim, so the resolver refuses to pick one.
+- The **centre** is the note you are already reading.
+
+Clicking a ghost, an ambiguous node or the centre does nothing, and that is deliberate: a guessed navigation would silently open the wrong note.
+
+Two other behaviours are worth knowing. The picture is **deterministic**: the same note and the same data always produce the same layout, ordered by status, label and direction, so a graph you learned stays where you learned it. And the graph is an **enhancement, not the only way in**: it renders on a canvas marked `aria-hidden`, while the links and backlinks lists underneath are the surface a keyboard and a screen reader use. Note hubs are capped at **30 neighbours** per direction; when the cap fires the caption says `showing N of M` rather than pretending the picture is complete.
+
+It is a one-hop view by design. A whole-vault graph needs an endpoint that returns every edge in one response, and today the API answers one note at a time (a 76-note vault would be 76 requests, a 1,000-note vault 1,000). That work is parked in ticket 1g with its cost recorded.
 
 ## Organizing with folders
 
