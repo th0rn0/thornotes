@@ -3,27 +3,26 @@
 `scripts/verify_wikilinks.py` re-derives every `[[link]]` edge in a vault from
 the note bodies, independently of the server, and diffs the result against
 `GET /api/v1/notes/:id/links` and `/backlinks` for every note. It is the check
-that answers "is the stored graph right?" — the Go unit tests prove the rules
+that answers "is the stored graph right?". The Go unit tests prove the rules
 against fixtures, not against 471 real notes.
 
-It is **not** a per-PR gate: it needs a corpus and a running instance. Run it
+It is **not** a per-PR gate. It needs a corpus and a running instance. Run it
 after a change to link extraction, normalisation, resolution, the `note_links`
 index, or the reconcile path, and before a release that touches them.
 
 ## What the oracle models
 
 The oracle re-implements note 323 §4–5 from the spec; it does not call the Go
-code. Three rules decide whether its edges may legitimately differ from the
-server's:
+code. Three rules explain why its edges may differ from the server's:
 
 | Rule | What the oracle does | Where the server says so |
 |------|----------------------|--------------------------|
-| **Extraction** | Drops ` ``` ` and `~~~` fenced code blocks (3+ markers, any leading indent — indented text is *not* a fence), drops single-backtick inline code spans, then parses the remaining `[[target#anchor\|link text]]` | `ExtractLinks` in [`internal/wikilinks/extract.go`](../internal/wikilinks/extract.go) |
+| **Extraction** | Drops ` ``` ` and `~~~` fenced code blocks (3+ markers, any leading indent, because indented text is *not* a fence), drops single-backtick inline code spans, then parses the remaining `[[target#anchor\|link text]]` | `ExtractLinks` in [`internal/wikilinks/extract.go`](../internal/wikilinks/extract.go) |
 | **Edge key** | One edge per `(note, sha256(NormalizeKey(target)))`; the **first** occurrence's anchor and link text win, later occurrences of the same target collapse into that edge | `computeEdges` in [`internal/notes/links.go`](../internal/notes/links.go), `UNIQUE (from_note_id, target_hash)` |
 | **Resolution** | Candidates are notes whose stored slug equals `Slugify(target)` **or** whose `NormalizeKey(title)` equals `NormalizeKey(target)`; nearest common folder ancestor wins; an equal-nearest tie is `ambiguous` and resolves to nothing | `Resolve` in [`internal/wikilinks/resolve.go`](../internal/wikilinks/resolve.go) |
 
 The oracle reads note titles, slugs and folders from the **instance it is
-checking**, not from the corpus: resolution is a function of the index's own
+checking**, not from the corpus. Resolution is a function of the index's own
 data, and assuming the corpus's titles is how an oracle ends up measuring the
 load instead of the rules (see "the title the file states" below).
 
@@ -36,12 +35,12 @@ no fence example or no repeated target.
 The first run of this comparison (ticket 1e) reported **70 mismatches** on a
 corpus with no real defects. Every one was an artefact of the oracle:
 
-* **68 duplicate edges** — the oracle counted link *occurrences*; the server
+* **68 duplicate edges.** The oracle counted link *occurrences*; the server
   stores one row per `(note, target_hash)`. 16 notes repeat a target; 68 repeat
   occurrences in total.
-* **2 fenced-code examples** — `[[Note#Heading]]` and `[[Note|Display]]` written
-  inside a ` ```sql ` block in note 323, i.e. documentation of the syntax rather
-  than links.
+* **2 fenced-code examples.** `[[Note#Heading]]` and `[[Note|Display]]` appear
+  inside a ` ```sql ` block in note 323, so they document the syntax rather
+  than link to a note.
 
 Same corpus, same rules fixed:
 
@@ -51,9 +50,9 @@ Same corpus, same rules fixed:
 | today, replayed | **the identical 1e harness**, current server | 94 (68 + 2 + 24 title-drift, below) |
 | today | `scripts/verify_wikilinks.py` | **0** |
 
-The extra 24 in the replay are the same disease in a second place: the 1e oracle
+The extra 24 in the replay are the same fault in a second place. The 1e oracle
 resolved against the *corpus's* production titles, and a current server stores
-the title each **file** states, so `[[Wikilinks 1c: … — t_8d442792]]` was
+the title each **file** states. That means `[[Wikilinks 1c: … — t_8d442792]]` was
 "resolved" to the oracle and "unresolved" to the server (12 edges, plus 12
 backlink rows). Reading titles off the instance removes the whole class.
 
@@ -100,7 +99,7 @@ The corpus is one object of notes keyed by an arbitrary id:
 ```
 
 and the folder tree is `[{"id": 2, "name": "Projects", "parent_id": null}, …]`.
-Both are read off a source instance read-only: `GET /api/v1/notes/all` (ids,
+Both come from a source instance read-only: `GET /api/v1/notes/all` (ids,
 titles, slugs, folder ids), `GET /api/v1/notes/:id` (bodies) and
 `GET /api/v1/folders`. The 1e snapshot lives at
 `/opt/data/profiles/qa/cache/scratch/qa1e/prod_notes.json` +
@@ -134,8 +133,8 @@ python3 scripts/verify_wikilinks.py check \
   --calibrate --report /tmp/o595/report.json
 ```
 
-`--calibrate` additionally requires the corpus to contain at least one fenced
-link and one repeated target — the calibration guarantee. Drop it for an
+`--calibrate` also requires the corpus to contain at least one fenced link and
+one repeated target, which is the calibration guarantee. Drop it for an
 ordinary corpus. `--report` writes the full findings JSON (every disagreeing
 note, target and both sides' edges) so a failure can be triaged without
 re-running.
@@ -145,10 +144,11 @@ re-running.
 The real corpus has almost no duplicate titles, so `/links`'s `ambiguous` flag is
 otherwise covered only by the seeded demo. This synthesises it: two notes with
 the same title in sibling folders, one source in a third folder (equal distance
-to both → must be `ambiguous`, no `to_note_id`), one source in the same folder as
-a candidate (must resolve to it), and the oracle must agree on both — plus the
-ambiguous edge must create no backlink while the resolved one does. It removes
-its notes afterwards unless `--keep` is given, and is safe to re-run.
+to both, so the edge must be `ambiguous` with no `to_note_id`), one source in the
+same folder as a candidate (it must resolve to that candidate), and the oracle
+must agree on both. The ambiguous edge must also create no backlink while the
+resolved one does. It removes its notes afterwards unless `--keep` is given, and
+is safe to re-run.
 
 ```sh
 python3 scripts/verify_wikilinks.py fixture \
@@ -164,10 +164,11 @@ titles would otherwise make real corpus links ambiguous.
 python3 scripts/verify_wikilinks.py selftest
 ```
 
-No instance, no corpus. Four clauses: fence + inline-code exclusion (including
-that four-space-indented text is *not* a fence, because the server's rule says
-so), duplicate collapse with first-occurrence-wins, normalisation, and resolution
-(slug, title key, same-folder win, ambiguity, unresolved).
+No instance, no corpus. The selftest covers four clauses: the fence and inline
+code exclusion (including that four-space-indented text is *not* a fence,
+because the server's rule says so), duplicate collapse with
+first-occurrence-wins, normalisation, and resolution (slug, title key,
+same-folder win, ambiguity, unresolved).
 
 ## The title the file states
 
@@ -187,7 +188,7 @@ before a deploy converges titles on a real vault.
 ## Failure behaviour
 
 Exit code `0` means everything was compared and agreed. `1` means real
-disagreements — each is a finding with the note, the target and both sides'
+disagreements. Each is a finding with the note, the target and both sides'
 edges. `2` means **the harness could not produce evidence**, which is never a
 pass:
 
@@ -236,10 +237,10 @@ both sides' edges, and fix the server (or the spec) separately.
 
 ## Proving the harness still reports a mismatch
 
-A harness that never reports anything is the other half of the 1e disease. The
-mismatch path is exercised on purpose by loading a corpus and checking it before
-the server has finished indexing — `import` normally prevents this with its
-settle step, so switch the settle off:
+A harness that never reports anything is the other failure the 1e run exposed.
+The harness exercises the mismatch path on purpose. Load a corpus and check it
+before the server has finished indexing. `import` normally prevents this with
+its settle step, so switch the settle off:
 
 ```sh
 python3 scripts/verify_wikilinks.py import … --reconcile-wait 0 --settle-seconds 1 --settle-poll 1
@@ -260,15 +261,15 @@ FAIL: the oracle and the server disagree — see the findings above.
 ```
 
 The same corpus loaded with the default settle reports 0. The difference is the
-server's own reindex pass, not the oracle: this is exactly the class of finding
-a reader must be able to trust, and exactly why `import` waits for the graph to
-settle before anyone draws a conclusion from it.
+server's own reindex pass, not the oracle. This is the class of finding a reader
+must be able to trust, and the reason `import` waits for the graph to settle
+before anyone draws a conclusion from it.
 
 ## Notes for whoever runs it next
 
 * The auth endpoints are rate-limited per IP (burst 10, refill 1 per 90s). One
   `import` + `check` on a fresh account spends 5 of those. If a run reports
-  "auth rate-limited", wait or start a fresh instance — do not work around it.
+  "auth rate-limited", wait or start a fresh instance. Do not work around it.
 * `--workers` (default 8) sets the request parallelism for the per-note reads.
 * The instance must be left running between `import` and `check`; the check is
   read-only and can be re-run as often as the rate limit allows.
