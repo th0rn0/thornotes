@@ -4,32 +4,32 @@
 
 A self-hosted Markdown note-taking app with file-as-canonical storage. Every note is a real `.md` file on disk. The database is an index, not the source of truth.
 
-![thornotes editor — light mode](docs/screenshot-editor.png)
+![thornotes editor, light mode](docs/screenshot-editor.png)
 
-![thornotes syntax highlighting — dark mode](docs/screenshot-syntax-dark.png)
+![thornotes syntax highlighting, dark mode](docs/screenshot-syntax-dark.png)
 
 ## Features
 
-- Write notes in Markdown with a split-pane editor (CodeMirror 6 — syntax-aware, live preview)
-- Syntax highlighting for fenced code blocks — ` ```go `, ` ```yaml `, ` ```json `, and [180+ languages](https://highlightjs.org/)
+- Write notes in Markdown with a split-pane editor (CodeMirror 6 with syntax awareness and live preview)
+- Syntax highlighting for fenced code blocks: ` ```go `, ` ```yaml `, ` ```json `, and [180+ languages](https://highlightjs.org/)
 - Folder tree with lazy-loaded notes
-- **Folder overview** — click a folder to see a card grid of all its notes with content snippets
-- **Wiki-style note linking** — use `[[Note Title]]` in any note to link to another note; clicking the link in preview opens it, building a navigable note graph
+- **Folder overview.** Click a folder to see a card grid of all its notes with content snippets.
+- **Wiki-style note linking.** Use `[[Note Title]]` in any note to link to another note. Clicking the link in preview opens that note, and together the links form a navigable note graph.
 - Full-text search with snippet excerpts (see [the How-To](docs/how-to.md#search) for the current highlighting caveat)
 - Tags
-- Shareable read-only note links
-- MCP server — full CRUD over notes and folders via 14 tools; read-only or read-write token scopes; works with Claude Desktop, Open WebUI, Cursor, and any MCP-compatible client
+- Shareable read-only note and folder links. A note link reads one note, a folder link reads a whole subtree recursively. Both are scoped by bearer token, and both can carry a deadline. See [the How-To](docs/how-to.md#sharing-notes).
+- MCP server providing full CRUD over notes and folders via 14 tools. Supports read-only or read-write token scopes, and works with Claude Desktop, Open WebUI, Cursor, and any MCP-compatible client.
 - API tokens for programmatic access with read/write scope and optional per-folder permissions
-- Live sync — edits made directly to `.md` files on disk are detected and pushed to open browser tabs via SSE
-- Git-backed version history — opt-in; every save, delete, and folder rename becomes a commit so you can preview and restore any previous version
-- Multi-theme: Light, Dark, Catppuccin, Nord, Tokyo Night, Solarized — each with per-theme syntax highlighting tuned for that palette
-- **Default note view setting** — choose whether notes open in Markdown editor or rendered Preview by default; configurable per-device in Settings; new notes always open in editor regardless of this setting
-- **Markdown formatting toolbar** — bold, italic, heading, blockquote, ordered and unordered lists, link, table (with column-alignment formatter), undo/redo
-- **Right-click context menu** in the editor — bold, italic, blockquote, list, link, and table formatting available on selection
+- Live sync. Edits made directly to `.md` files on disk are detected and pushed to open browser tabs via SSE.
+- Git-backed version history, opt-in. Every save, delete, and folder rename becomes a commit, so you can preview and restore any previous version.
+- Multi-theme: Light, Dark, Catppuccin, Nord, Tokyo Night, Solarized. Each theme has syntax highlighting tuned for its palette.
+- **Four note views in the titlebar.** Edit, Split, Preview and Reading, chosen per device and remembered. Reading renders at a 74-character measure with the toolbar hidden. New notes always open in Edit.
+- **Markdown formatting toolbar.** Bold, italic, heading, blockquote, ordered and unordered lists, link, table (with column-alignment formatter), undo/redo.
+- **Right-click context menu in the editor.** Bold, italic, blockquote, list, link, and table formatting available on selection.
 - Line numbers toggle in the editor toolbar; character and line count in the status bar
 - Daily journal with multi-journal support
 - Import `.md` files or `.zip` archives (folder structure preserved)
-- Export a note or a whole folder as a `.zip` — the folder archive keeps its own name as the top-level directory, so it re-imports into another instance as that folder
+- Export a note or a whole folder as a `.zip`. The folder archive keeps its own name as the top-level directory, so it re-imports into another instance as that folder.
 
 ## Quick start with Docker
 
@@ -43,11 +43,11 @@ docker run -d \
   th0rn0/thornotes
 ```
 
-Open [http://localhost:8080](http://localhost:8080) and register your account. Once you've signed up, set `THORNOTES_ALLOW_REGISTRATION=false` and restart to close public sign-up. With the flag off, the "Create account" link is removed from the auth screen entirely, the register form is removed from the DOM, and `POST /api/v1/auth/register` returns `404 Not Found` for every caller including the very first user — closed means closed. Always start with the flag on (or unset; default is on), register the admin account, then restart with the flag off.
+Open [http://localhost:8080](http://localhost:8080) and register your account. Once you've signed up, set `THORNOTES_ALLOW_REGISTRATION=false` and restart to close public sign-up. With the flag off, the "Create account" link is removed from the auth screen entirely, the register form is removed from the DOM, and `POST /api/v1/auth/register` returns `404 Not Found` for every caller, including the very first user. Closed means closed. Always start with the flag on (or unset; default is on), register the admin account, then restart with the flag off.
 
 ### Data volume ownership
 
-The container runs as uid 65532, and the image seeds a **fresh named volume** at `/data` with that ownership on first mount — the quick start above and the Compose files below work as-is on a brand-new volume, no manual `chown` needed.
+The container runs as uid 65532, and the image seeds a **fresh named volume** at `/data` with that ownership on first mount. The quick start above and the Compose files below work as-is on a brand-new volume, and need no manual `chown`.
 
 Two cases need no help from the image and get none:
 
@@ -59,7 +59,7 @@ Two cases need no help from the image and get none:
 
 - **An existing volume** with data already in it is left exactly as it is.
 
-**A tmpfs is the one case that needs explicit flags.** Because the image carries `/data`, a plain `--tmpfs /data` mounts a root-owned mode-755 tmpfs instead of Docker's usual world-writable default, which uid 65532 cannot write — the container exits with `unable to open database file` on every start. If you want your data directory in RAM, say so in the flags themselves:
+**A tmpfs is the one case that needs explicit flags.** Because the image carries `/data`, a plain `--tmpfs /data` mounts a root-owned mode-755 tmpfs instead of Docker's usual world-writable default, which uid 65532 cannot write, so the container exits with `unable to open database file` on every start. If you want your data directory in RAM, say so in the flags themselves:
 
 ```sh
 docker run --tmpfs /data:uid=65532,gid=65532,mode=700 ...
@@ -206,9 +206,9 @@ sudo systemctl enable --now thornotes
 
 ### Linux desktop app (AppImage)
 
-A native desktop window is available as an AppImage attached to each release. It opens a dedicated Thornotes window (WebKitGTK) pointed at your running server — no browser tab required.
+A native desktop window is available as an AppImage attached to each release. It opens a dedicated Thornotes window (WebKitGTK) pointed at your running server, so no browser tab is required.
 
-**Install:**
+**Install.**
 
 1. Go to the [latest release](https://github.com/th0rn0/thornotes/releases/latest) and download `thornotes-desktop-v*-linux-amd64.AppImage`.
 2. Make it executable and move it somewhere on your PATH:
@@ -225,15 +225,15 @@ mv thornotes-desktop-v*-linux-amd64.AppImage ~/.local/bin/thornotes-desktop.AppI
 ~/.local/bin/thornotes-desktop.AppImage
 ```
 
-**First launch:** A setup dialog appears asking for your server URL (default: `http://localhost:8080`) and an optional "Start on login" toggle. After saving, the window navigates directly to your server. Config is stored at `~/.config/thornotes/desktop.json`.
+**First launch.** A setup dialog appears asking for your server URL (default: `http://localhost:8080`) and an optional "Start on login" toggle. After saving, the window navigates directly to your server. Config is stored at `~/.config/thornotes/desktop.json`.
 
-**If the server is unreachable at startup:** A "Cannot connect" screen appears with a Retry button and a "Change URL" button that returns to the setup dialog.
+**If the server is unreachable at startup.** A "Cannot connect" screen appears with a Retry button and a "Change URL" button that returns to the setup dialog.
 
-**Start on login:** The toggle in the setup dialog writes an XDG autostart entry to `~/.config/autostart/thornotes-desktop.desktop`. For this to survive moves, keep the AppImage at a stable path (e.g. `~/.local/bin/thornotes-desktop.AppImage`) before enabling it.
+**Start on login.** The toggle in the setup dialog writes an XDG autostart entry to `~/.config/autostart/thornotes-desktop.desktop`. For this to survive moves, keep the AppImage at a stable path (e.g. `~/.local/bin/thornotes-desktop.AppImage`) before enabling it.
 
-**Session persistence:** WebKitGTK stores cookies in `~/.local/share/webkit/` — you will only need to log in once per install.
+**Session persistence.** WebKitGTK stores cookies in `~/.local/share/webkit/`, so you only need to log in once per install.
 
-**System requirements:** The AppImage bundles WebKitGTK 4.0 and GTK3 via `linuxdeploy`. Any glibc-compatible Linux distro with a display server (X11 or Wayland via XWayland) is supported. No external webkit package required.
+**System requirements.** The AppImage bundles WebKitGTK 4.0 and GTK3 via `linuxdeploy`. Any glibc-compatible Linux distro with a display server (X11 or Wayland via XWayland) is supported. No external webkit package required.
 
 ## Configuration
 
@@ -248,25 +248,25 @@ All options are available as environment variables and CLI flags.
 | `THORNOTES_DB_NAME` | `--db-name` | `thornotes` | MySQL/MariaDB database name (mysql driver only) |
 | `THORNOTES_DB_USER` | `--db-user` | _(none)_ | MySQL/MariaDB username (mysql driver only) |
 | `THORNOTES_DB_PASSWORD` | `--db-password` | _(none)_ | MySQL/MariaDB password (mysql driver only) |
-| `THORNOTES_NOTES_ROOT` | `--notes-root` | `notes` | Root directory for `.md` files. Verified writable at startup — thornotes exits early if the directory is read-only or inaccessible. |
+| `THORNOTES_NOTES_ROOT` | `--notes-root` | `notes` | Root directory for `.md` files. thornotes checks it is writable at startup and exits early if the directory is read-only or inaccessible. |
 | `THORNOTES_ALLOW_REGISTRATION` | `--allow-registration` | `true` | Allow new user sign-up |
-| `THORNOTES_SECURE_COOKIES` | `--secure-cookies` | `false` | Set `Secure` flag on session cookie — enable when serving over HTTPS |
-| `THORNOTES_TRUSTED_PROXY` | `--trusted-proxy` | _(none)_ | CIDR of trusted reverse proxy (e.g. `10.0.0.0/8`) — enables `X-Forwarded-For` for rate limiting |
+| `THORNOTES_SECURE_COOKIES` | `--secure-cookies` | `false` | Set the `Secure` flag on the session cookie. Enable it when serving over HTTPS. |
+| `THORNOTES_TRUSTED_PROXY` | `--trusted-proxy` | _(none)_ | CIDR of the trusted reverse proxy (e.g. `10.0.0.0/8`). Enables `X-Forwarded-For` for rate limiting. |
 | `THORNOTES_WATCH_INTERVAL` | `--watch-interval` | `30s` | How often to poll the notes directory for external file changes. Set to `0` to disable |
 | `THORNOTES_SKIP_RECONCILIATION` | `--skip-reconciliation` | `false` | Skip the startup hash-check scan (safe on trusted restarts with large note corpora) |
-| `THORNOTES_ENABLE_GIT_HISTORY` | `--enable-git-history` | `false` | Record every note save/delete as a git commit in the notes directory. Enables the history API (`GET /api/v1/notes/:id/history`, `GET /api/v1/notes/:id/history/:sha`, `POST /api/v1/notes/:id/history/:sha/restore`). Uses [go-git](https://github.com/go-git/go-git) — no git binary required. |
-| `THORNOTES_SEED_DEV` | `--seed-dev` | `false` | **Development only.** On startup, create a `dev` user (password `devpassword1`), a realistic folder tree, and ~100 seeded notes — but only if the `dev` user does not already exist. Idempotent. Never enable in production. |
+| `THORNOTES_ENABLE_GIT_HISTORY` | `--enable-git-history` | `false` | Record every note save/delete as a git commit in the notes directory. Enables the history API (`GET /api/v1/notes/:id/history`, `GET /api/v1/notes/:id/history/:sha`, `POST /api/v1/notes/:id/history/:sha/restore`). Uses [go-git](https://github.com/go-git/go-git), so no git binary is required. |
+| `THORNOTES_SEED_DEV` | `--seed-dev` | `false` | **Development only.** On startup, create a `dev` user (password `devpassword1`), a realistic folder tree, and ~100 seeded notes, but only if the `dev` user does not already exist. Idempotent. Never enable in production. |
 | `THORNOTES_SHARE_RATE_PER_MINUTE` | `--share-rate-per-minute` | `60` | Reads of one public share link (`/s/:token`, `/f/:token`) allowed per minute from one client IP. `0` disables the minute window. |
-| `THORNOTES_SHARE_RATE_PER_HOUR` | `--share-rate-per-hour` | `600` | Reads of one public share link allowed per hour from one client IP — the ceiling on sustained use. `0` disables the hour window (both `0` disables the throttle). |
+| `THORNOTES_SHARE_RATE_PER_HOUR` | `--share-rate-per-hour` | `600` | Reads of one public share link allowed per hour from one client IP, which is the ceiling on sustained use. `0` disables the hour window (both `0` disables the throttle). |
 
 ### Share links and rate limiting
 
-Public share links are bearer capabilities: whoever holds the URL reads the note or folder, with no
+Public share links are bearer capabilities. Whoever holds the URL reads the note or folder, with no
 session. They are throttled separately from the auth endpoints, per `(client IP, link)`, at the
-budgets above — a shared NAT or CGNAT therefore does not throttle one reader because a colleague
+budgets above. A shared NAT or CGNAT therefore does not throttle one reader because a colleague
 opened another link, and one hot link cannot spend another link's budget.
 
-A throttled read is answered with the same empty `404` an unknown token gets; the surface never
+thornotes answers a throttled read with the same empty `404` an unknown token gets, and never
 returns `429`, because a status only a real link produces would confirm that a token is valid. The
 refusal is logged (`share read throttled`) with the link's short handle, never the token.
 
@@ -304,7 +304,7 @@ thornotes implements the [MCP Streamable HTTP transport (2025-03-26)](https://sp
 2. Create an API token
 3. Copy the connection snippet and paste it into your AI assistant's MCP config
 
-**Transport endpoints:**
+**Transport endpoints.**
 
 | Method | Endpoint | Purpose |
 |--------|----------|---------|
@@ -314,15 +314,15 @@ thornotes implements the [MCP Streamable HTTP transport (2025-03-26)](https://sp
 
 All three endpoints require `Authorization: Bearer <token>`.
 
-**Token scopes:** When creating an API token you can choose **Read + Write** (default) or **Read only**. Read-only tokens can call all read tools but write tools return `403 Forbidden`.
+**Token scopes.** When creating an API token you can choose **Read + Write** (default) or **Read only**. Read-only tokens can call all read tools but write tools return `403 Forbidden`.
 
-**Folder-scoped tokens:** On top of the global scope, an API token can be restricted to specific folders. In the **Account** modal expand *"Limit to specific folders"* when creating a token (or press *Permissions* on an existing token) and pick one or more folders with per-folder `read` or `write` access. The **Permissions** modal also lets you rename the token and flip its global scope between Read only and Read + Write without regenerating the token value. Rules:
+**Folder-scoped tokens.** On top of the global scope, an API token can be restricted to specific folders. In the **Account** modal expand *"Limit to specific folders"* when creating a token (or press *Permissions* on an existing token) and pick one or more folders with per-folder `read` or `write` access. The **Permissions** modal also lets you rename the token and flip its global scope between Read only and Read + Write without regenerating the token value. Rules:
 
-- A token with **no folder permissions** behaves as before — its global scope applies everywhere.
+- A token with **no folder permissions** behaves as before. Its global scope applies everywhere.
 - A token with **one or more folder permissions** is a whitelist: the MCP handler denies access to every folder not covered by a grant.
-- Permissions **cascade to descendants**: a `write` grant on `Work` covers `Work/Projects` and `Work/Projects/Q3`, unless an inner folder carries its own (tighter) grant.
-- A grant on the root (the implicit "/" row) covers unfiled notes and acts as the fallback for folders with no direct grant.
-- Notes inherit from their folder — you cannot set permissions on individual notes.
+- Permissions cascade to descendants. A `write` grant on `Work` covers `Work/Projects` and `Work/Projects/Q3`, unless an inner folder carries its own (tighter) grant.
+- A grant on the root (the implicit "/" row) covers unfiled notes and is the fallback for folders with no direct grant.
+- Notes inherit from their folder. You cannot set permissions on individual notes.
 - `write` implies `read`. You cannot grant `write` on a token whose global scope is `read`. The same rule is enforced on update: `PUT …/permissions` returns `400 Bad Request` for any request whose effective post-update state would be `scope=read` with one or more `write` folder grants. Clear stale write grants in the same request when downgrading scope, or remove them first.
 - Listings (`list_notes`, `list_folders`, `search_notes`, `list_tags`, `find_notes_by_tag`, `find_folders`, and the MCP `resources/list`) are automatically filtered so the client only sees allowed folders.
 
@@ -332,9 +332,9 @@ Permissions can also be managed via the API:
 # List tokens (includes folder_permissions on each)
 curl -b cookies.txt http://localhost:8080/api/v1/account/tokens
 
-# Edit an existing token. Every field is optional — anything you omit is
-# preserved. Supported fields: name, scope ("read"|"readwrite"), and
-# folder_permissions (full replacement).
+# Edit an existing token. Every field is optional, and anything you
+# omit is preserved. Supported fields: name, scope ("read"|"readwrite"),
+# and folder_permissions (full replacement).
 curl -b cookies.txt -X PUT -H 'Content-Type: application/json' \
      -H 'X-CSRF-Token: ...' \
      -d '{"name":"Claude Desktop","scope":"readwrite","folder_permissions":[{"folder_id":42,"permission":"write"},{"folder_id":null,"permission":"read"}]}' \
@@ -380,7 +380,7 @@ curl -b cookies.txt -X PUT -H 'Content-Type: application/json' \
 | `move_folder` | Move a folder to a different parent (circular moves are rejected). |
 | `delete_folder` | Delete a folder and all its contents permanently. |
 
-**Available resources:** Every note is also exposed as a `note://<id>` resource (MIME type `text/markdown`) for clients that use resource reads instead of tool calls.
+**Available resources.** Every note is also exposed as a `note://<id>` resource (MIME type `text/markdown`) for clients that use resource reads instead of tool calls.
 
 ### Claude Desktop
 
@@ -409,7 +409,7 @@ Open WebUI supports MCP servers via its built-in tools pipeline.
 2. Set **Type** to `MCP`
 3. Set **Server URL** to `http://localhost:8080/mcp`
 4. Add a custom header: `Authorization: Bearer <your-token>`
-5. Save — the thornotes tools appear in the tool selector for any model
+5. Save, and the thornotes tools appear in the tool selector for any model
 
 If your Open WebUI instance runs in Docker, use the Docker host address instead of `localhost` (e.g. `http://host.docker.internal:8080/mcp` on Mac/Windows, or the Docker bridge IP on Linux).
 
@@ -429,7 +429,7 @@ Content-Type: multipart/form-data
 
 The import request (including a ZIP archive) is limited to **10 MB**. Each note's content is separately limited to **1 MB** by note creation, so a `.md` file over 1 MB is refused with `content exceeds 1 MB limit` even when the request is within the 10 MB upload limit.
 
-**Response:**
+**Response.**
 
 ```json
 { "notes_created": 5, "folders_created": 2 }
@@ -439,12 +439,12 @@ Requires an active session (same auth as the browser app) and a valid CSRF token
 
 ## Journals
 
-Journals turn thornotes into a daily writing tool. A journal is a named container (e.g. `Personal`, `Work`) that owns a predictable folder tree and a one-click shortcut to today's entry. Journals are a zero-config feature — no env vars or flags required.
+Journals turn thornotes into a daily writing tool. A journal is a named container (e.g. `Personal`, `Work`) that owns a predictable folder tree and a one-click shortcut to today's entry. Journals are a zero-config feature. No env vars or flags required.
 
 ### What a journal is
 
 - A journal is a name plus a folder under the shared top-level `Journals/` directory.
-- Each entry is a normal `.md` note filed under `Journals/{journalName}/{year}/{MM - Month}/{DD - Weekday}.md` — e.g. `Journals/Personal/2025/01 - January/07 - Tuesday.md`.
+- Each entry is a normal `.md` note filed under `Journals/{journalName}/{year}/{MM - Month}/{DD - Weekday}.md`, for example `Journals/Personal/2025/01 - January/07 - Tuesday.md`.
 - Today's entry is auto-tagged with `journal entry` and the journal name, so you can find all entries with `find_notes_by_tag` or the tag filter in the UI.
 - The folder tree is materialised on first use, so entries remain accessible through the normal folder sidebar even without the journals UI.
 
@@ -462,11 +462,11 @@ Click **Today** in the sidebar. thornotes:
 2. Looks up today's date in the user's local timezone (the browser sends its IANA timezone via the `tz` query param).
 3. Returns the existing entry if there is one, or creates a fresh `{DD - Weekday}.md` note with the `journal entry` + journal-name tags.
 
-Clicking **Today** repeatedly on the same day always returns the same note — it is idempotent.
+Clicking **Today** repeatedly on the same day always returns the same note. It is idempotent.
 
 ### Removing a journal
 
-Removing a journal from the manage modal deletes only the journal *record*. The `Journals/{name}` folder, year/month folders, and every entry you have written are kept — they remain available in the normal folder tree, and you can re-create a journal with the same name later to reattach the shortcut.
+Removing a journal from the manage modal deletes only the journal *record*. The `Journals/{name}` folder, year/month folders, and every entry you have written are kept. They remain available in the normal folder tree, and you can re-create a journal with the same name later to reattach the shortcut.
 
 ### API
 
@@ -485,11 +485,11 @@ All endpoints require a session cookie (or a bearer token) and return JSON.
 
 Every note save, every delete, and every folder rename becomes a git commit inside your notes directory. Open the **History** button in the editor to browse prior versions, preview any commit's content, and restore one with a single click.
 
-This feature is **off by default** — thornotes will not touch your notes directory with git unless you opt in.
+This feature is **off by default**. thornotes will not touch your notes directory with git unless you opt in.
 
 ### Turn it on
 
-Set one of these at startup (not a runtime toggle — pick it up on boot):
+Set one of these at startup. It is not a runtime toggle, so pick it up on boot:
 
 ```sh
 # Docker
@@ -524,10 +524,10 @@ Empty saves (same content as last commit) are skipped automatically. All commit 
 1. Open any note in the editor.
 2. Click **History** in the editor toolbar (top-right, next to Share).
 3. The left pane lists every commit touching this note, newest first.
-4. Click a commit — the right pane shows the note's content at that point in time.
+4. Click a commit, and the right pane shows the note's content at that point in time.
 5. Click **Restore this version** to write it back as a new commit. The restore itself is recorded in history, so it's reversible.
 
-If you open the history modal without the feature enabled you'll see "Version history is not enabled on this server" — the button is always rendered so you know the hook exists.
+If you open the history modal without the feature enabled you'll see "Version history is not enabled on this server". The button is always rendered so you know the hook exists.
 
 ### Using it from the API
 
@@ -541,13 +541,13 @@ All three require a session cookie and return `501 Not Implemented` when the fea
 
 ### Caveats
 
-- **Disk growth.** Every save is a commit. Heavy editing over months adds up — a periodic `git gc` inside the notes directory keeps the repo compact. thornotes doesn't run gc for you.
-- **Bring-your-own repo.** If `THORNOTES_NOTES_ROOT` is already a git repository, thornotes reuses it — it won't re-init or touch your existing `user.name`/`user.email`. You can push it to a remote with the host's `git` CLI if you want off-box backups; thornotes itself never pushes.
+- **Disk growth.** Every save is a commit. Heavy editing over months adds up. Run `git gc` periodically inside the notes directory to keep the repo compact. thornotes doesn't run gc for you.
+- **Bring-your-own repo.** If `THORNOTES_NOTES_ROOT` is already a git repository, thornotes reuses it. It won't re-init or touch your existing `user.name`/`user.email`. You can push it to a remote with the host's `git` CLI if you want off-box backups; thornotes itself never pushes.
 - **One linear history.** No branching, no merging, no rebases. Restoring an old version is a normal forward commit, not a `git reset`.
 
 ## LLM context endpoint
 
-`GET /api/v1/notes/context` returns all of your notes concatenated into a single markdown string — ready to paste into an LLM prompt as context.
+`GET /api/v1/notes/context` returns all of your notes concatenated into a single markdown string, ready to paste into an LLM prompt as context.
 
 ```
 GET /api/v1/notes/context
@@ -556,7 +556,7 @@ GET /api/v1/notes/context?folder_id=42
 
 Requires a session cookie (same auth as the browser app).
 
-**Response:**
+**Response.**
 
 ```json
 {
@@ -581,7 +581,7 @@ notes/
       project.md
 ```
 
-The file is always the authoritative copy. If you edit, add, remove, or rename files directly (external editor, `git checkout`, `rsync`, drag-drop in your file manager), thornotes detects the change within `THORNOTES_WATCH_INTERVAL`, syncs the database to match, and pushes a refresh to any open browser tabs. New files appear in the tree, deleted files disappear, and content edits are picked up — the on-disk note tree is the source of truth.
+The file is always the authoritative copy. If you edit, add, remove, or rename files directly (external editor, `git checkout`, `rsync`, drag-drop in your file manager), thornotes detects the change within `THORNOTES_WATCH_INTERVAL`, syncs the database to match, and pushes a refresh to any open browser tabs. New files appear in the tree, deleted files disappear, and content edits are picked up. The on-disk note tree is the source of truth.
 
 ## Building from source
 
@@ -608,7 +608,7 @@ make test-db-down      # stop it
 `make test-with-db` points `THORNOTES_TEST_MYSQL_DSN` at the Compose database,
 whose credentials are the same ones CI's service container gets. Set
 `THORNOTES_REQUIRE_MYSQL=1` alongside a DSN to turn "no DSN, so the MySQL legs
-skipped" into a failure — CI sets it, so a renamed variable cannot silently
+skipped" into a failure. CI sets it, so a renamed variable cannot silently
 reduce the suite to SQLite.
 
 **One database, several packages, no `-p 1`.** `thornotes_test` is a single
@@ -617,8 +617,8 @@ schema, and four packages (`internal/repository`, `internal/repository/mysql`,
 packages in parallel processes, so each of those packages takes a MariaDB
 advisory lock (`thornotes_test_db`, `internal/dbtest`) for the length of its run
 and they take turns. That lock is what makes the parallel run reproducible: skip
-it in one package and the other's rows are deleted mid-assertion, which surfaces
-as a search failure with a foreign-key error underneath it —
+it in one package and the other package's rows are deleted mid-assertion, which
+surfaces as a search failure with a foreign-key error underneath it:
 
 ```
 --- FAIL: TestSearchAccents_MySQL
@@ -640,24 +640,24 @@ Two guards keep a package from quietly rejoining that state:
 **`-timeout` must outlast the lock.** The per-binary test timeout covers the time
 a package spends queued on that lock, which is bounded at 1800s, so
 `make test-with-db` passes `-timeout 2400s` rather than the 120s it used to.
-At 120s the command could not produce a green run at all on a 4-core machine —
-`internal/notes` alone takes ~153s without `-race` — and reported
-`panic: test timed out after 2m0s`, which reads as a product failure and is only
-the clock. The lock bound itself grew from 600s for the same class of reason: with
-five packages taking turns, the last one waits for the sum of the others, and on a
-loaded host `internal/notes` alone ran 916s, so the two cheapest packages behind it
-failed with `could not acquire "thornotes_test_db" within 600s`. The queue is now
-given room to drain, and the lock wait still reports itself before the test
-timeout would.
+At 120s the command could not produce a green run at all on a 4-core machine,
+because `internal/notes` alone takes ~153s without `-race`. The run then reported
+`panic: test timed out after 2m0s`, which reads as a product failure but is only
+the clock. The lock bound itself grew from 600s for the same class of reason.
+With five packages taking turns, the last one waits for the sum of the others.
+On a loaded host `internal/notes` alone ran 916s, so the two cheapest packages
+behind it failed with `could not acquire "thornotes_test_db" within 600s`. The
+queue now has room to drain, and the lock wait still reports itself before the
+test timeout would.
 
-**The trade:** the MySQL-touching packages run one at a time — the database is
-serialised, the rest of the suite is not — and the lock is held on the server, so
+**The trade.** The MySQL-touching packages run one at a time. The database is
+serialised, the rest of the suite is not. The lock is held on the server, so
 two checkouts pointed at the same schema serialise too (that is the intent). Do
 not "fix" a slow or noisy run by adding `-p 1`: it hides the mechanism rather
 than using it, and the collision comes back the moment somebody runs the suite
 without the flag. A package cannot be given its own database instead: the test
 user has `GRANT ALL` on `thornotes_test` only and no `CREATE`, so a schema per
-package is refused — measured, not assumed:
+package is refused. The check below is measured, not assumed:
 
 ```
 $ mysql -u thornotes -p thornotes -e "CREATE DATABASE thornotes_test_notes"
@@ -696,7 +696,7 @@ Releases are version-tagged commits on `main`. The CI pipeline automatically bui
 CI will then:
 - Run lint (with `.golangci.yml` config) and tests.
 - Build and push multi-arch (`linux/amd64`, `linux/arm64`) images: `th0rn0/thornotes:latest` and `th0rn0/thornotes:v0.9.0.0`.
-- Run a smoke test — pulls the freshly pushed image, starts a container, and verifies HTTP 200 on `/`.
+- Run a smoke test that pulls the freshly pushed image, starts a container, and verifies HTTP 200 on `/`.
 - Create a GitHub release with the changelog section for that version as release notes (only after smoke test passes).
 - Build and attach a static `thornotes-linux-amd64` binary and a `thornotes-desktop-v0.9.0.0-linux-amd64.AppImage` to the release.
 
@@ -705,7 +705,7 @@ CI will then:
 If you need to release without CI, run the Docker build and push yourself:
 
 ```sh
-# Build (multi-arch — requires docker buildx and QEMU)
+# Build (multi-arch, requires docker buildx and QEMU)
 docker buildx build \
   --platform linux/amd64,linux/arm64 \
   -t th0rn0/thornotes:latest \

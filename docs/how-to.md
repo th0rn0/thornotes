@@ -1,35 +1,36 @@
-# Thornotes — How-To Guide
+# Thornotes: how-to guide
 
-Thornotes is a self-hosted markdown notes app. Every note is a real `.md` file on disk — your data is always yours, readable by any text editor.
+Thornotes is a self-hosted markdown notes app. Every note is a real `.md` file on disk. Your data stays yours, and any text editor can read it.
 
 ---
 
-## Table of Contents
+## Table of contents
 
 1. [Installation](#installation)
-2. [Getting Started — Web Interface](#getting-started--web-interface)
-3. [Desktop App](#desktop-app)
-4. [Creating Notes](#creating-notes)
-5. [The Editor](#the-editor)
-6. [Organizing with Folders](#organizing-with-folders)
-7. [Using Tags](#using-tags)
-8. [Board View](#board-view)
+2. [Getting started: web interface](#getting-started-web-interface)
+3. [Desktop app](#desktop-app)
+4. [Creating notes](#creating-notes)
+5. [The editor](#the-editor)
+6. [Organizing with folders](#organizing-with-folders)
+7. [Using tags](#using-tags)
+8. [Board view](#board-view)
 9. [Search](#search)
-10. [Sharing Notes](#sharing-notes)
-11. [Sharing a Folder](#sharing-a-folder)
+10. [Sharing notes](#sharing-notes)
+11. [Sharing a folder](#sharing-a-folder)
 12. [Journals](#journals)
-13. [Version History](#version-history)
+13. [Version history](#version-history)
 14. [Import](#import)
-15. [Themes](#themes)
-16. [API Tokens](#api-tokens)
-17. [MCP Server (AI Integration)](#mcp-server-ai-integration)
-18. [Keyboard Shortcuts](#keyboard-shortcuts)
+15. [Export](#export)
+16. [Themes](#themes)
+17. [API tokens](#api-tokens)
+18. [MCP server (AI integration)](#mcp-server-ai-integration)
+19. [Keyboard shortcuts](#keyboard-shortcuts)
 
 ---
 
 ## Installation
 
-Thornotes is a server application — you run it once and access it from any browser (or the desktop app). Pick the method that fits your setup.
+Thornotes is a server application. You run it once and access it from any browser (or the desktop app). Pick the method that fits your setup.
 
 ### Option 1: Docker (recommended)
 
@@ -45,13 +46,13 @@ docker run -d \
 
 Open [http://localhost:8080](http://localhost:8080) and register your account.
 
-A fresh named volume (`thornotes-data`) is seeded with the right ownership automatically. If you bind-mount a host directory instead, make it writable by uid 65532 first — see [Data volume ownership](../README.md#data-volume-ownership).
+A fresh named volume (`thornotes-data`) is seeded with the right ownership automatically. If you bind-mount a host directory instead, make it writable by uid 65532 first. See [Data volume ownership](../README.md#data-volume-ownership).
 
-For persistent configuration or MariaDB, use Docker Compose — see the [README](../README.md#docker-compose) for full examples.
+For persistent configuration or MariaDB, use Docker Compose. See the [README](../README.md#docker-compose) for full examples.
 
 ### Option 2: Linux binary
 
-Pre-built static binaries are attached to every [release](https://github.com/th0rn0/thornotes/releases/latest). No runtime dependencies — just download and run.
+Pre-built static binaries are attached to every [release](https://github.com/th0rn0/thornotes/releases/latest). No runtime dependencies. Download and run.
 
 ```sh
 # Download
@@ -70,7 +71,7 @@ Open [http://localhost:8080](http://localhost:8080) and register your account.
 
 To run as a background service, see the [systemd setup](../README.md#running-as-a-systemd-service) in the README.
 
-### Option 3: Build from source
+### Option 3: build from source
 
 Requires Go 1.26+.
 
@@ -81,7 +82,7 @@ make build
 ./thornotes --addr :8080 --db thornotes.db --notes-root notes
 ```
 
-### After installation — first steps
+### After installation: first steps
 
 1. Open the server URL in a browser.
 2. Click **Register** to create your account.
@@ -98,7 +99,7 @@ make build
 
 ---
 
-## Getting Started — Web Interface
+## Getting started: web interface
 
 Open Thornotes in your browser. If this is your first time, you'll see the login screen.
 
@@ -108,17 +109,17 @@ Click **Register** to create an account. After logging in you'll land on the mai
 
 ---
 
-## Desktop App
+## Desktop app
 
-Thornotes is a web app, so any browser can pin it as a standalone desktop app that opens in its own window without browser tabs or toolbars. No download required — just open your Thornotes server URL and follow the steps for your browser.
+Thornotes is a web app, so any browser can pin it as a standalone desktop app that opens in its own window without browser tabs or toolbars. No download required. Open your Thornotes server URL and follow the steps for your browser.
 
 ### Chrome / Chromium / Edge (recommended)
 
-Chrome and Edge give the best standalone experience: a dedicated window with no browser UI.
+Chrome and Edge open the app in a dedicated window with no browser UI.
 
 1. Open your Thornotes URL (e.g. `http://localhost:8080`)
 2. Log in
-3. Click the **install icon** (⊕) in the right side of the address bar — or open the menu (⋮) and choose **Install Thornotes** (Chrome) / **Apps → Install this site as an app** (Edge)
+3. Click the **install icon** (⊕) in the right side of the address bar, or open the menu (⋮) and choose **Install Thornotes** (Chrome) / **Apps → Install this site as an app** (Edge)
 4. Click **Install** in the dialog
 
 Thornotes now appears in your app launcher and taskbar like any other app. You can also right-click the taskbar entry and enable **Start on login**.
@@ -129,11 +130,11 @@ Thornotes now appears in your app launcher and taskbar like any other app. You c
 
 Firefox doesn't support installing PWAs directly, but you can open Thornotes in a dedicated window without any browser chrome:
 
-**Option A — Open as app window:**
+**Option A: open as an app window.**
 1. Open your Thornotes URL
 2. Press `Alt` to show the menu bar → **Tools → Open in New Window Without Toolbars**
 
-**Option B — Create a launcher shortcut (Linux):**
+**Option B: create a launcher shortcut (Linux).**
 ```sh
 # Replace the URL with your Thornotes server address
 cat > ~/.local/share/applications/thornotes.desktop << 'EOF'
@@ -157,23 +158,23 @@ Thornotes appears in your Dock and opens in its own minimal window.
 
 ---
 
-## Creating Notes
+## Creating notes
 
 Click the **+** icon next to any folder (or at the top of the sidebar for a root note) to create a new note. Type a title and press **Enter**.
 
-The title becomes the note's filename on disk — `my-note.md` — and its URL slug. You can rename it later without breaking anything.
+The title becomes the note's filename on disk, `my-note.md`, and its URL slug. You can rename it later without breaking anything.
 
-**To delete a note:** Open it and press **Delete** (when you're not typing in the editor), or use the delete button in the toolbar. You'll be asked to confirm.
+**To delete a note.** Open it and press **Delete** (when you're not typing in the editor), or use the delete button in the toolbar. You'll be asked to confirm.
 
 ---
 
-## The Editor
+## The editor
 
 ![Editor view](./screenshot-editor.png)
 
 The editor is split into two panes: markdown on the left, live preview on the right.
 
-### Formatting Toolbar
+### Formatting toolbar
 
 The toolbar above the editor gives you quick access to:
 
@@ -200,9 +201,9 @@ The toolbar above the editor gives you quick access to:
 
 Click the table icon to open an 8×8 grid. Hover to pick your dimensions, then click to insert. The table is inserted as markdown with aligned columns.
 
-You can also paste tab-separated data (e.g. from a spreadsheet) and Thornotes will offer to convert it to a markdown table automatically.
+You can also paste tab-separated data (e.g. from a spreadsheet) and Thornotes offers to convert it to a markdown table.
 
-### Syntax Highlighting
+### Syntax highlighting
 
 Code blocks detect the language from the fence tag and highlight accordingly. 180+ languages are supported.
 
@@ -212,56 +213,65 @@ Dark mode syntax highlighting adapts to your theme:
 
 ![Syntax highlighting dark](./screenshot-syntax-dark.png)
 
-### Auto-Save
+### Auto-save
 
 Thornotes saves automatically 1.5 seconds after you stop typing. The status indicator in the top-right of the editor shows **Saved**, **Saving…**, or **Unsaved** at all times.
 
-### Wiki-Style Links
+### Wiki-style links
 
 Link to other notes with `[[Note Title]]` syntax. In the preview pane, these render as clickable links that navigate to the referenced note.
 
-### Preview Mode
+### The four note views
 
 ![Preview mode](./screenshot-preview.png)
 
-Click the preview/edit toggle to switch to a full-width rendered view. The editor collapses and you get a clean reading experience.
+The note titlebar carries a four-way switcher: **Edit**, **Split**, **Preview** and **Reading**. The active view is highlighted, and the choice is a preference: the next note you open uses it.
+
+- **Edit** is the plain markdown editor, with the formatting toolbar and the status bar.
+- **Split** puts the editor and the rendered note side by side. On a narrow window the two stack instead of shrinking, so neither becomes a column of three words.
+- **Preview** shows the rendered note across the full width, with the toolbar still available.
+- **Reading** is the same rendered note at a 74-character measure with the toolbar hidden. That measure is the point of the view: lines wider than roughly 75 characters are slower to read, so Reading keeps the text column narrow even on a wide screen.
+
+A **new** note always opens in Edit, whatever you have chosen, because a rendered empty note has nothing to read. Once you open an existing note, your last choice comes back.
+
+The same preference lives in **Settings → Editor → Default note view**, now with all four options; changing it there takes effect immediately rather than on the next note.
 
 ---
 
-## Organizing with Folders
+## Organizing with folders
 
 The left sidebar is your folder tree. Click a folder to expand it and see its notes. Click the folder *name* (not the arrow) to open a card overview showing all notes inside with their first few lines as a preview.
 
-**Create a folder:** Click the **+** next to the folder icon at the top of the sidebar, or right-click an existing folder.
+**Create a folder.** Click the **+** next to the folder icon at the top of the sidebar, or right-click an existing folder.
 
-**Rename / Move / Delete:** Right-click any folder for options. Deleting a folder deletes everything inside it — notes and subfolders — so be sure before confirming.
+**Rename, move or delete.** Right-click any folder for options. Deleting a folder deletes everything inside it, notes and subfolders, so be sure before confirming.
 
-**Drag and drop:** Drag any note or folder onto another folder to move it there. Drag to the root area to un-nest it.
+**Drag and drop.** Drag any note or folder onto another folder to move it there. Drag to the root area to un-nest it.
 
 Folders nest as deep as you like. The path becomes the file path on disk: `notes/{user-id}/work/projects/roadmap.md`.
 
 ---
 
-## Using Tags
+## Using tags
 
-**Add tags to a note:** Type in the **Tags** field at the top of the editor (comma-separated). Press Enter to confirm.
+**Add tags to a note.** Type in the **Tags** field at the top of the editor (comma-separated). Press Enter to confirm.
 
 Tags let you cross-reference notes across folders. A note in `work/projects/` can share tags with a note in `personal/ideas/`.
 
 > Note: the UI currently has no tag browser and no tag-filter panel. Tags are write-only from the editor, and the search box sends only a text query. Two ways to filter by tag exist today, and neither is a "browse by tag" view:
 >
-> - **MCP:** the `list_tags` and `find_notes_by_tag` tools, and `search_notes` with its `tags` argument (AND across tags).
-> - **HTTP:** `GET /api/v1/notes?q=…&tag=one&tag=two`. The `q` parameter is required, so this is a search narrowed by tag rather than a tag listing. Multi-tag filtering is affected by the search-semantics defect tracked as H-02.
+> - **MCP.** The `list_tags` and `find_notes_by_tag` tools, and `search_notes` with its `tags` argument (AND across tags).
+> - **HTTP.** `GET /api/v1/notes?q=…&tag=one&tag=two`. The `q` parameter is required, so this is a search narrowed by tag rather than a tag listing. Multi-tag filtering is affected by the search-semantics defect tracked as H-02.
 
 ---
 
-## Board View
+## Board view
 
-If your notes use `status-*` and `project-*` tags to track work, the **Board** view renders them as a kanban-style board — columns for statuses, swimlanes for projects, all on one screen.
+If your notes use `status-*` and `project-*` tags to track work, the **Board** view renders them as a kanban-style board: columns for statuses and swimlanes for projects, on one screen.
 
-**To open it:** click the **Board** button in the sidebar toolbar. Click it again to return to the normal view. The toggle remembers its last state, so it will be there next time you open Thornotes if you left it on.
+Click the **Board** button in the sidebar toolbar to open it. Click it again to return to the normal view. The toggle remembers its last state, so if you left it on it is still on next time you open Thornotes.
 
-**Tag convention:**
+**Tag convention.**
 
 - **Columns** are `status-*` tags. The suffix is humanised: `status-in-review` becomes the "In review" column. Fixed column order: Todo, Ready, Running, In review, Blocked, Done, Archived. Any other status you invent appears after those, alphabetically.
 - **Swimlanes** are `project-*` tags. The suffix is shown as-is (title-cased): `project-thornotes` → "Thornotes". A note with several project tags appears under the alphabetically first one, so it is on the board exactly once.
@@ -270,7 +280,7 @@ If your notes use `status-*` and `project-*` tags to track work, the **Board** v
 
 Cards show the note title, priority (`P<nn>` when a `priority-pNN` tag exists), a relative date, and any other tags as chips. Click a card to open the note.
 
-This is a view, not a schema change — no new fields, no new endpoints, no migration. The board reads the same `/api/v1/notes/all` endpoint the rest of the app uses and groups the results on the client.
+This is a view, not a schema change: no new fields, no new endpoints, no migration. The board reads the same `/api/v1/notes/all` endpoint the rest of the app uses and groups the results on the client.
 
 ---
 
@@ -278,20 +288,20 @@ This is a view, not a schema change — no new fields, no new endpoints, no migr
 
 Click the **Search** icon or use the search box at the top of the sidebar. Search runs across note titles and full content. Results show the matching snippet and the folder path for context.
 
-Every word you type must appear in the note, and every tag you filter on must be on the note — two words are an AND, not an OR, and two tags mean "tagged with both". Tag matching ignores case, so `#Home` and `#home` find the same notes; `%` and `_` in a tag are ordinary characters, not wildcards. A note may still store `Home` and `home` as two separate tags — search treats them alike, the tag list does not merge them.
+Every word you type must appear in the note, and every tag you filter on must be on the note. Two words are an AND, not an OR, and two tags mean "tagged with both". Tag matching ignores case, so `#Home` and `#home` find the same notes; `%` and `_` in a tag are ordinary characters, not wildcards. A note may still store `Home` and `home` as two separate tags. Search treats them alike, but the tag list does not merge them.
 
-Words of any length are found: `go` and `ip` return the notes that contain them, on every backend. A term shorter than the database's full-text index can hold is matched by a scan of your own notes instead of by the index, so it is slower than a longer term — one scan per short term, over your notes only — and it matches as a substring (`go` also finds `ago`), where a longer term matches as a word. One difference between backends remains: SQLite stems words, so `meeting` finds a note saying "meetings" there, and MySQL does not, so it does not. That is not fixed here and is tracked separately.
+Words of any length are found: `go` and `ip` return the notes that contain them, on every backend. A term shorter than the database's full-text index can hold is matched by a scan of your own notes instead of by the index, so it is slower than a longer term, with one scan per short term over your notes only, and it matches as a substring (`go` also finds `ago`), where a longer term matches as a word. One difference between backends remains: SQLite stems words, so `meeting` finds a note saying "meetings" there, and MySQL does not, so it does not. That is not fixed here and is tracked separately.
 
-Accents and non-ASCII case fold the same way on both backends: `CAFÉ` finds a note saying "café", `naive` finds "naïve", `istanbul` finds "İstanbul", `uber` finds "über". SQLite gets there through FTS5's `unicode61` tokenizer (migration `010`), which decomposes and strips the diacritics a query left off, with `porter` still chained on top so stemming is unchanged. One rule remains different between the backends: `ß` → `ss`. A query for `STRASSE` finds a note saying "Straße" on MariaDB, whose `utf8mb4_unicode_ci` collation has that rule, and not on SQLite, because `unicode61` folds by decomposition and `ß` has none — no FTS5 tokenizer offers it. That is a known limitation of the SQLite backend, not a regression, and it is the only accent case that still divides the two.
-Filler words do not narrow a search. MySQL's full-text index refuses to store a stopword, so `the`, `who`, `when`, `where`, `what`, `this`, `that`, `about`, `are`, `was`, `will`, `with`, `from`, `for`, `how` and a few more were once enough to make a search return **nothing at all** — `the meeting` found no notes on MySQL, and only the notes containing both words on SQLite. Those words are now dropped from the query on every backend, so `the meeting` returns the same notes as `meeting`, `who owns` the same notes as `owns`, and a search made only of filler words returns nothing rather than everything. The words that are dropped are exactly the ones the index cannot hold; words that merely contain one (`theatre`, `without`) are searched for as normal. The residual is the same shape as the short-word one: an instance whose database is configured with a stopword list of its own will not have that list honoured.
+Accents and non-ASCII case fold the same way on both backends: `CAFÉ` finds a note saying "café", `naive` finds "naïve", `istanbul` finds "İstanbul", `uber` finds "über". SQLite gets there through FTS5's `unicode61` tokenizer (migration `010`), which decomposes and strips the diacritics a query left off, with `porter` still chained on top so stemming is unchanged. One rule remains different between the backends: `ß` → `ss`. A query for `STRASSE` finds a note saying "Straße" on MariaDB, whose `utf8mb4_unicode_ci` collation has that rule, and not on SQLite, because `unicode61` folds by decomposition and `ß` has none; no FTS5 tokenizer offers that rule. That is a known limitation of the SQLite backend, not a regression, and it is the only accent case that still divides the two.
+Filler words do not narrow a search. MySQL's full-text index refuses to store a stopword, so `the`, `who`, `when`, `where`, `what`, `this`, `that`, `about`, `are`, `was`, `will`, `with`, `from`, `for`, `how` and a few more were once enough to make a search return **nothing at all**. `the meeting` found no notes on MySQL, and only the notes containing both words on SQLite. Those words are now dropped from the query on every backend, so `the meeting` returns the same notes as `meeting`, `who owns` the same notes as `owns`, and a search made only of filler words returns nothing rather than everything. The words that are dropped are exactly the ones the index cannot hold; words that merely contain one (`theatre`, `without`) are searched for as normal. The residual is the same shape as the short-word one: an instance whose database is configured with a stopword list of its own will not have that list honoured.
 
 The snippet is an excerpt of the note centred on the first match, with `<mark>…</mark>` around each occurrence and `…` where text was trimmed, and it is the same on every database backend. The UI HTML-escapes the snippet before rendering, so the markers appear as literal text; that escaping is deliberate: the snippet comes from author-controlled note content, and rendering it unescaped would hand a note author an XSS primitive.
 
 ---
 
-## Sharing Notes
+## Sharing notes
 
-Every note can be shared as a read-only public link — no login required for the viewer.
+Every note can be shared as a read-only public link. The viewer needs no login.
 
 1. Open the note you want to share.
 2. Click the **Share** button in the toolbar.
@@ -304,16 +314,16 @@ Clicking **Share** on a note that already has a link asks for confirmation, then
 
 ### What a share link is, and what it is not
 
-A share URL is a **bearer capability**: the token in it is the whole authorisation. Anyone who holds the link can read the note, with no account, no session and no record of who they are. Treat it exactly like a password — in a channel you would not put a password in, in a chat with someone you trust, not in a public issue.
+A share URL is a **bearer capability**: the token in it is the whole authorisation. Anyone who holds the link can read the note, with no account, no session and no record of who they are. Treat it exactly like a password: share it with the person you mean to share it with, not in a public issue and not in a channel where you would not paste a password.
 
 What that means for the two ends of it:
 
 - **Nothing caches or indexes it.** The shared view is served with `Cache-Control: no-store` and `X-Robots-Tag: noindex`, so a proxy in front of the instance keeps no copy and a link that leaks into a crawlable page does not enter a search index. The 404 for a link that no longer works carries the same headers, so a cache cannot learn which tokens are live.
-- **The instance does not log it.** Access logs record the share path with the token replaced by a short stable handle (`/s/t_1a2b3c4d`), so a log can still be grouped by link — every request for one link carries the same handle — without the log itself being a list of working capabilities.
+- **The instance does not log it.** Access logs record the share path with the token replaced by a short stable handle (`/s/t_1a2b3c4d`), so a log can still be grouped by link, because every request for one link carries the same handle, without the log itself being a list of working capabilities.
 
-**What revokes a link:** unsharing the note, or sharing it again (which rotates the token). Moving or renaming a note does **not** break a share link — the link resolves by token, not by path — and neither does editing it: a share always shows the note as it currently is, not as it looked when you shared it.
+**What revokes a link.** Unsharing the note revokes it, and so does sharing it again (which rotates the token). Moving or renaming a note does **not** break a share link, because the link resolves by token, not by path, and neither does editing it: a share always shows the note as it currently is, not as it looked when you shared it.
 
-**What does not expire it by default:** a link works until it is revoked. That is still the default — a link with no deadline is the one you get unless you ask for another — but a deadline is now available, because "no expiry is a legitimate answer if it is stated" and an unstated one is not.
+**What does not expire it by default.** A link works until it is revoked. That is still the default: a link with no deadline is the one you get unless you ask for another. A deadline is now available, because "no expiry is a legitimate answer if it is stated" and an unstated one is not.
 
 ### Expiry, and finding the links you have handed out
 
@@ -321,21 +331,21 @@ A share link can be given a deadline. Two ways, and the difference matters:
 
 - **`POST /api/v1/notes/:id/share`** with `{"expires_at": "2026-12-01T09:00:00Z"}` (RFC3339) creates the link with that deadline. Omit it, or send `null`, and the link never expires. A deadline in the past is refused with `400`, because publishing a link that is already dead means handing somebody a URL that answers 404 everywhere with nothing saying why.
 - **`PATCH /api/v1/notes/:id/share`** with `{"expires_at": …}` changes the deadline of the link that already exists, and `{"clear_expiry": true}` removes it. This one does **not** rotate the token, which is the point: re-sharing to extend a deadline would revoke every copy of the link already in circulation.
-  The field is `clear_expiry` and not `clear` on purpose: on the POST route above, `{"clear": true}` **revokes** the link. Expiry is not revocation — removing a deadline makes a link immortal, and only unsharing or sharing again (which rotates the token) takes a URL away. The PATCH route refuses `{"clear": true}`, so the word that kills a link next door cannot silently make one permanent here.
+  The field is `clear_expiry` and not `clear` on purpose: on the POST route above, `{"clear": true}` **revokes** the link. Expiry is not revocation: removing a deadline makes a link immortal, and only unsharing or sharing again (which rotates the token) takes a URL away. The PATCH route refuses `{"clear": true}`, so the word that kills a link next door cannot silently make one permanent here.
 
-**An expired link cannot be revived.** Once a link's deadline has passed, `PATCH` refuses both shapes with `409 Conflict` — extending the deadline and `clear_expiry` alike — with the body `{"error":"this share link has expired; share the note again to create a new link"}`. Clearing the deadline is refused for the same reason as extending it, and more so: `expires_at = NULL` would make a dead link immortal, which is a stronger revival than moving the date. The only way to publish the note again is a **fresh share**, which rotates the token, so the old URL stays dead for good — a deadline anyone can silently undo is not a deadline, and a recipient's `404` has to be information they can trust. A **live** link is unaffected: extending or clearing its deadline still works and still keeps the same token.
+**An expired link cannot be revived.** Once a link's deadline has passed, `PATCH` refuses both shapes with `409 Conflict`, extending the deadline and `clear_expiry` alike, with the body `{"error":"this share link has expired; share the note again to create a new link"}`. Clearing the deadline is refused for the same reason as extending it, and more so: `expires_at = NULL` would make a dead link immortal, which is a stronger revival than moving the date. The only way to publish the note again is a **fresh share**, which rotates the token, so the old URL stays dead for good. A deadline anyone can silently undo is not a deadline, and a recipient's `404` has to be information they can trust. A **live** link is unaffected: extending or clearing its deadline still works and still keeps the same token.
 
-An expired link answers exactly what a token that never existed answers — the same status, the same empty body, the same headers. There is nothing in the response that says "this was a real link once", because that is information the holder of a burned URL should not be able to get.
+An expired link answers exactly what a token that never existed answers: the same status, the same empty body, the same headers. There is nothing in the response that says "this was a real link once", because that is information the holder of a burned URL should not be able to get.
 
-**Your links, in one place: `GET /api/v1/shares`.** It lists the caller's own share links of **both kinds** — note links and folder links — with the kind on each row (`"kind": "note"` or `"kind": "folder"`), the note's title or the folder's name, the deadline, and when the link was last opened. The token itself is reduced to its first eight characters plus `…`. That is enough to match a row against a URL you still have and useless for replaying one: an endpoint that answered with every working token would turn one authenticated read into a bulk export of the capabilities themselves. It is what makes bulk revocation possible at all; before it, a link could only be cleared from the note (or the folder) that produced it — and a folder you had to remember you had shared.
+**Your links, in one place: `GET /api/v1/shares`.** It lists the caller's own share links of **both kinds**, note links and folder links, with the kind on each row (`"kind": "note"` or `"kind": "folder"`), the note's title or the folder's name, the deadline, and when the link was last opened. The token itself is reduced to its first eight characters plus `…`. That is enough to match a row against a URL you still have and useless for replaying one: an endpoint that answered with every working token would turn one authenticated read into a bulk export of the capabilities themselves. It is what makes bulk revocation possible at all; before it, a link could only be cleared from the note (or the folder) that produced it, and a folder you had to remember you had shared.
 
-A folder row carries `folder_id` (the folder to revoke) and a `note_id` of `null`; a note row carries `note_id` and, as before, the `folder_id` of the folder the note lives in. The order is part of the answer: newest first, ties broken by kind and then by id, so two identical calls return the same sequence. A link that has been revoked is gone from the list — revoking deletes the row — and a link that has **expired stays listed with its deadline**, so the panel can say why a URL you still have stopped answering.
+A folder row carries `folder_id` (the folder to revoke) and a `note_id` of `null`; a note row carries `note_id` and, as before, the `folder_id` of the folder the note lives in. The order is part of the answer: newest first, ties broken by kind and then by id, so two identical calls return the same sequence. A link that has been revoked is gone from the list, because revoking deletes the row, and a link that has **expired stays listed with its deadline**, so the panel can say why a URL you still have stopped answering.
 
-**Last opened** is recorded at most **once per link per ten minutes**. A share link is read-only, unauthenticated and easy to hit in a loop, so a write per view would let anyone holding a URL grow the database; one write per ten minutes caps a link at six an hour however hard it is hit, and still answers the only question the field is for — is this link still in use, and roughly when?
+**Last opened** is recorded at most **once per link per ten minutes**. A share link is read-only, unauthenticated and easy to hit in a loop, so a write per view would let anyone holding a URL grow the database; one write per ten minutes caps a link at six an hour however hard it is hit, and still answers the only question the field is for: is this link still in use, and roughly when?
 
 ---
 
-## Sharing a Folder
+## Sharing a folder
 
 A folder can be shared as one read-only link at `https://your-instance.example.com/f/{token}`. Anyone with that link reads the folder's contents with no account and no session, and the view is **live**: it shows the folder as it is when they open it, not as it was when you made the link. That has two consequences and both are the feature, not a caveat: a note you add to the folder later is published to everyone holding the link, and a note you move out of it is unpublished.
 
@@ -347,7 +357,17 @@ Right-click the folder and choose **Share**. Before a link exists, the confirmat
 
 (If your build predates the folder Share control, the same thing is one request: `POST /api/v1/folders/{id}/share` returns `{"share_token": "…"}`, and the link is `/f/{token}`.)
 
-Clicking **Share** on a folder that already has a link asks for confirmation and then **replaces** the link, exactly as it does for a note: the previous URL stops working at that moment. A folder link that is lost can therefore only be replaced, never recovered — `GET /api/v1/shares` deliberately answers with a prefix, not the token.
+Clicking **Share** on a folder that already has a link asks for confirmation and then **replaces** the link, exactly as it does for a note: the previous URL stops working at that moment. A folder link that is lost can therefore only be replaced, never recovered, because `GET /api/v1/shares` answers with a prefix, not the token.
+
+### A folder link can have a deadline
+
+Folder links take the same deadline a note link does, with the same two routes and the same refusal:
+
+- `POST /api/v1/folders/{id}/share` with `{"expires_at": "2026-12-01T09:00:00Z"}` issues the link with that deadline. A deadline in the past is refused with `400`.
+- `PATCH /api/v1/folders/{id}/share` changes or removes it. `{"expires_at": …}` moves the deadline and `{"clear_expiry": true}` removes it, both **without rotating the token**, so every copy already handed out keeps working.
+- Once the deadline has passed, `PATCH` refuses both shapes with `409` and the body `{"error":"this share link has expired; share the folder again to create a new link"}`. Clearing the deadline on a dead link is refused for the same reason as extending it: it would make a dead URL immortal. Publishing the folder again means a fresh share, which rotates the token, so the old URL stays dead.
+
+An expired folder link answers the same `404`, with the same empty body and the same headers, as a token that never existed. That is asserted against the note route too: the two surfaces return one serialised refusal for expired, revoked and unknown links, so nothing in either response says that a token was real once.
 
 ### Seeing every link you have handed out, and revoking one
 
@@ -355,38 +375,38 @@ Open the shared-links panel (the **link icon** in the sidebar toolbar). It lists
 
 That panel is the only place a folder link has to be findable, and it exists because the alternative is worse than inconvenient: a folder link grants a whole subtree, so a link you cannot find is an entitlement you cannot close.
 
-- **Revoke from the panel.** Press **Revoke** on the row. The confirmation says what stops — every note in that folder and its subfolders, for everyone holding the URL — and the link stops resolving on the next request. There is no cache to expire and no session to wait out.
+- **Revoke from the panel.** Press **Revoke** on the row. The confirmation says what stops: every note in that folder and its subfolders, for everyone holding the URL. The link stops resolving on the next request. There is no cache to expire and no session to wait out.
 - **Revoke from the folder.** Right-click the folder and choose **Unshare**. Same effect: the row is deleted.
 - **Revoking is not expiry.** A revoke deletes the link; a deadline makes a link stop answering at a moment. An expired link keeps its row in the panel with its deadline, which is what explains why a URL you still have stopped working.
 
-What also closes a folder link, without asking: deleting the folder, or deleting any folder above it. What does **not**: moving or renaming the folder, which keeps the link working because the share is keyed on the folder and not on its path — so a renamed bookmarked note *inside* the folder does stop resolving while the folder link itself keeps working.
+Deleting the folder, or deleting any folder above it, also closes the link without asking. Moving or renaming the folder does **not**: the link keeps working because the share is keyed on the folder and not on its path. So a renamed bookmarked note *inside* the folder does stop resolving, while the folder link itself keeps working.
 
 
 ---
 
 ## Journals
 
-Journals are for regular writing — daily logs, work diaries, mood tracking. Each journal entry is automatically organized into a date-based folder hierarchy.
+Journals are for regular writing: daily logs, work diaries, mood tracking. Each journal entry is automatically organized into a date-based folder hierarchy.
 
-**Create a journal:** Click **Journals** in the sidebar, then **+ New Journal**. Give it a name (e.g. "Daily", "Work Log").
+**Create a journal.** Click **Journals** in the sidebar, then **+ New Journal**. Give it a name (e.g. "Daily", "Work Log").
 
-**Write today's entry:** Select your journal from the dropdown, then click **Today**. Thornotes creates the entry at `Journals/{journal}/{year}/{MM - Month}/{DD - Weekday}.md` (e.g. `Journals/Personal/2025/01 - January/07 - Tuesday.md`) and opens it in the editor. Click Today on the same day and you get the same note back.
+**Write today's entry.** Select your journal from the dropdown, then click **Today**. Thornotes creates the entry at `Journals/{journal}/{year}/{MM - Month}/{DD - Weekday}.md` (e.g. `Journals/Personal/2025/01 - January/07 - Tuesday.md`) and opens it in the editor. Click Today on the same day and you get the same note back.
 
-Entries are automatically tagged with `journal entry` and the journal name, so you can find them via the tag browser even without navigating the folder tree.
+Entries are automatically tagged with `journal entry` and the journal name, so a search for either tag finds them without navigating the folder tree. There is no tag browser (see [Using tags](#using-tags)); tag filtering goes through search.
 
-You can have multiple journals — a personal one, a work one, a fitness log — each with its own independent history.
+You can have multiple journals, a personal one, a work one, a fitness log, each with its own independent history.
 
 ---
 
-## Version History
+## Version history
 
 > Version history requires `--enable-git-history` at startup. See the [README](../README.md) for setup.
 
-When git history is enabled, every save is committed to a git repository in your notes directory. No git CLI is required — Thornotes includes a pure Go implementation.
+When git history is enabled, every save is committed to a git repository in your notes directory. No git CLI is required. Thornotes includes a pure Go implementation.
 
-**View history:** Click the **History** button in the editor toolbar. A panel shows every version with a timestamp and a preview of that version's content.
+**View history.** Click the **History** button in the editor toolbar. A panel shows every version with a timestamp and a preview of that version's content.
 
-**Restore a version:** Click **Restore** on any history entry. Thornotes saves the old content as a new commit (forward-only — history is never rewritten). Your current content before the restore is also committed, so nothing is lost.
+**Restore a version.** Click **Restore** on any history entry. Thornotes saves the old content as a new commit (forward-only: history is never rewritten). Your current content before the restore is also committed, so nothing is lost.
 
 What gets tracked:
 - Every note save (content changes)
@@ -408,7 +428,7 @@ Entries are sorted by path and each one's modified time is the note's `updated_a
 
 A note or folder that is not yours and one that does not exist both answer `404` with the API's usual not-found body.
 
-Notes are read from disk as the archive streams (no temporary file, one note in memory at a time). If a note's row outlived its file — a half-finished delete — the entry is skipped and `_export-report.txt` at the top of the archive lists what is missing, so a short archive is never silent.
+Notes are read from disk as the archive streams (no temporary file, one note in memory at a time). If a note's row outlived its file, as in a half-finished delete, the entry is skipped and `_export-report.txt` at the top of the archive lists what is missing, so a short archive is never silent.
 
 Exporting and re-importing is the supported way to move a folder between instances: the import format is the same zip.
 
@@ -416,9 +436,9 @@ Exporting and re-importing is the supported way to move a folder between instanc
 
 ## Import
 
-**Single note or ZIP archive:** Click the **↑ Import** button in the sidebar. The import modal opens with a file picker — choose one `.md` file or one `.zip` file, then click **Import** to confirm. Each imported note takes its title from the `# H1` its content states, exactly as a note found on disk does; a file with no heading keeps its filename as the title. The filename still decides the note's slug, so the file that arrives keeps the name it arrived with — which is what makes an export re-import into the same layout. For a ZIP, Thornotes recreates the directory structure inside the archive as folders and creates a note for each `.md` file. The file content is preserved exactly.
+**Single note or ZIP archive.** Click the **↑ Import** button in the sidebar. The import modal opens with a file picker. Choose one `.md` file or one `.zip` file, then click **Import** to confirm. Each imported note takes its title from the `# H1` its content states, exactly as a note found on disk does; a file with no heading keeps its filename as the title. The filename still decides the note's slug, so the file that arrives keeps the name it arrived with, which is what makes an export re-import into the same layout. For a ZIP, Thornotes recreates the directory structure inside the archive as folders and creates a note for each `.md` file. The file content is preserved exactly.
 
-Maximum import size is **10 MB**, for a single note or a whole ZIP. Each note's *content* is separately limited to **1 MB** by note creation, so a `.md` file over 1 MB is refused with `content exceeds 1 MB limit` even though the upload itself was within the limit — split it, or import it as several notes.
+Maximum import size is **10 MB**, for a single note or a whole ZIP. Each note's *content* is separately limited to **1 MB** by note creation, so a `.md` file over 1 MB is refused with `content exceeds 1 MB limit` even though the upload itself was within the limit. Split it, or import it as several notes.
 
 ---
 
@@ -433,7 +453,7 @@ Click the palette icon (bottom of sidebar) to open the theme picker. Available t
 | **Dark** | Dark mode |
 | **Catppuccin** | Pastel-toned dark theme |
 | **Nord** | Cool blue Arctic-inspired dark theme |
-| **Tokyo Night** | Vibrant dark theme with warm highlights |
+| **Tokyo Night** | Dark theme with warm highlights |
 | **Solarized** | Classic Solarized color scheme |
 
 ![Dark theme](./screenshot-dark.png)
@@ -442,22 +462,22 @@ Your theme choice is saved in the browser and persists across sessions. The **Au
 
 ---
 
-## API Tokens
+## API tokens
 
-API tokens let you access Thornotes programmatically — from scripts, CI pipelines, or AI assistants.
+API tokens let you access Thornotes from scripts, CI pipelines, or AI assistants.
 
-**Create a token:** Go to **Account** (top-right menu) → **API Tokens** → **New Token**.
+**Create a token.** Go to **Account** (top-right menu) → **API Tokens** → **New Token**.
 
 Give the token a name, choose a scope, and optionally restrict it to specific folders.
 
-### Token Scopes
+### Token scopes
 
 | Scope | What it can do |
 |-------|---------------|
 | `read` | Read notes, folders, tags. Cannot create, edit, or delete. |
 | `readwrite` | Full read and write access. |
 
-### Folder Permissions
+### Folder permissions
 
 By default, a token can access all your notes. You can restrict a token to one or more folders:
 
@@ -468,17 +488,17 @@ By default, a token can access all your notes. You can restrict a token to one o
 
 You can mix permissions: give a token `read` on one folder and `write` on another (as long as the global scope is `readwrite`).
 
-**Using a token:** Pass it as a Bearer token in the `Authorization` header:
+**Using a token.** Pass it as a Bearer token in the `Authorization` header:
 
 ```
 Authorization: Bearer tn_your_token_here
 ```
 
-Tokens are prefixed with `tn_`. The full token value is shown once at creation — copy it then. You can see the prefix and permissions later, but not the full value.
+Tokens are prefixed with `tn_`. The full token value is shown once at creation. Copy it then. You can see the prefix and permissions later, but not the full value.
 
 ---
 
-## MCP Server (AI Integration)
+## MCP server (AI integration)
 
 Thornotes includes a built-in [Model Context Protocol](https://modelcontextprotocol.io) server. This lets AI assistants (Claude, Cursor, etc.) read and write your notes directly.
 
@@ -502,7 +522,7 @@ The MCP endpoint is at `https://your-instance.example.com/mcp`. Create a `readwr
 }
 ```
 
-### Available Tools
+### Available tools
 
 **Read tools** (any token scope):
 
@@ -530,17 +550,17 @@ The MCP endpoint is at `https://your-instance.example.com/mcp`. Create a `readwr
 | `move_folder` | Move a folder to a different parent |
 | `delete_folder` | Delete a folder and all its contents |
 
-### Notes as Resources
+### Notes as resources
 
 Notes are also exposed as MCP resources at `note://{id}`. AI clients that support the MCP resources interface can browse and read notes directly, without making explicit tool calls.
 
-### Token-Scoped Access
+### Token-scoped access
 
 MCP respects all API token permissions. A read-only token can only use read tools. A folder-scoped token only sees the permitted folders. The AI assistant cannot access anything the token isn't permitted to see.
 
 ---
 
-## Keyboard Shortcuts
+## Keyboard shortcuts
 
 | Shortcut | Action |
 |----------|--------|
@@ -554,12 +574,12 @@ MCP respects all API token permissions. A read-only token can only use read tool
 
 ## Tips
 
-**Files are always there.** Thornotes stores every note as a plain `.md` file in `notes/{user-id}/`. You can open, edit, or back up your notes with any tool — rsync, git, Obsidian, VS Code, anything.
+**Files are always there.** Thornotes stores every note as a plain `.md` file in `notes/{user-id}/`. You can open, edit, or back up your notes with any tool: rsync, git, Obsidian, VS Code, anything.
 
 **External edits sync automatically.** If you edit a `.md` file outside of Thornotes, it detects the change within the watch interval (default 30 seconds) and updates the UI across all open browser tabs.
 
-**Context endpoint for AI.** `GET /api/v1/notes/context` returns all your notes concatenated into one block — useful for feeding your full knowledge base to an LLM in a single request. Optionally scope it to a folder with `?folder_id=123`. Truncates at 200,000 characters.
+**Context endpoint for AI.** `GET /api/v1/notes/context` returns all your notes concatenated into one block. That is useful for feeding your full knowledge base to an LLM in a single request. Optionally scope it to a folder with `?folder_id=123`. Truncates at 200,000 characters.
 
-**Disable registration after setup.** Once you've created your account(s), restart Thornotes with `--allow-registration=false` (or `THORNOTES_ALLOW_REGISTRATION=false`) to close public sign-up. The "Create account" link disappears from the auth screen, the register form is removed from the DOM, and `POST /api/v1/auth/register` returns `404 Not Found` — there is no UI or API path into registration on a closed instance, including for the very first user. Always start fresh instances with the flag on (the default), register your admin account, then restart with the flag off.
+**Disable registration after setup.** Once you've created your account(s), restart Thornotes with `--allow-registration=false` (or `THORNOTES_ALLOW_REGISTRATION=false`) to close public sign-up. The "Create account" link disappears from the auth screen, the register form is removed from the DOM, and `POST /api/v1/auth/register` returns `404 Not Found`. There is no UI or API path into registration on a closed instance, including for the very first user. Always start fresh instances with the flag on (the default), register your admin account, then restart with the flag off.
 
 **HTTPS in production.** Set `THORNOTES_SECURE_COOKIES=true` when running behind a TLS reverse proxy. This sets the `Secure` flag on session cookies. Also set `THORNOTES_TRUSTED_PROXY` to the CIDR of your proxy so rate limiting works correctly.

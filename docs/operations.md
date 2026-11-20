@@ -16,7 +16,7 @@ SQLite's online backup command is also available while the database is open:
 sqlite3 /data/thornotes.db '.backup /data/backups/thornotes-before-migration.db'
 ```
 
-For MySQL or MariaDB, dump the database before deploying (replace the example database name and supply credentials through your configured MySQL client option file or environment). The client binary is named differently depending on the image: the official `mariadb` images ship `mariadb-dump` and `mariadb` and do **not** include `mysqldump`, while MySQL installs ship `mysqldump` and `mysql`. Use the pair your client provides — the flags are the same:
+For MySQL or MariaDB, dump the database before deploying (replace the example database name and supply credentials through your configured MySQL client option file or environment). The client binary is named differently depending on the image: the official `mariadb` images ship `mariadb-dump` and `mariadb` and do **not** include `mysqldump`, while MySQL installs ship `mysqldump` and `mysql`. Use the pair your client provides. The flags are the same:
 
 ```sh
 mariadb-dump --single-transaction --routines --triggers thornotes > thornotes-before-migration.sql
@@ -30,7 +30,7 @@ Keep the backup outside the database volume or on another durable system. A back
 
 ## The deploy-time gate: compare the database against the candidate image
 
-The startup refusal in "Schema too new" happens at container start — after the deploy has already been cut over. Catch it before the swap with the gate script: it compares the **running** instance's `/healthz` `schema.version` with the **candidate** image's `co.thornotes.schema.max` label (SQLite) or `co.thornotes.schema.max.mysql` label (MySQL — production runs MySQL). Run it on the Docker host, after `docker pull` of the candidate image and before swapping containers:
+The startup refusal in "Schema too new" happens at container start, after the deploy has already been cut over. Catch it before the swap with the gate script: it compares the **running** instance's `/healthz` `schema.version` with the **candidate** image's `co.thornotes.schema.max` label (SQLite) or `co.thornotes.schema.max.mysql` label (MySQL, which is what production runs). Run it on the Docker host, after `docker pull` of the candidate image and before swapping containers:
 
 ```sh
 docker pull th0rn0/thornotes:latest
@@ -43,18 +43,18 @@ scripts/deploy-gate.sh \
 
 Its decisions:
 
-- **database version > image ceiling** — refuse. Starting that image is a guaranteed exit 1 at startup; the gate prints both numbers and the remedy (deploy a build with a higher ceiling, or restore the backup taken before that migration, then pin the older image). Nothing is started.
-- **database version < image ceiling** — the image will migrate on start. It refuses to proceed unless the `--backup` path exists, is non-empty, and is no older than the age budget (`--max-backup-age-min`, default 240). Take the backup per "Before deploying migrations" above first.
-- **equal** — proceed; no migration will run on start.
-- **unknown** — refuse. An unreachable `/healthz`, an image that cannot be inspected, a missing or non-numeric label, or a `/healthz` body without a readable `schema.version` all stop the deploy. Absent evidence is not permission.
+- **Database version is above the image ceiling.** Refuse. Starting that image is a guaranteed exit 1 at startup. The gate prints both numbers and the remedy: deploy a build with a higher ceiling, or restore the backup taken before that migration, then pin the older image. Nothing is started.
+- **Database version is below the image ceiling.** The image will migrate on start. The gate refuses to proceed unless the `--backup` path exists, is non-empty, and is no older than the age budget (`--max-backup-age-min`, default 240). Take the backup per "Before deploying migrations" above first.
+- **The two versions are equal.** Proceed; no migration will run on start.
+- **The comparison is unknown.** Refuse. An unreachable `/healthz`, an image that cannot be inspected, a missing or non-numeric label, or a `/healthz` body without a readable `schema.version` all stop the deploy. Absent evidence is not permission.
 
-Exit code 0 means safe to cut over; 1 means refused (one line per failure). The scripted check `scripts/deploy-gate.test.sh` (run on the Docker host) exercises all three decisions plus both refusals — a too-new database refused before any container starts, and a missing backup — against a pulled `th0rn0/thornotes` image so the label path is always real.
+Exit code 0 means safe to cut over; 1 means refused (one line per failure). The scripted check `scripts/deploy-gate.test.sh` (run on the Docker host) exercises all three decisions plus both refusals (a too-new database refused before any container starts, and a missing backup) against a pulled `th0rn0/thornotes` image so the label path is always real.
 
 ## Reverse proxy cache headers: keep /sw.js and the document out of the expires rule
 
-Production sits behind Nginx Proxy Manager (openresty). With its "Cache Assets" behaviour, NPM matches static extensions (`.js` among them) and **overrides** whatever the app sent with `expires` + `cache-control: max-age≈1d`. Since PR #33 asset URLs are versioned (`/static/...?v=<8 hex>`), a pinned stale body can no longer happen for versioned assets — but a long-cached `/sw.js` delays service-worker rotation and leaves dead caches on disk, and `/` is the document that pins those asset URLs.
+Production sits behind Nginx Proxy Manager (openresty). With its "Cache Assets" behaviour, NPM matches static extensions (`.js` among them) and **overrides** whatever the app sent with `expires` + `cache-control: max-age≈1d`. Asset URLs have been versioned since PR #33 (`/static/...?v=<8 hex>`), so a pinned stale body can no longer happen for versioned assets. A long-cached `/sw.js` still delays service-worker rotation and leaves dead caches on disk, and `/` is the document that pins those asset URLs.
 
-Paste this into the proxy host's **Advanced** tab (openresty resolves a later exact-match `location` over the generated prefix-match blocks; `conf.d/include/proxy.conf` supplies the upstream proxy directives with the scheme/server/port NPM already `set` at server scope — no upstream address to duplicate):
+Paste this into the proxy host's **Advanced** tab (openresty resolves a later exact-match `location` over the generated prefix-match blocks; `conf.d/include/proxy.conf` supplies the upstream proxy directives with the scheme/server/port NPM already `set` at server scope, so there is no upstream address to duplicate):
 
 ```nginx
 # The service worker must always revalidate: a stale cached copy delays its
@@ -73,7 +73,7 @@ location = / {
 }
 ```
 
-After saving and allowing NPM to reload, verify with (curl -sI, three probes — note the header each must show):
+After saving and allowing NPM to reload, verify with (curl -sI, three probes, and note the header each must show):
 
 ```sh
 curl -sI https://notes.th0rn0.co.uk/sw.js            # must show cache-control: no-cache
@@ -81,7 +81,7 @@ curl -sI https://notes.th0rn0.co.uk/                 # must show cache-control: 
 curl -sI "https://notes.th0rn0.co.uk/static/js/app.js?v=<current hex>"   # may keep a long max-age
 ```
 
-Operational notes: `expires off` removes the injected `Expires`/`max-age` on those two exact paths and lets the app's own `Cache-Control` stand; the app already serves `no-cache` for `/` and for unversioned or stale-versioned `/static/` URLs (see `internal/router/assets.go`, `cacheControlFor`). If the `?v=` parameter is dropped from a patch-formed URL, the app answers `no-cache` itself — the proxy must not re-add a `max-age` to those paths under any rule that pattern-matches extensions. Versioned assets (`?v=<current hex>`) may keep caching: the URL changes whenever the bytes do.
+Operational notes: `expires off` removes the injected `Expires`/`max-age` on those two exact paths and lets the app's own `Cache-Control` stand. The app already serves `no-cache` for `/` and for unversioned or stale-versioned `/static/` URLs (see `internal/router/assets.go`, `cacheControlFor`). If the `?v=` parameter is dropped from a patch-formed URL, the app answers `no-cache` itself. The proxy must not re-add a `max-age` to those paths under any rule that pattern-matches extensions. Versioned assets (`?v=<current hex>`) may keep caching: the URL changes whenever the bytes do.
 
 ## Rollback is restore, then pin
 
@@ -109,13 +109,13 @@ The `version` is the migration version recorded in the database. `dirty=1` means
 curl -s https://notes.example.com/healthz | jq -r .build.version
 ```
 
-The value is the commit the binary was built from, injected at build time (`-X main.Version`); CI passes `${DRONE_COMMIT_SHA}`. A binary built without the flag reports `dev`, and one built with an empty value reports `unknown` — neither is ever an empty string, because an empty field reads like a missing key rather than a missing stamp.
+The value is the commit the binary was built from, injected at build time (`-X main.Version`); CI passes `${DRONE_COMMIT_SHA}`. A binary built without the flag reports `dev`, and one built with an empty value reports `unknown`. Neither is ever an empty string, because an empty field reads like a missing key rather than a missing stamp.
 
 The endpoint is unauthenticated deliberately. Knowing the commit of a notes server is not a secret, and requiring a login to answer it means only someone with host access can tell whether a deploy landed. Use it instead of the front-end asset digest (`app.js?v=…`): that hashes the assets, not the commit, so several releases that touch no JavaScript serve byte-identical digests.
 
 ## Starting up: "reconciling" is not an error
 
-The listener opens before the startup reconcile finishes, so a booting instance answers `503` for anything that reads or writes the note index until that pass is done — `status` is `"reconciling"` and `startup.phase` says the same, while `schema`, `build` and `checks` remain readable:
+The listener opens before the startup reconcile finishes, so a booting instance answers `503` for anything that reads or writes the note index until that pass is done. During that window `status` is `"reconciling"` and `startup.phase` says the same, while `schema`, `build` and `checks` remain readable:
 
 ```bash
 curl -s https://notes.example.com/healthz | jq -r '.status, .startup.phase'
@@ -123,11 +123,11 @@ curl -s https://notes.example.com/healthz | jq -r '.status, .startup.phase'
 # reconciling
 ```
 
-Wait for `status: "ok"` before treating the instance as ready; a healthcheck that reads any non-200 as "down" already does the right thing here, and a consumer with `depends_on: {thornotes: {condition: service_healthy}}` will now wait for the pass too — that is the intent, not a side effect. `error` still means what it meant: the database or the notes root needs a human, not a moment.
+Wait for `status: "ok"` before treating the instance as ready. A healthcheck that reads any non-200 as "down" already does the right thing here, and a consumer with `depends_on: {thornotes: {condition: service_healthy}}` will now wait for the pass too. That is the intent, not a side effect. `error` still means what it meant: the database or the notes root needs a human, not a moment.
 
-How long that window lasts depends on which of two passes you are in, and the two differ by more than an order of magnitude. The figures usually quoted for this pass — ~2.7s for 400 notes, ~13s for 2,000, ~33s for 5,000 on SQLite — are the **rebuild**: the notes table is empty or does not match the disk, as on a first boot, a fresh or restored volume, or an index that was lost. That pass reads and hashes every file and costs roughly 4.4 ms per note. A **restart over a vault whose database already matches the disk** — what an ordinary deploy actually pays — finds every hash unchanged, at roughly 0.08 ms per note: 0.16s rather than 8.8s for 2,000 notes, about 55× cheaper. Both were measured with 2,000 notes, and in both cases the port is bound and answering within 0.02s; it is only the note routes that answer `503` until the pass ends, while the app shell, `/healthz`, `/api/v1/auth/*` and static assets serve normally.
+How long that window lasts depends on which of two passes you are in, and the two differ by more than an order of magnitude. The figures usually quoted for this pass (~2.7s for 400 notes, ~13s for 2,000, ~33s for 5,000 on SQLite) are the **rebuild**: the notes table is empty or does not match the disk, as on a first boot, a fresh or restored volume, or an index that was lost. That pass reads and hashes every file and costs roughly 4.4 ms per note. A **restart over a vault whose database already matches the disk** (what an ordinary deploy actually pays) finds every hash unchanged, at roughly 0.08 ms per note: 0.16s rather than 8.8s for 2,000 notes, about 55× cheaper. Both were measured with 2,000 notes, and in both cases the port is bound and answering within 0.02s; it is only the note routes that answer `503` until the pass ends, while the app shell, `/healthz`, `/api/v1/auth/*` and static assets serve normally.
 
-So size a container start period for the rebuild, not for the restart. A start period chosen from the rebuild number is harmless on a restart that is ready in a fraction of a second; one chosen from the restart number will flap on a genuine rebuild. `--skip-reconciliation` remains the escape hatch for a trusted restart, but it disables the repair itself, so it is safe only when you know the disk and the index agree — it is not a way to avoid a delay that a matching restart does not incur anyway.
+Size a container start period for the rebuild, not for the restart. A start period chosen from the rebuild number is harmless on a restart that is ready in a fraction of a second; one chosen from the restart number will flap on a genuine rebuild. `--skip-reconciliation` remains the escape hatch for a trusted restart, but it disables the repair itself, so it is safe only when you know the disk and the index agree. It is not a way to avoid a delay that a matching restart does not incur anyway.
 
 ## Schema too new
 
@@ -148,7 +148,7 @@ Do not lower the database version marker to make an old image start. That does n
 
 ## Schema dirty
 
-A migration was interrupted and `schema_migrations.dirty` is set. The version shown in the message is the migration version stamped when the interruption occurred; the repeated version in “force version N” is the proposed version marker to clear the dirty state to; the final version is the migration number whose pre-migration backup would be restored. A dirty version is not proof that every operation in that migration completed.
+A migration was interrupted and `schema_migrations.dirty` is set. The version shown in the message is the migration version stamped when the interruption occurred; the repeated version in "force version N" is the proposed version marker to clear the dirty state to; the final version is the migration number whose pre-migration backup would be restored. A dirty version is not proof that every operation in that migration completed.
 
 The emitted error is:
 
@@ -156,7 +156,7 @@ The emitted error is:
 schema version 8 is dirty: a migration was interrupted and the schema is in an unknown state — inspect the database and verify the schema by hand, then force version 8 only if it is correct, or restore the database backup taken before migration 8
 ```
 
-This is a manual-intervention event. Inspect the live schema and compare it with the expected schema at that migration, including whether each migration statement took effect. Only after verifying that the schema is genuinely in the expected state may an operator clear the dirty flag. Note that **Thornotes itself has no force command** — there is no flag, endpoint or subcommand for it, despite the wording of the error. Clearing it means a direct write to the bookkeeping table:
+This is a manual-intervention event. Inspect the live schema and compare it with the expected schema at that migration, including whether each migration statement took effect. Only after verifying that the schema is genuinely in the expected state may an operator clear the dirty flag. **Thornotes itself has no force command**: there is no flag, endpoint or subcommand for it, despite the wording of the error. Clearing it means a direct write to the bookkeeping table:
 
 ```sh
 sqlite3 /data/thornotes.db 'update schema_migrations set version = 8, dirty = 0'
@@ -186,6 +186,6 @@ The Drone runner keeps expensive tool caches on its host and bind-mounts them in
 | --- | --- | --- | --- |
 | `/var/cache/drone/gradle-home` | `/root/.gradle` | `build-android` | Gradle caches |
 
-- Go module downloads are **not** cached on the runner: the Go steps (`lint`, `test`, `build-linux-binary`) each fetch their own module tree. Measured on this runner, a fully cold download adds ~1 s to the `test` step (52 `go: downloading` lines), so a shared module cache does not pay for itself — and while two builds run at once it made them *slower* (~+50 s per `test` step), so it was removed in ticket 597.
+- Go module downloads are **not** cached on the runner: the Go steps (`lint`, `test`, `build-linux-binary`) each fetch their own module tree. Measured on this runner, a fully cold download adds ~1 s to the `test` step (52 `go: downloading` lines), so a shared module cache does not pay for itself. While two builds ran at once it made them *slower* (~+50 s per `test` step), so it was removed in ticket 597.
 - The `test` step instead retries the *download* once (`go mod download all || go mod download all`): a single stream reset from `proxy.golang.org` (HTTP/2 `stream error`, as on build #226) no longer turns the build red. The download is idempotent and hash-verified against `go.sum`, so the retry cannot mask a corrupted or wrong module; real test failures are never retried.
-- **There are two Drone runners, and one of them is production.** `max` (441 G, the Docker host that runs `thornotes`, `thornotes-db-1`, `watchtower`, `homeassistant`, `jellyfin`, `radarr`, `sonarr` and `portainer`, with `/servdata` as the production mount) and `drone-runner-tehhulk` (74 G). A runner probe answers for whichever runner picked up that build, so "the runner has no `/servdata`" and "the runner's daemon cannot reach MAX's Docker API" are facts about `drone-runner-tehhulk` from builds #271/#275/#277 — they are not facts about both. Nothing pins a pipeline to a particular runner, so any CI step that assumes production-local paths or the production Docker socket has to prove which runner it landed on (build #379 did: `docker info --format '{{.Name}}'` → `runner=max`). Host work that must reach production data belongs on the host, not in a pipeline.
+- **There are two Drone runners, and one of them is production.** `max` (441 G, the Docker host that runs `thornotes`, `thornotes-db-1`, `watchtower`, `homeassistant`, `jellyfin`, `radarr`, `sonarr` and `portainer`, with `/servdata` as the production mount) and `drone-runner-tehhulk` (74 G). A runner probe answers for whichever runner picked up that build, so "the runner has no `/servdata`" and "the runner's daemon cannot reach MAX's Docker API" are facts about `drone-runner-tehhulk` from builds #271/#275/#277. They are not facts about both. Nothing pins a pipeline to a particular runner, so any CI step that assumes production-local paths or the production Docker socket has to prove which runner it landed on (build #379 did: `docker info --format '{{.Name}}'` → `runner=max`). Host work that must reach production data belongs on the host, not in a pipeline.
